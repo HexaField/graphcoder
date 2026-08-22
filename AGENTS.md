@@ -88,15 +88,34 @@ WebSocket at `ws://localhost:3001/ws`:
 ```
 src/
   api/graph.ts          — fetch functions for all server endpoints
+  constants.ts          — shared colour maps (NODE_KIND_FILL, EDGE_KIND_STROKE, helpers)
   state/store.ts        — SolidJS createStore reactive state + action functions
+    exports: visibleGraph(), toggleNodeKind(), toggleEdgeKind(), setFocus(), clearFocus(), clearFilters()
   layout/elk.ts         — ELK layout computation (async, per ViewMode)
   canvas/GraphCanvas.tsx — SVG canvas with pan/zoom, NodeRect, EdgeLine
   components/
+    FilterPanel.tsx      — Left sidebar: node/edge kind toggles + focus indicator
     Toolbar.tsx          — ProjectInput + ViewModeSwitcher + SearchBar
-    NodeInspector.tsx    — Selected node detail panel
+    NodeInspector.tsx    — Selected node detail panel + Focus/Unfocus button
     SearchBar.tsx        — Symbol search with dropdown
   App.tsx               — Root layout, mounts WebSocket on load
 ```
+
+## Filter & focus system
+
+State fields: `hiddenNodeKinds: NodeKind[]`, `hiddenEdgeKinds: EdgeKind[]`, `focusedNodeId: string | null`.
+
+`visibleGraph()` — pure function, call inside `createMemo()` or `createEffect()`. Applies:
+
+1. Node kind filter (`hiddenNodeKinds` exclusion)
+2. Individual node focus (focused node + direct neighbours from full edge set)
+3. Edge kind filter (`hiddenEdgeKinds` exclusion) + both endpoints must be in visible node set
+
+`GraphCanvas.tsx` uses `createMemo(visibleGraph)` as its layout input — filters and focus trigger re-layout automatically. Background SVG `<rect>` click clears focus (browser guarantees `onClick` doesn't fire on drag).
+
+## CodeGraph — repo itself
+
+The graphcoder repo has a `.codegraph/` index at its root. Use `codegraph explore` (or `mcp__codegraph__codegraph_explore` with `projectPath=/home/josh/workspaces/hexafield/graphcoder`) for structural navigation. The index auto-syncs via file watcher after `codegraph init` was run.
 
 ## Phase roadmap
 

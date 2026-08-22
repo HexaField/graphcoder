@@ -1,6 +1,6 @@
 import type { Component } from 'solid-js'
 import { Show } from 'solid-js'
-import { state } from '../state/store.js'
+import { clearFocus, setFocus, state } from '../state/store.js'
 
 export const NodeInspector: Component = () => {
   return (
@@ -16,10 +16,27 @@ export const NodeInspector: Component = () => {
         {(detail) => (
           <>
             <div class="p-4 border-b border-gray-700">
-              <div class="text-xs text-gray-500 uppercase mb-1">{detail().node.kind}</div>
-              <div class="text-white font-mono font-medium">{detail().node.name}</div>
-              <div class="text-gray-400 text-xs mt-1 font-mono truncate">
-                {detail().node.filePath}:{detail().node.startLine}
+              <div class="flex items-start justify-between gap-2">
+                <div class="min-w-0">
+                  <div class="text-xs text-gray-500 uppercase mb-1">{detail().node.kind}</div>
+                  <div class="text-white font-mono font-medium truncate">{detail().node.name}</div>
+                  <div class="text-gray-400 text-xs mt-1 font-mono truncate">
+                    {detail().node.filePath}:{detail().node.startLine}
+                  </div>
+                </div>
+                <button
+                  class={`flex-shrink-0 text-xs px-2 py-1 rounded border transition-colors ${
+                    state.focusedNodeId === detail().node.id
+                      ? "bg-blue-900 border-blue-700 text-blue-200 hover:bg-blue-800"
+                      : "bg-gray-800 border-gray-700 text-blue-300 hover:bg-gray-700"
+                  }`}
+                  onClick={() => (state.focusedNodeId === detail().node.id ? clearFocus() : setFocus(detail().node.id))}
+                  title={
+                    state.focusedNodeId === detail().node.id ? 'Clear focus' : 'Focus on this node and its neighbours'
+                  }
+                >
+                  {state.focusedNodeId === detail().node.id ? 'Unfocus' : 'Focus'}
+                </button>
               </div>
             </div>
             <Show when={detail().node.signature}>

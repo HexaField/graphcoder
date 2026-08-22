@@ -1,5 +1,5 @@
 import { createStore } from 'solid-js/store'
-import type { GraphEdge, GraphNode, NodeDetail, ProjectStats, ViewMode } from '@graphcoder/core'
+import type { EdgeKind, GraphEdge, GraphNode, NodeDetail, NodeKind, ProjectStats, ViewMode } from '@graphcoder/core'
 import * as api from '../api/graph.js'
 
 const VIEW_MODES: ViewMode[] = ['module-dependency', 'call-graph', 'impact-radius']
@@ -33,6 +33,11 @@ interface AppState {
   // View
   viewMode: ViewMode
 
+  // Filters & focus
+  hiddenNodeKinds: NodeKind[]
+  hiddenEdgeKinds: EdgeKind[]
+  focusedNodeId: string | null
+
   // Search
   searchQuery: string
   searchResults: { node: GraphNode; score: number }[]
@@ -50,10 +55,73 @@ export const [state, setState] = createStore<AppState>({
   selectedNodeDetail: null,
   isLoadingDetail: false,
   viewMode: 'module-dependency',
+  hiddenNodeKinds: [],
+  hiddenEdgeKinds: [],
+  focusedNodeId: null,
   searchQuery: '',
   searchResults: [],
   isSearching: false
 })
+
+// ── Filters & focus ───────────────────────────────────────────────────────────
+
+export function toggleNodeKind(kind: NodeKind): void {
+  setState('hiddenNodeKinds', (prev) => (prev.includes(kind) ? prev.filter((k) => k !== kind) : [...prev, kind]))
+}
+
+export function toggleEdgeKind(kind: EdgeKind): void {
+  setState('hiddenEdgeKinds', (prev) => (prev.includes(kind) ? prev.filter((k) => k !== kind) : [...prev, kind]))
+}
+
+export function setFocus(nodeId: string): void {
+  setState('focusedNodeId', nodeId)
+}
+
+export function clearFocus(): void {
+  setState('focusedNodeId', null)
+}
+
+export function clearFilters(): void {
+  setState('hiddenNodeKinds', [])
+  setState('hiddenEdgeKinds', [])
+}
+
+/**
+ * Derive the currently visible nodes and edges by applying:
+ *   1. Node kind filter  (hiddenNodeKinds)
+ *   2. Individual node focus  (focusedNodeId → neighbourhood)
+ *   3. Edge kind filter  (hiddenEdgeKinds) + endpoints must be in visible set
+ *
+ * Call this inside a reactive context (createMemo / createEffect) so that
+ * SolidJS tracks every state path it reads.
+ */
+export function visibleGraph(): { nodes: GraphNode[]; edges: GraphEdge[] } {
+  const hiddenKindSet = new Set(state.hiddenNodeKinds)
+  const hiddenEdgeSet = new Set(state.hiddenEdgeKinds)
+
+  // 1. Apply node kind filter
+  let nodes = state.nodes.filter((n) => !hiddenKindSet.has(n.kind))
+  let nodeIds = new Set(nodes.map((n) => n.id))
+
+  // 2. Apply focus: narrow to focused node + its direct neighbours
+  const focusId = state.focusedNodeId
+  if (focusId && nodeIds.has(focusId)) {
+    const keep = new Set<string>([focusId])
+    for (const e of state.edges) {
+      if (e.source === focusId && nodeIds.has(e.target)) keep.add(e.target)
+      if (e.target === focusId && nodeIds.has(e.source)) keep.add(e.source)
+    }
+    nodes = nodes.filter((n) => keep.has(n.id))
+    nodeIds = new Set(nodes.map((n) => n.id))
+  }
+
+  // 3. Filter edges: kind not hidden + both endpoints visible
+  const edges = state.edges.filter((e) => !hiddenEdgeSet.has(e.kind) && nodeIds.has(e.source) && nodeIds.has(e.target))
+
+  return { nodes, edges }
+}
+
+// ── Project ───────────────────────────────────────────────────────────────────
 
 export async function openProject(projectRoot: string): Promise<void> {
   setState('isLoading', true)

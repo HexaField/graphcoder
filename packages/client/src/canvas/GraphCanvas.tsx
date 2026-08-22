@@ -1,37 +1,8 @@
-import type { Component } from 'solid-js'
-import { createEffect, createSignal, For, onCleanup, onMount, Show } from 'solid-js'
+import { type Component, createEffect, createMemo, createSignal, For, onCleanup, onMount, Show } from 'solid-js'
 import type { GraphNode } from '@graphcoder/core'
+import { edgeKindColor, nodeKindColor } from '../constants.js'
 import { layoutGraph, type LayoutEdge, type LayoutNode, type LayoutResult } from '../layout/elk.js'
-import { selectNode, state } from '../state/store.js'
-
-// ── Colour helpers ────────────────────────────────────────────────────────────
-
-const KIND_FILL: Record<string, string> = {
-  function: '#1e40af',
-  method: '#1e40af',
-  class: '#581c87',
-  struct: '#581c87',
-  file: '#374151',
-  interface: '#115e59',
-  trait: '#115e59',
-  protocol: '#115e59',
-  component: '#1e3a5f'
-}
-
-function nodeFill(kind: string | undefined): string {
-  return KIND_FILL[kind ?? ''] ?? '#1f2937'
-}
-
-const EDGE_STROKE: Record<string, string> = {
-  calls: '#3b82f6',
-  imports: '#9ca3af',
-  extends: '#a78bfa',
-  implements: '#a78bfa'
-}
-
-function edgeStroke(kind: string | undefined): string {
-  return EDGE_STROKE[kind ?? ''] ?? '#4b5563'
-}
+import { clearFocus, selectNode, state, visibleGraph } from '../state/store.js'
 
 // ── Sub-components ────────────────────────────────────────────────────────────
 
@@ -59,7 +30,7 @@ const NodeRect: Component<NodeRectProps> = (props) => {
       <rect
         width={props.layoutNode.width}
         height={props.layoutNode.height}
-        fill={nodeFill(props.graphNode?.kind)}
+        fill={nodeKindColor(props.graphNode?.kind)}
         stroke={props.selected ? '#3b82f6' : 'transparent'}
         stroke-width={props.selected ? 2 : 0}
         rx={4}
@@ -104,7 +75,7 @@ const EdgeLine: Component<EdgeLineProps> = (props) => {
     <polyline
       points={pointsStr()}
       fill="none"
-      stroke={edgeStroke(props.edge.kind)}
+      stroke={edgeKindColor(props.edge.kind)}
       stroke-width="1.5"
       opacity="0.6"
       marker-end="url(#arrowhead)"
@@ -121,12 +92,17 @@ export const GraphCanvas: Component = () => {
 
   let svgRef: SVGSVGElement | undefined
 
-  // Recompute layout when nodes / edges / viewMode change
+  // Memo so that filter/focus changes invalidate the layout exactly once per tick
+  const visible = createMemo(visibleGraph)
+
+  // Recompute layout when visible nodes / edges / viewMode change
   createEffect(async () => {
-    const nodes = state.nodes
-    const edges = state.edges
+    const { nodes, edges } = visible()
     const viewMode = state.viewMode
-    if (nodes.length === 0) return
+    if (nodes.length === 0) {
+      setLayout(null)
+      return
+    }
     setIsLayouting(true)
     try {
       const result = await layoutGraph(nodes, edges, viewMode)
@@ -170,8 +146,6 @@ export const GraphCanvas: Component = () => {
     const rect = svgRef.getBoundingClientRect()
     const mouseXRatio = (e.clientX - rect.left) / rect.width
     const mouseYRatio = (e.clientY - rect.top) / rect.height
-    // Scale proportionally to deltaY so trackpad (many small events) and
-    // mouse wheel (few large events) both feel natural.
     // deltaMode 0 = pixels (trackpad), 1 = lines, 2 = pages
     const sensitivity = e.deltaMode === 0 ? 0.002 : 0.08
     const factor = Math.exp(e.deltaY * sensitivity)
@@ -218,12 +192,18 @@ export const GraphCanvas: Component = () => {
             <polygon points="0 0, 8 3, 0 6" fill="#4b5563" />
           </marker>
         </defs>
+        {/*
+          Background hit target — clicking empty canvas clears focus.
+          Browser only fires onClick (not drag), so no pan interference.
+        */}
+        <rect x="-50000" y="-50000" width="100000" height="100000" fill="transparent" onClick={clearFocus} />
         <g data-testid="graph-edges">
           <For each={layout()?.edges ?? []}>{(edge) => <EdgeLine edge={edge} />}</For>
         </g>
         <g data-testid="graph-nodes">
           <For each={layout() ? [...layout()!.nodes.values()] : []}>
             {(node) => {
+              // Lookup in full state.nodes so kind/name are always available
               const graphNode = state.nodes.find((n) => n.id === node.id)
               return (
                 <NodeRect
