@@ -11,3 +11,6 @@ test-results
 .env.local
 
 .certs
+
+# CodeGraph index directories (recreated by server on first open)
+test-fixtures/**/.codegraph

@@ -1,7 +1,7 @@
 import type { Component } from 'solid-js'
 import { createSignal, For, Show } from 'solid-js'
 import type { ViewMode } from '@graphcoder/core'
-import { openProject, setViewMode, state } from '../state/store.js'
+import { captureSnapshot, clearDiff, openProject, setViewMode, state } from '../state/store.js'
 import { SearchBar } from './SearchBar.js'
 
 // ── Project path input ─────────────────────────────────────────────────────
@@ -77,6 +77,34 @@ export const Toolbar: Component = () => {
       <div class="h-4 border-l border-gray-600" />
 
       <ViewModeSwitcher />
+
+      <div class="h-4 border-l border-gray-600" />
+
+      {/* Diff controls */}
+      <Show when={state.nodes.length > 0}>
+        <Show
+          when={state.baseSnapshot}
+          fallback={
+            <button
+              class="text-xs px-2 py-1 rounded border border-gray-600 text-gray-300 hover:bg-gray-700 hover:text-white"
+              onClick={captureSnapshot}
+              data-testid="snapshot-btn"
+              title="Capture current graph as diff baseline"
+            >
+              ⊙ Snapshot
+            </button>
+          }
+        >
+          <span class="text-xs text-blue-400 font-mono">diff active</span>
+          <button
+            class="text-xs px-2 py-1 rounded border border-gray-700 text-gray-400 hover:text-red-400 hover:border-red-700"
+            onClick={clearDiff}
+            data-testid="clear-diff-toolbar-btn"
+          >
+            ✕ Clear diff
+          </button>
+        </Show>
+      </Show>
 
       <div class="ml-auto">
         <SearchBar />

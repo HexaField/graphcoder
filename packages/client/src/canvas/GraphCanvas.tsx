@@ -1,8 +1,18 @@
 import { type Component, createEffect, createMemo, createSignal, For, onCleanup, onMount, Show } from 'solid-js'
 import type { GraphNode } from '@graphcoder/core'
+import { nodeSemanticId } from '@graphcoder/core'
 import { edgeKindColor, nodeKindColor } from '../constants.js'
 import { layoutGraph, type LayoutEdge, type LayoutNode, type LayoutResult } from '../layout/elk.js'
 import { clearFocus, selectNode, state, visibleGraph } from '../state/store.js'
+
+type DiffStatus = 'added' | 'modified' | 'moved' | 'none'
+
+function diffStatusStroke(status: DiffStatus): string {
+  if (status === 'added') return '#22c55e'
+  if (status === 'modified') return '#f59e0b'
+  if (status === 'moved') return '#06b6d4'
+  return 'transparent'
+}
 
 // ── Sub-components ────────────────────────────────────────────────────────────
 
@@ -10,6 +20,7 @@ interface NodeRectProps {
   layoutNode: LayoutNode
   graphNode: GraphNode | undefined
   selected: boolean
+  diffStatus: DiffStatus
   onClick: () => void
 }
 
@@ -27,6 +38,20 @@ const NodeRect: Component<NodeRectProps> = (props) => {
       data-testid={`node-${props.layoutNode.id}`}
       data-nodeid={props.layoutNode.id}
     >
+      {/* Diff overlay ring — rendered first so it sits behind the node fill */}
+      <Show when={props.diffStatus !== 'none'}>
+        <rect
+          x={-3}
+          y={-3}
+          width={props.layoutNode.width + 6}
+          height={props.layoutNode.height + 6}
+          fill="none"
+          stroke={diffStatusStroke(props.diffStatus)}
+          stroke-width={2.5}
+          rx={6}
+          opacity={0.85}
+        />
+      </Show>
       <rect
         width={props.layoutNode.width}
         height={props.layoutNode.height}
@@ -94,6 +119,21 @@ export const GraphCanvas: Component = () => {
 
   // Memo so that filter/focus changes invalidate the layout exactly once per tick
   const visible = createMemo(visibleGraph)
+
+  // Diff overlay: set of semantic IDs per change type
+  const diffOverlay = createMemo(() => {
+    const diff = state.currentDiff
+    if (!diff) return { added: new Set<string>(), modified: new Set<string>(), moved: new Set<string>() }
+    const added = new Set<string>()
+    const modified = new Set<string>()
+    const moved = new Set<string>()
+    for (const op of diff.operations) {
+      if (op.op === 'add_node') added.add(op.node.id)
+      else if (op.op === 'modify_node') modified.add(op.id)
+      else if (op.op === 'move_node') moved.add(op.id)
+    }
+    return { added, modified, moved }
+  })
 
   // Recompute layout when visible nodes / edges / viewMode change
   createEffect(async () => {
@@ -205,11 +245,24 @@ export const GraphCanvas: Component = () => {
             {(node) => {
               // Lookup in full state.nodes so kind/name are always available
               const graphNode = state.nodes.find((n) => n.id === node.id)
+              // Resolve diff status via semantic ID
+              const semId = graphNode ? nodeSemanticId(graphNode) : null
+              const overlay = diffOverlay()
+              const diffStatus: DiffStatus = semId
+                ? overlay.added.has(semId)
+                  ? 'added'
+                  : overlay.modified.has(semId)
+                    ? 'modified'
+                    : overlay.moved.has(semId)
+                      ? 'moved'
+                      : 'none'
+                : 'none'
               return (
                 <NodeRect
                   layoutNode={node}
                   graphNode={graphNode}
                   selected={state.selectedNodeId === node.id}
+                  diffStatus={diffStatus}
                   onClick={() => void selectNode(node.id)}
                 />
               )

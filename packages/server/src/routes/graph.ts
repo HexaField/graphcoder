@@ -51,6 +51,12 @@ router.get('/projects/current', (_req: Request, res: Response) => {
   }
 })
 
+// POST /projects/close — closes the current project (used by tests to reset server state)
+router.post('/projects/close', async (_req: Request, res: Response) => {
+  await graphService.close()
+  res.json({ success: true })
+})
+
 // GET /graph
 router.get('/graph', (req: Request, res: Response) => {
   if (!graphService.isOpen()) {

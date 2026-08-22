@@ -70,7 +70,11 @@ importers:
         specifier: 2.11.10
         version: 2.11.10(@testing-library/jest-dom@6.5.0)(solid-js@1.9.10)(vite@6.4.1(@types/node@25.0.3)(jiti@2.6.1)(lightningcss@1.30.2)(tsx@4.21.0)(yaml@2.8.2))
 
-  packages/core: {}
+  packages/core:
+    dependencies:
+      '@noble/hashes':
+        specifier: ^2.3.0
+        version: 2.3.0
 
   packages/server:
     dependencies:
@@ -592,6 +596,10 @@ packages:
     peerDependencies:
       '@emnapi/core': ^1.7.1
       '@emnapi/runtime': ^1.7.1
+
+  '@noble/hashes@2.3.0':
+    resolution: {integrity: sha512-oN+QwyX7VSHotibwubG3kpzbwKrfnyR6OOO+3Nk/53ADL7FmgHHz4TgrbaYKvvOw09u6QTx0oiH1cNCIOuN0CQ==}
+    engines: {node: '>= 20.19.0'}
 
   '@oxc-project/types@0.133.0':
     resolution: {integrity: sha512-KzkdCd6Uxqnf6l3HOw1xfatAlUURA0g14cvBYFyJ5SaNOQbOUvBr9PKArcPcrNIeRsBdgcUzOGrhKveVpvOIGA==}
@@ -2638,6 +2646,8 @@ snapshots:
       '@emnapi/runtime': 1.10.0
       '@tybys/wasm-util': 0.10.2
     optional: true
+
+  '@noble/hashes@2.3.0': {}
 
   '@oxc-project/types@0.133.0': {}
 

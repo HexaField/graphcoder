@@ -109,3 +109,10 @@ export interface SearchResultItem {
 
 // View modes for the canvas
 export type ViewMode = 'module-dependency' | 'call-graph' | 'impact-radius'
+
+export { normalizeSignature, nodeSemanticId, semanticId } from './identity.js'
+export type { ArchDiff, ArchOp, EdgeTuple, LocationHint, NodeProps, NodeSnapshot } from './diff/types.js'
+export { canonicalJson, computeDiffHash, snapshotHash } from './diff/hash.js'
+export { computeArchDiff, sortOps } from './diff/compute.js'
+export { applyArchDiff } from './diff/apply.js'
+export { compose } from './diff/compose.js'

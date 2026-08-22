@@ -1,5 +1,16 @@
 import { createStore } from 'solid-js/store'
-import type { EdgeKind, GraphEdge, GraphNode, NodeDetail, NodeKind, ProjectStats, ViewMode } from '@graphcoder/core'
+import type {
+  ArchDiff,
+  EdgeKind,
+  GraphEdge,
+  GraphNode,
+  GraphSnapshot,
+  NodeDetail,
+  NodeKind,
+  ProjectStats,
+  ViewMode
+} from '@graphcoder/core'
+import { computeArchDiff } from '@graphcoder/core'
 import * as api from '../api/graph.js'
 
 const VIEW_MODES: ViewMode[] = ['module-dependency', 'call-graph', 'impact-radius']
@@ -38,6 +49,10 @@ interface AppState {
   hiddenEdgeKinds: EdgeKind[]
   focusedNodeId: string | null
 
+  // Diff
+  baseSnapshot: GraphSnapshot | null
+  currentDiff: ArchDiff | null
+
   // Search
   searchQuery: string
   searchResults: { node: GraphNode; score: number }[]
@@ -58,6 +73,8 @@ export const [state, setState] = createStore<AppState>({
   hiddenNodeKinds: [],
   hiddenEdgeKinds: [],
   focusedNodeId: null,
+  baseSnapshot: null,
+  currentDiff: null,
   searchQuery: '',
   searchResults: [],
   isSearching: false
@@ -84,6 +101,26 @@ export function clearFocus(): void {
 export function clearFilters(): void {
   setState('hiddenNodeKinds', [])
   setState('hiddenEdgeKinds', [])
+}
+
+// ── Diff ──────────────────────────────────────────────────────────────────────
+
+/** Capture the current graph as the diff baseline. */
+export function captureSnapshot(): void {
+  setState('baseSnapshot', { nodes: [...state.nodes], edges: [...state.edges] })
+  setState('currentDiff', null)
+}
+
+/** Discard the baseline and clear any computed diff. */
+export function clearDiff(): void {
+  setState('baseSnapshot', null)
+  setState('currentDiff', null)
+}
+
+/** Recompute the diff against the current snapshot. Called internally on WS updates. */
+function recomputeDiff(nodes: GraphNode[], edges: GraphEdge[]): void {
+  if (!state.baseSnapshot) return
+  setState('currentDiff', computeArchDiff(state.baseSnapshot, { nodes, edges }))
 }
 
 /**
@@ -124,6 +161,10 @@ export function visibleGraph(): { nodes: GraphNode[]; edges: GraphEdge[] } {
 // ── Project ───────────────────────────────────────────────────────────────────
 
 export async function openProject(projectRoot: string): Promise<void> {
+  // Clear stale nodes immediately so we never show a previous project's layout
+  // while waiting for the new project's graph data to arrive.
+  setState('nodes', [])
+  setState('edges', [])
   setState('isLoading', true)
   setState('error', null)
   try {
@@ -250,8 +291,11 @@ export function connectWebSocket(): void {
           edges?: GraphEdge[]
         }
         if (data.type === 'graph_snapshot' || data.type === 'graph_update') {
-          if (data.nodes) setState('nodes', data.nodes)
-          if (data.edges) setState('edges', data.edges)
+          const newNodes = data.nodes ?? state.nodes
+          const newEdges = data.edges ?? state.edges
+          if (data.nodes) setState('nodes', newNodes)
+          if (data.edges) setState('edges', newEdges)
+          recomputeDiff(newNodes, newEdges)
         }
       } catch {
         // ignore malformed messages

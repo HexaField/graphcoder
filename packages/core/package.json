@@ -18,5 +18,8 @@
     "build": "tsdown",
     "check": "tsc --noEmit",
     "test": "vitest run"
+  },
+  "dependencies": {
+    "@noble/hashes": "^2.3.0"
   }
 }
