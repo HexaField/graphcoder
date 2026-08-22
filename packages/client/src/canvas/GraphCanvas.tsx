@@ -170,7 +170,11 @@ export const GraphCanvas: Component = () => {
     const rect = svgRef.getBoundingClientRect()
     const mouseXRatio = (e.clientX - rect.left) / rect.width
     const mouseYRatio = (e.clientY - rect.top) / rect.height
-    const factor = e.deltaY > 0 ? 1.15 : 1 / 1.15
+    // Scale proportionally to deltaY so trackpad (many small events) and
+    // mouse wheel (few large events) both feel natural.
+    // deltaMode 0 = pixels (trackpad), 1 = lines, 2 = pages
+    const sensitivity = e.deltaMode === 0 ? 0.002 : 0.08
+    const factor = Math.exp(e.deltaY * sensitivity)
     const newW = vb.w * factor
     const newH = vb.h * factor
     setViewBox({
@@ -188,7 +192,7 @@ export const GraphCanvas: Component = () => {
   })
 
   return (
-    <div class="relative w-full h-full bg-gray-950 overflow-hidden" data-testid="graph-canvas">
+    <div class="relative w-full h-full bg-gray-950 overflow-hidden select-none" data-testid="graph-canvas">
       <Show when={isLayouting()}>
         <div class="absolute inset-0 flex items-center justify-center text-gray-400 z-10">
           <span>Computing layout…</span>
