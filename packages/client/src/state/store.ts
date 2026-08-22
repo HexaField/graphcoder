@@ -2,6 +2,18 @@ import { createStore } from 'solid-js/store'
 import type { GraphEdge, GraphNode, NodeDetail, ProjectStats, ViewMode } from '@graphcoder/core'
 import * as api from '../api/graph.js'
 
+const VIEW_MODES: ViewMode[] = ['module-dependency', 'call-graph', 'impact-radius']
+
+// ── URL persistence ───────────────────────────────────────────────────────────
+
+function syncUrlParams(): void {
+  const params = new URLSearchParams()
+  if (state.projectRoot) params.set('project', state.projectRoot)
+  params.set('view', state.viewMode)
+  const qs = params.toString()
+  history.replaceState(null, '', qs ? `?${qs}` : window.location.pathname)
+}
+
 interface AppState {
   // Project
   projectRoot: string | null
@@ -53,6 +65,7 @@ export async function openProject(projectRoot: string): Promise<void> {
     const graph = await api.fetchGraph()
     setState('nodes', graph.nodes)
     setState('edges', graph.edges)
+    syncUrlParams()
   } catch (e) {
     setState('error', e instanceof Error ? e.message : 'Failed to open project')
   } finally {
@@ -81,6 +94,7 @@ export function clearSelection(): void {
 
 export async function setViewMode(mode: ViewMode): Promise<void> {
   setState('viewMode', mode)
+  syncUrlParams()
   try {
     if (mode === 'call-graph' && state.selectedNodeId) {
       const subgraph = await api.fetchCallGraph(state.selectedNodeId)
@@ -117,18 +131,33 @@ export async function search(query: string): Promise<void> {
   }
 }
 
-export async function fetchCurrentProject(): Promise<void> {
-  try {
-    const result = await api.fetchCurrentProject()
-    if (result.open && result.projectRoot) {
-      setState('projectRoot', result.projectRoot)
-      if (result.stats) setState('projectStats', result.stats)
-      const graph = await api.fetchGraph()
-      setState('nodes', graph.nodes)
-      setState('edges', graph.edges)
+/** Restore state from URL params on startup, then fall back to the server's current project. */
+export async function initFromUrl(): Promise<void> {
+  const params = new URLSearchParams(window.location.search)
+  const projectParam = params.get('project')
+  const viewParam = params.get('view') as ViewMode | null
+
+  if (viewParam && VIEW_MODES.includes(viewParam)) {
+    setState('viewMode', viewParam)
+  }
+
+  if (projectParam) {
+    await openProject(projectParam)
+  } else {
+    // No URL param — check whether the server already has a project open
+    try {
+      const result = await api.fetchCurrentProject()
+      if (result.open && result.projectRoot) {
+        setState('projectRoot', result.projectRoot)
+        if (result.stats) setState('projectStats', result.stats)
+        const graph = await api.fetchGraph()
+        setState('nodes', graph.nodes)
+        setState('edges', graph.edges)
+        syncUrlParams()
+      }
+    } catch {
+      // Server has no project open yet — not an error
     }
-  } catch {
-    // Server may not have a project open yet — not an error
   }
 }
 

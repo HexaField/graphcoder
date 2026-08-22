@@ -2,12 +2,12 @@ import { onMount, Show } from 'solid-js'
 import { GraphCanvas } from './canvas/GraphCanvas.js'
 import { NodeInspector } from './components/NodeInspector.js'
 import { Toolbar } from './components/Toolbar.js'
-import { connectWebSocket, fetchCurrentProject, state } from './state/store.js'
+import { connectWebSocket, initFromUrl, state } from './state/store.js'
 
 export default function App() {
   onMount(() => {
     connectWebSocket()
-    void fetchCurrentProject()
+    void initFromUrl()
   })
 
   return (
