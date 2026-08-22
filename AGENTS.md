@@ -57,6 +57,7 @@ pnpm test:unit
 | GET    | `/health`                  | Server health check                                     |
 | POST   | `/api/projects/open`       | Open + index a project: `{ projectRoot: string }`       |
 | GET    | `/api/projects/current`    | Current open project + stats                            |
+| POST   | `/api/projects/close`      | Close current project (test state reset)                |
 | GET    | `/api/graph`               | Full graph snapshot: `?kinds=function,class,...` filter |
 | GET    | `/api/nodes/search`        | FTS symbol search: `?q=...`                             |
 | GET    | `/api/nodes/:id`           | Node + edges + source code                              |
@@ -90,16 +91,45 @@ src/
   api/graph.ts          — fetch functions for all server endpoints
   constants.ts          — shared colour maps (NODE_KIND_FILL, EDGE_KIND_STROKE, helpers)
   state/store.ts        — SolidJS createStore reactive state + action functions
-    exports: visibleGraph(), toggleNodeKind(), toggleEdgeKind(), setFocus(), clearFocus(), clearFilters()
+    exports: visibleGraph(), captureSnapshot(), clearDiff(), toggleNodeKind(),
+             toggleEdgeKind(), setFocus(), clearFocus(), clearFilters()
   layout/elk.ts         — ELK layout computation (async, per ViewMode)
-  canvas/GraphCanvas.tsx — SVG canvas with pan/zoom, NodeRect, EdgeLine
+  canvas/GraphCanvas.tsx — SVG canvas with pan/zoom, NodeRect, EdgeLine, diff overlay rings
   components/
+    DiffPanel.tsx        — Bottom bar: diff summary + collapsible op list
     FilterPanel.tsx      — Left sidebar: node/edge kind toggles + focus indicator
-    Toolbar.tsx          — ProjectInput + ViewModeSwitcher + SearchBar
+    Toolbar.tsx          — ProjectInput + ViewModeSwitcher + SearchBar + Snapshot controls
     NodeInspector.tsx    — Selected node detail panel + Focus/Unfocus button
     SearchBar.tsx        — Symbol search with dropdown
   App.tsx               — Root layout, mounts WebSocket on load
 ```
+
+## ArchDiff v2 + Semantic Identity (Phase 1)
+
+`packages/core/src/identity.ts` — `semanticId(kind, name, sig?)` → 64-char hex sha256. Stable across file moves; breaks on rename or kind-change. `nodeSemanticId(node)` convenience wrapper.
+
+`packages/core/src/diff/` — composable graph delta format:
+
+- `types.ts` — `ArchDiff { version:2, base, target, diffHash, operations: ArchOp[] }`. Op union: `add_node | remove_node | modify_node | move_node | add_edge | remove_edge`
+- `hash.ts` — `canonicalJson()`, `snapshotHash()` (nodes sorted by semId), `computeDiffHash()`
+- `compute.ts` — `computeArchDiff(base, target)`: move detection (same semId, different filePath), rename heuristic (same kind+file+startLine±5 → `renameOf` annotation), canonical op ordering (remove_edge → remove_node → modify_node → move_node → add_node → add_edge)
+- `apply.ts` — `applyArchDiff(snapshot, diff)`: validates base hash, applies ops in canonical order
+- `compose.ts` — `compose(ab, bc)`: folding rules (add+remove=cancel, add+modify=folded-add, modify+modify=merged, move+move=collapsed, edge cancel)
+
+Client diff state (`store.ts`): `baseSnapshot: GraphSnapshot | null`, `currentDiff: ArchDiff | null`.  
+Actions: `captureSnapshot()`, `clearDiff()`. Auto-recomputes on every WS graph update.
+
+`DiffPanel.tsx` — summary bar (green=added, red=removed, amber=modified, cyan=moved) + collapsible op list. Testids: `diff-panel`, `diff-toggle`, `clear-diff-btn`.
+
+`GraphCanvas.tsx` — diff overlay rings per node via `createMemo` over `diffOverlay`. Color: green=added, amber=modified, cyan=moved.
+
+`Toolbar.tsx` — `snapshot-btn` (shown when project open + no snapshot), `clear-diff-toolbar-btn` (shown when snapshot active).
+
+Server: `POST /api/projects/close` — closes current project for test state reset.
+
+Test fixtures: `test-fixtures/project-v1/` + `test-fixtures/project-v2/` — deliberate rename/move/add/remove across 3 TS files for diff round-trip E2E tests.
+
+**Gotcha:** `test-fixtures/**/.codegraph` gitignored — stale index (0 nodes) causes `[data-nodeid]` to never render in E2E tests. Delete `.codegraph/` from any fixture to force re-index.
 
 ## Filter & focus system
 
@@ -122,7 +152,7 @@ The graphcoder repo has a `.codegraph/` index at its root. Use `codegraph explor
 | Phase | Status  | Description                                                     |
 | ----- | ------- | --------------------------------------------------------------- |
 | 0     | ✅ Done | Read-only graph explorer, ELK layout, SVG canvas, E2E tests     |
-| 1     | Planned | ArchDiff v2 format, semantic identity layer, diff visualization |
+| 1     | ✅ Done | ArchDiff v2 format, semantic identity layer, diff visualization |
 | 2     | Planned | Temporal mapper (Git history → per-commit diffs via worktrees)  |
 | 3     | Planned | Prospective state engine (in-memory graph mutations)            |
 | 4     | Planned | Code synthesis engine (ArchDiff → file changes → commit loop)   |
