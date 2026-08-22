@@ -1,8 +1,13 @@
-import { CodeGraph, NODE_KINDS } from '@colbymchenry/codegraph'
-import type { Node, Edge } from '@colbymchenry/codegraph'
+// @colbymchenry/codegraph ships as CJS; use createRequire for reliable interop
+// in our ESM server package.
+import { createRequire } from 'node:module'
+import type { CodeGraph as CodeGraphType, Node, Edge } from '@colbymchenry/codegraph'
+
+const require = createRequire(import.meta.url)
+const { CodeGraph, NODE_KINDS } = require('@colbymchenry/codegraph') as typeof import('@colbymchenry/codegraph')
 
 export class GraphService {
-  private cg: CodeGraph | null = null
+  private cg: CodeGraphType | null = null
   private projectRoot: string | null = null
 
   async open(projectRoot: string): Promise<void> {
@@ -35,7 +40,7 @@ export class GraphService {
     this.projectRoot = projectRoot
   }
 
-  getCodeGraph(): CodeGraph {
+  getCodeGraph(): CodeGraphType {
     if (!this.cg) {
       throw new Error('No CodeGraph project is open. Call POST /api/projects/open first.')
     }
