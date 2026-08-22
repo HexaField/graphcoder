@@ -135,7 +135,7 @@ export async function fetchCurrentProject(): Promise<void> {
 let wsReconnectTimer: ReturnType<typeof setTimeout> | null = null
 
 export function connectWebSocket(): void {
-  const wsUrl = import.meta.env.VITE_WS_URL ?? 'ws://localhost:3001/ws'
+  const wsUrl = import.meta.env.VITE_WS_URL ?? `ws://${window.location.hostname}:3001/ws`
 
   const connect = () => {
     if (wsReconnectTimer !== null) {
