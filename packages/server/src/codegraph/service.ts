@@ -36,7 +36,13 @@ export class GraphService {
       console.log('Indexing complete')
     }
 
-    this.cg.watch()
+    // watch() fails with ENOSPC when the system inotify limit is exhausted.
+    // Degrade gracefully — indexing and querying still work, just no auto-sync.
+    try {
+      this.cg.watch()
+    } catch (err) {
+      console.warn('[GraphCoder] File watching unavailable (ENOSPC or similar); changes will not auto-sync:', err)
+    }
     this.projectRoot = projectRoot
   }
 
