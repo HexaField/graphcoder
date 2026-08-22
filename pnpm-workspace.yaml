@@ -1,2 +1,5 @@
 packages:
   - 'packages/*'
+allowBuilds:
+  '@fastify/pre-commit': false
+  esbuild: false

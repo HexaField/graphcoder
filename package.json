@@ -1,12 +1,12 @@
 {
-  "name": "template-monorepo",
+  "name": "graphcoder",
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "concurrently \"pnpm --filter @template/client dev\" \"pnpm --filter @template/server dev\"",
+    "dev": "concurrently \"pnpm --filter @graphcoder/client dev\" \"pnpm --filter @graphcoder/server dev\"",
     "build": "pnpm -r --if-present build",
-    "test": "pnpm -r test",
-    "certs": "mkdir -p .certs && openssl req -x509 -newkey rsa:2048 -keyout .certs/localhost.key -out .certs/localhost.cert -days 365 -nodes -subj \"/CN=localhost\"",
+    "test": "pnpm --filter @graphcoder/client test",
+    "test:unit": "pnpm -r --filter !@graphcoder/client test",
     "lint": "oxlint --fix",
     "format": "oxfmt --write",
     "check": "pnpm -r check && oxlint",

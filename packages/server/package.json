@@ -1,5 +1,5 @@
 {
-  "name": "@template/server",
+  "name": "@graphcoder/server",
   "version": "1.0.0",
   "type": "module",
   "scripts": {
@@ -10,14 +10,17 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@template/core": "workspace:*",
+    "@colbymchenry/codegraph": "^1.5.0",
+    "@graphcoder/core": "workspace:*",
     "cors": "^2.8.5",
     "dotenv": "^17.2.3",
     "express": "^5.2.1",
+    "ws": "^8.21.3",
     "zod": "^4.3.5"
   },
   "devDependencies": {
     "@types/cors": "^2.8.19",
-    "@types/express": "^5.0.6"
+    "@types/express": "^5.0.6",
+    "@types/ws": "^8.18.1"
   }
 }

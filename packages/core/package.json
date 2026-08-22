@@ -1,5 +1,5 @@
 {
-  "name": "@template/core",
+  "name": "@graphcoder/core",
   "version": "1.0.0",
   "type": "module",
   "main": "src/index.ts",

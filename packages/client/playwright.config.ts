@@ -8,9 +8,8 @@ export default defineConfig({
   workers: process.env.CI ? 1 : undefined,
   reporter: process.env.CI ? 'github' : 'list',
   use: {
-    baseURL: 'https://localhost:3000',
-    trace: 'on-first-retry',
-    ignoreHTTPSErrors: true
+    baseURL: 'http://localhost:3000',
+    trace: 'on-first-retry'
   },
   projects: [
     {
@@ -18,10 +17,17 @@ export default defineConfig({
       use: { ...devices['Desktop Chrome'] }
     }
   ],
-  webServer: {
-    command: 'npm run dev',
-    url: 'https://localhost:3000',
-    reuseExistingServer: !process.env.CI,
-    ignoreHTTPSErrors: true
-  }
+  webServer: [
+    {
+      command: 'pnpm --filter @graphcoder/server dev',
+      url: 'http://localhost:3001/health',
+      reuseExistingServer: !process.env.CI,
+      cwd: '../..'
+    },
+    {
+      command: 'pnpm dev',
+      url: 'http://localhost:3000',
+      reuseExistingServer: !process.env.CI
+    }
+  ]
 })
