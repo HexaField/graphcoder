@@ -325,6 +325,25 @@ async function layoutGrouped(
     packageIdSet = new Set(packageIdToLabel.keys())
   }
 
+  // ── Dir compound IDs (shared: used by 3-tier AND 4-tier paths) ───────────
+  // Stable ELK-safe ids for directory compounds (paths contain slashes).
+
+  let dirIdx = 0
+  const dirPathToId = new Map<string, string>()
+  const dirIdToPath = new Map<string, string>()
+  for (const dp of dirPathToFiles.keys()) {
+    const id = `__dir${dirIdx++}`
+    dirPathToId.set(dp, id)
+    dirIdToPath.set(id, dp)
+  }
+  const dirIdSet = new Set(dirIdToPath.keys())
+
+  const fileIdToDirId = new Map<string, string>() // top-level file group id → dir compound id
+  for (const [dp, fgs] of dirPathToFiles) {
+    const dirId = dirPathToId.get(dp)!
+    for (const fg of fgs) fileIdToDirId.set(fg.id, dirId)
+  }
+
   // ── Helper: build a file-level ELK compound node (handles childGroups) ────
 
   function buildFileElkNode(fg: FileGroup, innerDir: string): ElkNode | null {
@@ -822,23 +841,6 @@ async function layoutGrouped(
   //   flat-group-internal → flat group compound edges
   //   everything else → root edges
   // ─────────────────────────────────────────────────────────────────────────
-
-  // Stable ELK-safe ids for directory compounds (paths contain slashes)
-  let dirIdx = 0
-  const dirPathToId = new Map<string, string>()
-  const dirIdToPath = new Map<string, string>()
-  for (const dp of dirPathToFiles.keys()) {
-    const id = `__dir${dirIdx++}`
-    dirPathToId.set(dp, id)
-    dirIdToPath.set(id, dp)
-  }
-  const dirIdSet = new Set(dirIdToPath.keys())
-
-  const fileIdToDirId = new Map<string, string>() // top-level file group id → dir compound id
-  for (const [dp, fgs] of dirPathToFiles) {
-    const dirId = dirPathToId.get(dp)!
-    for (const fg of fgs) fileIdToDirId.set(fg.id, dirId)
-  }
 
   // ── Classify edges by LCA level ───────────────────────────────────────────
 
