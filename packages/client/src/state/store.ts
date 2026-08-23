@@ -53,5 +53,9 @@ export type { PersistedFilters } from './storage.js'
 export { setViewMode } from './view.js'
 export type { ViewState } from './view.js'
 
+// Section: Hierarchy
+export { clearHierarchyHidden, toggleHierarchyHidden } from './hierarchy.js'
+export type { HierarchyState } from './hierarchy.js'
+
 // Utilities
 export { VIEW_MODES } from './url.js'

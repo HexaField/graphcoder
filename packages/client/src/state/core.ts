@@ -5,6 +5,7 @@ import { loadFilters } from './storage.js'
 import type { DiffState } from './diff.js'
 import type { FiltersState } from './filters.js'
 import type { GraphState } from './graph.js'
+import type { HierarchyState } from './hierarchy.js'
 import type { ProjectState } from './project.js'
 import type { SearchState } from './search.js'
 import type { SelectionState } from './selection.js'
@@ -16,7 +17,14 @@ import type { ViewState } from './view.js'
  * Slice types live in their respective section files (project.ts, filters.ts, …).
  * This composed type is exported for the rare consumer that needs the full shape.
  */
-export type AppState = ProjectState & GraphState & SelectionState & ViewState & FiltersState & DiffState & SearchState
+export type AppState = ProjectState &
+  GraphState &
+  SelectionState &
+  ViewState &
+  FiltersState &
+  DiffState &
+  SearchState &
+  HierarchyState
 
 const _saved = loadFilters()
 
@@ -64,5 +72,8 @@ export const [state, setState] = createStore<AppState>({
   // Search
   searchQuery: '',
   searchResults: [],
-  isSearching: false
+  isSearching: false,
+
+  // Hierarchy
+  hiddenPaths: []
 })

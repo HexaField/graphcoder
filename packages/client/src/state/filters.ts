@@ -114,6 +114,25 @@ export function visibleGraph(): { nodes: GraphNode[]; edges: GraphEdge[] } {
   let nodes = state.nodes.filter((n) => !hiddenKindSet.has(n.kind))
   let nodeIds = new Set(nodes.map((n) => n.id))
 
+  // 1b. Apply hierarchy show/hide — driven by the HierarchyPanel per-item toggles.
+  //     A node disappears if its own ID is hidden, its file path is hidden, or any
+  //     directory/package prefix of its file path is hidden.  Parent hiding cascades
+  //     to children; un-hiding a parent restores children to their own state.
+  if (state.hiddenPaths.length > 0) {
+    const hSet = new Set(state.hiddenPaths)
+    nodes = nodes.filter((n) => {
+      if (hSet.has(n.id)) return false
+      const fp = n.filePath
+      if (!fp) return true
+      const parts = fp.replace(/\\/g, '/').split('/')
+      for (let i = 1; i <= parts.length; i++) {
+        if (hSet.has(parts.slice(0, i).join('/'))) return false
+      }
+      return true
+    })
+    nodeIds = new Set(nodes.map((n) => n.id))
+  }
+
   // 2a. Apply test-file filter — matches .test.* / .spec.* / __tests__ / __mocks__ / .stories.*
   if (state.hideTestFiles) {
     const TEST_RE = /(\.(test|spec)\.[jt]sx?$|__tests__[\\/]|__mocks__[\\/]|\.stories\.[jt]sx?$)/i
