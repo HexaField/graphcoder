@@ -47,6 +47,7 @@ interface AppState {
   // Filters & focus
   hiddenNodeKinds: NodeKind[]
   hiddenEdgeKinds: EdgeKind[]
+  hideTestFiles: boolean
   focusedNodeId: string | null
 
   // Diff
@@ -72,6 +73,7 @@ export const [state, setState] = createStore<AppState>({
   viewMode: 'module-dependency',
   hiddenNodeKinds: [],
   hiddenEdgeKinds: [],
+  hideTestFiles: false,
   focusedNodeId: null,
   baseSnapshot: null,
   currentDiff: null,
@@ -98,9 +100,14 @@ export function clearFocus(): void {
   setState('focusedNodeId', null)
 }
 
+export function toggleHideTestFiles(): void {
+  setState('hideTestFiles', (v) => !v)
+}
+
 export function clearFilters(): void {
   setState('hiddenNodeKinds', [])
   setState('hiddenEdgeKinds', [])
+  setState('hideTestFiles', false)
 }
 
 // ── Diff ──────────────────────────────────────────────────────────────────────
@@ -139,6 +146,13 @@ export function visibleGraph(): { nodes: GraphNode[]; edges: GraphEdge[] } {
   // 1. Apply node kind filter
   let nodes = state.nodes.filter((n) => !hiddenKindSet.has(n.kind))
   let nodeIds = new Set(nodes.map((n) => n.id))
+
+  // 1b. Apply test-file filter — matches .test.* / .spec.* / __tests__ / __mocks__ / .stories.*
+  if (state.hideTestFiles) {
+    const TEST_RE = /(\.(test|spec)\.[jt]sx?$|__tests__[\\/]|__mocks__[\\/]|\.stories\.[jt]sx?$)/i
+    nodes = nodes.filter((n) => !TEST_RE.test(n.filePath ?? ''))
+    nodeIds = new Set(nodes.map((n) => n.id))
+  }
 
   // 2. Apply focus: narrow to focused node + its direct neighbours
   const focusId = state.focusedNodeId
