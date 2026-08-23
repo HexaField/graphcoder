@@ -325,7 +325,8 @@ export const GraphCanvas: Component = () => {
   let pixiApp: Application | null = null
   let worldContainer: Container | null = null
   let dirGroupLayer: Container | null = null // directory containers — deepest background
-  let groupLayer: Container | null = null // file container boxes — drawn above dir layer
+  let groupLayer: Container | null = null // file + contract container boxes
+  let classGroupLayer: Container | null = null // class sub-containers (inside file containers)
   let edgeLayer: Container | null = null
   let nodeLayer: Container | null = null
 
@@ -349,27 +350,38 @@ export const GraphCanvas: Component = () => {
   })
 
   /**
-   * File groups for compound layout. Computed from raw contains edges so that
-   * we can build groups even after file-kind nodes are stripped from visible().
-   * Only populated when state.groupByFile is on.
+   * Unified compound group memo — composes all three grouping modes simultaneously.
+   *
+   * Priority / structure:
+   *   1. Contract groups (groupByContract) claim matching nodes first; they
+   *      carry no filePath so ELK places them as flat root compounds alongside
+   *      the dir compounds.
+   *   2. File groups (groupByFile) get the remaining nodes. When groupByClass
+   *      is ALSO on, class nodes become childGroups (sub-compounds) inside each
+   *      file group; methods/properties inside them become leaf nodes of the class
+   *      sub-group rather than the file group.
+   *   3. When ONLY groupByClass is on (no file grouping), class nodes become
+   *      top-level groups with filePath — ELK places them inside dir compounds.
    */
-  const fileGroups = createMemo((): FileGroup[] | undefined => {
-    if (!state.groupByFile) return undefined
+  const combinedGroups = createMemo((): FileGroup[] | undefined => {
+    const gf = state.groupByFile
+    const gc = state.groupByClass
+    const gct = state.groupByContract
+
+    if (!gf && !gc && !gct) return undefined
 
     const visibleNodeIds = new Set(visible().nodes.map((n) => n.id))
 
-    // Build a contains-children index for recursive descent.
-    // Methods inside classes, routes registered inside function bodies, etc.
-    // are grandchildren of the file — a single-level filter misses them.
+    // Build one-level contains-children index (direct children only)
     const containsChildren = new Map<string, string[]>()
     for (const e of state.edges) {
       if (e.kind !== 'contains') continue
-      let children = containsChildren.get(e.source)
-      if (!children) containsChildren.set(e.source, (children = []))
-      children.push(e.target)
+      let ch = containsChildren.get(e.source)
+      if (!ch) containsChildren.set(e.source, (ch = []))
+      ch.push(e.target)
     }
 
-    /** Recursively collect all descendants of nodeId through contains edges. */
+    // Recursive descendant collection for file grouping
     function collectDescendants(nodeId: string, out: Set<string>): void {
       for (const child of containsChildren.get(nodeId) ?? []) {
         out.add(child)
@@ -377,107 +389,94 @@ export const GraphCanvas: Component = () => {
       }
     }
 
-    // Find all file-kind nodes in the full (unfiltered) node set
-    const fileNodes = state.nodes.filter((n) => n.kind === 'file')
+    function fileLabel(fn: GraphNode): string {
+      const name = fn.name
+      return name && !name.includes('/') ? name : ((fn.filePath ?? name ?? fn.id).split('/').pop() ?? fn.id)
+    }
 
     const groups: FileGroup[] = []
-    for (const fileNode of fileNodes) {
-      // Collect ALL descendants (direct + indirect) that are currently visible.
-      // This ensures methods inside classes, routes registered inside functions,
-      // and any other deeply-nested symbols appear inside their file container.
-      const allDescendants = new Set<string>()
-      collectDescendants(fileNode.id, allDescendants)
-      const childIds = [...allDescendants].filter((id) => visibleNodeIds.has(id))
+    const claimedByContract = new Set<string>()
 
-      if (childIds.length === 0) continue // skip files with no visible children
+    // ── 1. Contract groups ─────────────────────────────────────────────────
+    if (gct) {
+      const visibleNodes = visible().nodes
+      const assigned = new Set<string>()
+      for (const def of CONTRACT_GROUPS) {
+        const childIds = visibleNodes.filter((n) => !assigned.has(n.id) && def.test(n)).map((n) => n.id)
+        if (childIds.length === 0) continue
+        childIds.forEach((id) => {
+          assigned.add(id)
+          claimedByContract.add(id)
+        })
+        // No filePath → flat root compound (not inside a dir container)
+        groups.push({ id: def.id, label: def.label, color: def.color, childIds })
+      }
+    }
 
-      // Use name for display; fall back to last segment of filePath
-      const name = fileNode.name
-      const label =
-        name && !name.includes('/')
-          ? name
-          : ((fileNode.filePath ?? name ?? fileNode.id).split('/').pop() ?? fileNode.id)
+    // ── 2a. File groups (with optional class sub-groups) ───────────────────
+    if (gf) {
+      const fileNodes = state.nodes.filter((n) => n.kind === 'file')
 
-      groups.push({ id: fileNode.id, label, childIds, filePath: fileNode.filePath })
+      for (const fn of fileNodes) {
+        const allDesc = new Set<string>()
+        collectDescendants(fn.id, allDesc)
+        // Remove contract-claimed nodes from the file group
+        for (const id of claimedByContract) allDesc.delete(id)
+
+        if (gc) {
+          // Build class sub-groups for direct class children of this file
+          const childGroups: FileGroup[] = []
+          const assignedToClass = new Set<string>()
+
+          for (const classId of containsChildren.get(fn.id) ?? []) {
+            const classNode = state.nodes.find((n) => n.id === classId && n.kind === 'class')
+            if (!classNode) continue
+            const classChildIds = (containsChildren.get(classId) ?? []).filter(
+              (id) => visibleNodeIds.has(id) && !claimedByContract.has(id)
+            )
+            if (classChildIds.length === 0) continue
+            classChildIds.forEach((id) => assignedToClass.add(id))
+            childGroups.push({
+              id: classId,
+              label: classNode.name,
+              color: '#818cf8',
+              childIds: classChildIds
+            })
+          }
+
+          // Remaining visible descendants that didn't end up in a class sub-group
+          const leafIds = [...allDesc].filter((id) => visibleNodeIds.has(id) && !assignedToClass.has(id))
+          if (leafIds.length === 0 && childGroups.length === 0) continue
+
+          groups.push({
+            id: fn.id,
+            label: fileLabel(fn),
+            childIds: leafIds,
+            childGroups: childGroups.length > 0 ? childGroups : undefined,
+            filePath: fn.filePath
+          })
+        } else {
+          // File groups without class sub-grouping — all descendants as leaves
+          const childIds = [...allDesc].filter((id) => visibleNodeIds.has(id))
+          if (childIds.length === 0) continue
+          groups.push({ id: fn.id, label: fileLabel(fn), childIds, filePath: fn.filePath })
+        }
+      }
+    } else if (gc) {
+      // ── 2b. Class groups only (no file grouping) ───────────────────────
+      const classNodes = state.nodes.filter((n) => n.kind === 'class')
+      for (const cn of classNodes) {
+        const childIds = (containsChildren.get(cn.id) ?? []).filter(
+          (id) => visibleNodeIds.has(id) && !claimedByContract.has(id)
+        )
+        if (childIds.length === 0) continue
+        // filePath → placed inside dir compound by ELK
+        groups.push({ id: cn.id, label: cn.name, filePath: cn.filePath, color: '#818cf8', childIds })
+      }
     }
 
     return groups.length > 0 ? groups : undefined
   })
-
-  /**
-   * Class groups for structural method layout. Each class node with at least one
-   * visible `contains` child becomes a compound container. Only active when
-   * groupByClass is on and groupByFile is off (file mode keeps classes as nodes
-   * inside file containers and doesn't need a separate class grouping layer).
-   */
-  const classGroups = createMemo((): FileGroup[] | undefined => {
-    if (!state.groupByClass || state.groupByFile) return undefined
-
-    const visibleNodeIds = new Set(visible().nodes.map((n) => n.id))
-
-    // One-level contains-children index (class → direct children only).
-    // Methods and properties are always direct children of their class in codegraph.
-    const containsChildren = new Map<string, string[]>()
-    for (const e of state.edges) {
-      if (e.kind !== 'contains') continue
-      let children = containsChildren.get(e.source)
-      if (!children) containsChildren.set(e.source, (children = []))
-      children.push(e.target)
-    }
-
-    // All class-kind nodes in the full node set (class nodes are stripped from
-    // visible() when groupByClass is on, so we look at state.nodes directly).
-    const classNodes = state.nodes.filter((n) => n.kind === 'class')
-    const groups: FileGroup[] = []
-
-    for (const classNode of classNodes) {
-      const childIds = (containsChildren.get(classNode.id) ?? []).filter((id) => visibleNodeIds.has(id))
-      if (childIds.length === 0) continue
-
-      // filePath triggers directory-nesting layout (same as file groups) — classes
-      // from the same directory are visually co-located under a dir container.
-      groups.push({
-        id: classNode.id,
-        label: classNode.name,
-        filePath: classNode.filePath,
-        color: '#818cf8', // indigo-400 — distinguishes class containers from neutral file containers
-        childIds
-      })
-    }
-
-    return groups.length > 0 ? groups : undefined
-  })
-
-  /**
-   * Contract groups for semantic API surface layout. Each visible node matches
-   * the first ContractGroupDef whose test() returns true. Nodes that match no
-   * group stay ungrouped (rendered flat alongside the contract compounds).
-   * Only populated when state.groupByContract is on and state.groupByFile is off.
-   */
-  const contractGroups = createMemo((): FileGroup[] | undefined => {
-    // File grouping takes precedence — contract mode is inactive when file mode is on
-    if (!state.groupByContract || state.groupByFile) return undefined
-
-    const visibleNodes = visible().nodes
-    const assigned = new Set<string>()
-    const groups: FileGroup[] = []
-
-    for (const def of CONTRACT_GROUPS) {
-      const childIds = visibleNodes.filter((n) => !assigned.has(n.id) && def.test(n)).map((n) => n.id)
-      if (childIds.length === 0) continue
-      childIds.forEach((id) => assigned.add(id))
-      // No filePath — triggers flat 2-tier ELK layout instead of dir nesting
-      groups.push({ id: def.id, label: def.label, color: def.color, childIds })
-    }
-
-    return groups.length > 0 ? groups : undefined
-  })
-
-  /**
-   * Active groups for ELK layout: file grouping takes precedence over class
-   * grouping which takes precedence over contract grouping.
-   */
-  const activeGroups = createMemo((): FileGroup[] | undefined => fileGroups() ?? classGroups() ?? contractGroups())
 
   // Overlay positions: camera × ELK layout → CSS pixel rects for each node.
   // Updates on every pan/zoom and every layout change.
@@ -503,7 +502,7 @@ export const GraphCanvas: Component = () => {
   createEffect(async () => {
     const { nodes, edges } = visible()
     const viewMode = state.viewMode
-    const groups = activeGroups() // reactive: re-layouts when groupByFile or groupByContract toggles
+    const groups = combinedGroups() // reactive: re-layouts when any grouping mode changes
     if (nodes.length === 0) {
       setLayout(null)
       return
@@ -552,7 +551,7 @@ export const GraphCanvas: Component = () => {
   // those without needing a GPU re-upload.
 
   createEffect(() => {
-    if (!pixiReady() || !dirGroupLayer || !groupLayer || !edgeLayer || !nodeLayer) return
+    if (!pixiReady() || !dirGroupLayer || !groupLayer || !classGroupLayer || !edgeLayer || !nodeLayer) return
     const l = layout()
     const selectedId = state.selectedNodeId
     const overlay = diffOverlay()
@@ -561,6 +560,7 @@ export const GraphCanvas: Component = () => {
 
     clearContainer(dirGroupLayer)
     clearContainer(groupLayer)
+    clearContainer(classGroupLayer)
     clearContainer(edgeLayer)
     clearContainer(nodeLayer)
     if (!l) return
@@ -570,9 +570,14 @@ export const GraphCanvas: Component = () => {
       drawDirContainer(dirGroupLayer, dc, colors.isDark)
     }
 
-    // Draw file container boxes above directory backgrounds
+    // Draw file and contract container boxes above directory backgrounds
     for (const container of l.containers) {
       drawFileContainer(groupLayer, container, colors.isDark)
+    }
+
+    // Draw class sub-containers inside file containers
+    for (const cc of l.classContainers) {
+      drawFileContainer(classGroupLayer, cc, colors.isDark)
     }
 
     for (const edge of l.edges) {
@@ -614,19 +619,21 @@ export const GraphCanvas: Component = () => {
       autoDensity: true
     })
 
-    // Build scene graph: world → [dir containers, file containers, edges, nodes]
+    // Build scene graph: world → [dir containers, file containers, class containers, edges, nodes]
     const wc = new Container()
     const dgl = new Container() // dir group layer — directory bounding boxes (deepest)
-    const gl = new Container() // group layer — file bounding boxes
+    const gl = new Container() // group layer — file + contract container boxes
+    const cgl = new Container() // class group layer — class sub-container boxes
     const el = new Container()
     const nl = new Container()
-    wc.addChild(dgl, gl, el, nl)
+    wc.addChild(dgl, gl, cgl, el, nl)
     app.stage.addChild(wc)
 
     pixiApp = app
     worldContainer = wc
     dirGroupLayer = dgl
     groupLayer = gl
+    classGroupLayer = cgl
     edgeLayer = el
     nodeLayer = nl
 
@@ -659,6 +666,7 @@ export const GraphCanvas: Component = () => {
       worldContainer = null
       dirGroupLayer = null
       groupLayer = null
+      classGroupLayer = null
       edgeLayer = null
       nodeLayer = null
       app.destroy()

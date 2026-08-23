@@ -269,10 +269,11 @@ export function visibleGraph(): { nodes: GraphNode[]; edges: GraphEdge[] } {
     nodeIds = new Set(nodes.map((n) => n.id))
   }
 
-  // When grouping by class (and NOT by file — file mode shows classes as regular
-  // nodes inside file containers), remove class-kind nodes. They become spatial
-  // containers that hold their method/property children.
-  if (state.groupByClass && !state.groupByFile) {
+  // When grouping by class, remove class-kind nodes — they become spatial
+  // containers holding their method/property children. Applies whether or not
+  // file grouping is also on; when both are active, class containers appear as
+  // sub-compounds nested inside file containers.
+  if (state.groupByClass) {
     nodes = nodes.filter((n) => n.kind !== 'class')
     nodeIds = new Set(nodes.map((n) => n.id))
   }
