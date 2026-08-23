@@ -24,7 +24,7 @@ export default defineConfig({
   webServer: [
     {
       command: 'pnpm --filter @graphcoder/server dev',
-      url: 'http://localhost:3001/health',
+      url: 'http://localhost:3001/api/projects/current',
       reuseExistingServer: !process.env.CI,
       cwd: '../..'
     },

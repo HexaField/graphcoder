@@ -1,88 +1,45 @@
-# Template Monorepo
+# GraphCoder
 
-This is a modern, full-stack TypeScript monorepo template managed with **pnpm workspaces**. It provides a pre-configured environment for building scalable applications with a shared core library, a SolidJS client, and an Express server.
+Bidirectional architectural flow & mutation platform. Ingests any codebase into a deterministic structural graph, overlays Git history as a temporal dimension, and synthesises graph mutations back into real code changes.
 
-## 📂 Project Structure
+Think of it as a two-way mirror between your code and a live, queryable architecture model — not a static diagram, but an active workspace where you can explore, diff, and eventually edit the structure directly.
 
-The monorepo is organized into the following packages:
+## What it does today
 
-- **`packages/client`**: A frontend application built with **SolidJS**, **Vite**, and **Tailwind CSS**. It includes **Storybook** for component development and **Playwright** for end-to-end testing.
-- **`packages/server`**: A backend server built with **Express**. It uses **tsx** for fast development execution and **tsdown** for production builds.
-- **`packages/core`**: A shared library containing common logic, types, or utilities used by both the client and server. It is bundled using **tsdown**.
+- **Graph explorer** — full-project call graph, file grouping, contract surface grouping (REST / WebSocket / GraphQL / Services / UI), node/edge kind filtering, symbol search, focus mode
+- **Diff overlay** — capture a structural snapshot then keep coding; the canvas shows a live ring-diff of adds, removes, moves, and modifications against the baseline
+- **HTTP bridge** — synthetic `calls` edges across the HTTP boundary: `fetch()` calls in client code link directly to their matching Express route handlers, bridging the gap static analysis can't cross
 
-## 🚀 Getting Started
+## Architecture
 
-### Prerequisites
+```
+packages/
+  core/    — shared types: GraphSnapshot, ArchDiff v2, semantic identity
+  server/  — Express 5 API + CodeGraph + WebSocket + HTTP bridge analyser
+  client/  — SolidJS + ELK layout + Pixi.js canvas
+```
 
-- **Node.js** (Latest LTS recommended)
-- **pnpm** (Package manager)
+Server at `:3001`, client at `:3000`. Start both with `pnpm dev`.
 
-### Installation
+## Phase progress
 
-Install all dependencies across the monorepo:
+| Phase | Status  | What                                                           |
+| ----- | ------- | -------------------------------------------------------------- |
+| 0     | ✅ Done | Read-only explorer — graph, layout, canvas, E2E test suite     |
+| 1     | ✅ Done | ArchDiff v2 — semantic identity, diff computation, overlay UI  |
+| 2     | 🔜 Next | Temporal mapper — Git history → per-commit ArchDiffs           |
+| 3     | Planned | Prospective state — in-memory graph mutations, preview changes |
+| 4     | Planned | Synthesis engine — ArchDiff → file edits → commit loop         |
+| 5     | Planned | Flow generation — LLM-narrated source→sink flows, tethered     |
+| 6     | Planned | MCP interface — AI agent access to the full mutation platform  |
+
+## Quick start
 
 ```bash
 pnpm install
-```
-
-### Development
-
-Start the development servers for both the client and server concurrently:
-
-```bash
 pnpm dev
+# open http://localhost:3000
+# enter a project path → graph loads
 ```
 
-- **Client**: http://localhost:5173 (default Vite port)
-- **Server**: Check console output for port (typically configured in `src/index.ts`)
-
-## 🛠 Scripts
-
-Run these scripts from the root directory:
-
-| Script         | Description                                                |
-| :------------- | :--------------------------------------------------------- |
-| `pnpm dev`     | Starts client and server in development mode concurrently. |
-| `pnpm build`   | Builds all packages in the workspace.                      |
-| `pnpm test`    | Runs tests across all packages (Vitest & Playwright).      |
-| `pnpm lint`    | Lints code using Oxlint.                                   |
-| `pnpm format`  | Formats code using Oxfmt.                                  |
-| `pnpm check`   | Runs type checking (`tsc`) and linting.                    |
-| `pnpm prepare` | Sets up Husky git hooks.                                   |
-
-## 🧰 Tech Stack & Tooling
-
-### Core Technologies
-
-- **Language**: [TypeScript](https://www.typescriptlang.org/)
-- **Package Manager**: [pnpm](https://pnpm.io/) (Workspaces)
-- **Build Tools**: [Vite](https://vitejs.dev/) (Client), [tsdown](https://tsdown.dev/) (Core + Server)
-
-### Frontend (`packages/client`)
-
-- **Framework**: [SolidJS](https://www.solidjs.com/)
-- **Styling**: [Tailwind CSS](https://tailwindcss.com/)
-- **Testing**: [Playwright](https://playwright.dev/)
-- **Documentation**: [Storybook](https://storybook.js.org/)
-
-### Backend (`packages/server`)
-
-- **Framework**: [Express](https://expressjs.com/)
-- **Runtime**: [tsx](https://github.com/privatenumber/tsx) (TypeScript execution)
-
-### Shared (`packages/core`)
-
-- **Testing**: [Vitest](https://vitest.dev/)
-
-### DevOps & Code Quality
-
-- **Linting**: [Oxlint](https://oxc.rs/docs/guide/usage/linter)
-- **Formatting**: [Oxfmt](https://oxc.rs/docs/guide/usage/formatter)
-- **Git Hooks**: [Husky](https://typicode.github.io/husky/) & [lint-staged](https://github.com/okonet/lint-staged)
-- **CI/CD Readiness**: Scripts are optimized for CI environments (`check`, `test`, `build`).
-
-## ⚙️ Configuration Files
-
-- `pnpm-workspace.yaml`: Defines the workspace structure.
-- `.oxfmtrc.json`: Oxfmt configuration.
-- `tsconfig.json`: Base TypeScript configuration.
+Requires Node 22.5+ (built-in SQLite for CodeGraph).

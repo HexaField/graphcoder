@@ -6,7 +6,6 @@ dotenv.config()
 import cors from 'cors'
 import express from 'express'
 import { createServer } from 'node:http'
-import healthRouter from './routes/health.js'
 import graphRouter from './routes/graph.js'
 import { setupWebSocket } from './ws.js'
 
@@ -17,7 +16,6 @@ const host = process.env.HOST ?? 'localhost'
 app.use(cors())
 app.use(express.json())
 
-app.use('/health', healthRouter)
 app.use('/api', graphRouter)
 
 const server = createServer(app)
