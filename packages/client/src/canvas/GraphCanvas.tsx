@@ -15,11 +15,44 @@
 import { type Component, createEffect, createMemo, createSignal, onCleanup, onMount, Show } from 'solid-js'
 import type { GraphNode, NodeKind } from '@graphcoder/core'
 import type { FileGroup } from '../layout/elk.js'
-import { layoutGraph } from '../layout/elk.js'
+import { layoutGraph, type LayoutResult } from '../layout/elk.js'
 import { clearFocus, selectNode, state, visibleGraph } from '../state/store.js'
 import { resolvedTheme } from '../state/theme.js'
 import type { DiffOverlay } from './ThreeRenderer.js'
 import { ThreeRenderer } from './ThreeRenderer.js'
+
+// ── ELK node cap ─────────────────────────────────────────────────────────────
+//
+// ELK's layered (Sugiyama) algorithm is O(n²) in memory — beyond ~2000 nodes it
+// reliably OOMs the browser tab. When the visible graph exceeds this limit we
+// sort by kind importance and drop the least-interesting nodes, showing a
+// warning banner so the user knows to enable kind / file filters.
+
+const ELK_SAFE_LIMIT = 2000
+
+/** Kind importance order — lower = kept first when capping. */
+const KIND_PRIORITY: Partial<Record<NodeKind, number>> = {
+  class: 0,
+  struct: 0,
+  interface: 1,
+  trait: 1,
+  protocol: 1,
+  module: 2,
+  namespace: 2,
+  function: 3,
+  method: 3,
+  route: 4,
+  component: 4,
+  enum: 5,
+  type_alias: 6,
+  property: 7,
+  field: 7,
+  variable: 8,
+  constant: 8,
+  parameter: 9,
+  import: 10,
+  export: 10
+}
 
 // ── Contract group definitions (unchanged from PixiJS version) ────────────────
 
@@ -69,6 +102,8 @@ export const GraphCanvas: Component = () => {
   // Camera state: pan offset (world coords → screen) + zoom
   const [cam, setCam] = createSignal({ panX: 0, panY: 0, zoom: 1 })
   const [rendererReady, setRendererReady] = createSignal(false)
+  // > 0 when the visible graph exceeded ELK_SAFE_LIMIT; value = total node count
+  const [cappedTotal, setCappedTotal] = createSignal(0)
 
   let canvasRef: HTMLCanvasElement | undefined
   let wrapperRef: HTMLDivElement | undefined
@@ -232,7 +267,7 @@ export const GraphCanvas: Component = () => {
 
   // ── ELK layout effect ───────────────────────────────────────────────────────
 
-  const [layout, setLayout] = createSignal<Awaited<ReturnType<typeof layoutGraph>> | null>(null)
+  const [layout, setLayout] = createSignal<LayoutResult | null>(null)
 
   createEffect(async () => {
     const { nodes, edges } = visible()
@@ -240,12 +275,35 @@ export const GraphCanvas: Component = () => {
     const groups = combinedGroups()
     if (nodes.length === 0) {
       setLayout(null)
+      setCappedTotal(0)
       return
     }
+
+    let layoutNodes = nodes
+    let layoutEdges = edges
+    let passGroups: FileGroup[] | undefined = groups
+
+    if (nodes.length > ELK_SAFE_LIMIT) {
+      // Sort by kind importance and keep the most interesting nodes.
+      const sorted = [...nodes].sort((a, b) => {
+        const pa = KIND_PRIORITY[a.kind as NodeKind] ?? 99
+        const pb = KIND_PRIORITY[b.kind as NodeKind] ?? 99
+        return pa - pb
+      })
+      const keptIds = new Set(sorted.slice(0, ELK_SAFE_LIMIT).map((n) => n.id))
+      layoutNodes = nodes.filter((n) => keptIds.has(n.id))
+      layoutEdges = edges.filter((e) => keptIds.has(e.source) && keptIds.has(e.target))
+      // Skip compound groups when capping — group childIds would reference removed nodes.
+      passGroups = undefined
+      setCappedTotal(nodes.length)
+    } else {
+      setCappedTotal(0)
+    }
+
     setIsLayouting(true)
-    needsFit = true // will auto-fit when renderer applies this layout
+    needsFit = true
     try {
-      const result = await layoutGraph(nodes, edges, direction, groups)
+      const result = await layoutGraph(layoutNodes, layoutEdges, direction, passGroups)
       setLayout(result)
     } finally {
       setIsLayouting(false)
@@ -408,6 +466,19 @@ export const GraphCanvas: Component = () => {
         <div class="absolute inset-0 flex items-center justify-center text-gray-400 dark:text-gray-500 pointer-events-none">
           <span>No project open. Enter a project path above.</span>
         </div>
+      </Show>
+
+      {/* Large-graph cap warning — shown below the canvas, above nothing */}
+      <Show when={cappedTotal() > 0}>
+        {(total) => (
+          <div class="absolute bottom-0 left-0 right-0 z-10 px-4 py-2 bg-amber-50 dark:bg-amber-950 border-t border-amber-200 dark:border-amber-800 text-xs text-amber-800 dark:text-amber-300 pointer-events-none flex items-center gap-2">
+            <span>⚠</span>
+            <span>
+              Large graph — showing {ELK_SAFE_LIMIT} of {total()} nodes (class/interface/function priority). Enable kind
+              or file filters to focus the view.
+            </span>
+          </div>
+        )}
       </Show>
 
       {/*
