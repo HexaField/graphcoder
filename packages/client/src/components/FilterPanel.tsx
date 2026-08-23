@@ -7,6 +7,7 @@ import {
   state,
   toggleEdgeKind,
   toggleGroupByFile,
+  toggleHideDevFiles,
   toggleHideTestFiles,
   toggleNodeKind
 } from '../state/store.js'
@@ -62,7 +63,11 @@ export const FilterPanel: Component = () => {
 
   const hasFilters = createMemo(
     () =>
-      state.hiddenNodeKinds.length > 0 || state.hiddenEdgeKinds.length > 0 || state.hideTestFiles || state.groupByFile
+      state.hiddenNodeKinds.length > 0 ||
+      state.hiddenEdgeKinds.length > 0 ||
+      state.hideTestFiles ||
+      state.hideDevFiles ||
+      state.groupByFile
   )
 
   return (
@@ -117,6 +122,13 @@ export const FilterPanel: Component = () => {
               hover:bg-gray-200 dark:hover:bg-gray-800 transition-opacity ${state.hideTestFiles ? 'opacity-30' : 'opacity-100'}`} onClick={toggleHideTestFiles} title={state.hideTestFiles ? 'Show test files' : 'Hide test files'} data-testid="filter-scope-tests">
             <span class="w-2.5 h-2.5 rounded-sm flex-shrink-0" style={{ background: '#f59e0b' }} />
             <span class="text-gray-600 dark:text-gray-300 truncate">tests</span>
+          </button>
+
+          {/* devops — opacity-30 when active (config/toolchain files filtered out) */}
+          <button class={`flex items-center gap-2 w-full px-2 py-1 rounded text-xs font-mono text-left
+              hover:bg-gray-200 dark:hover:bg-gray-800 transition-opacity ${state.hideDevFiles ? 'opacity-30' : 'opacity-100'}`} onClick={toggleHideDevFiles} title={state.hideDevFiles ? 'Show devops files' : 'Hide devops files (config, lock, CI, env…)'} data-testid="filter-scope-devops">
+            <span class="w-2.5 h-2.5 rounded-sm flex-shrink-0" style={{ background: '#8b5cf6' }} />
+            <span class="text-gray-600 dark:text-gray-300 truncate">devops</span>
           </button>
 
           {/* group files — highlighted when active (feature is ON) */}

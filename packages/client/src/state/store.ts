@@ -48,6 +48,7 @@ interface AppState {
   hiddenNodeKinds: NodeKind[]
   hiddenEdgeKinds: EdgeKind[]
   hideTestFiles: boolean
+  hideDevFiles: boolean
   groupByFile: boolean
   focusedNodeId: string | null
 
@@ -69,6 +70,7 @@ interface PersistedFilters {
   hiddenNodeKinds: NodeKind[]
   hiddenEdgeKinds: EdgeKind[]
   hideTestFiles: boolean
+  hideDevFiles: boolean
   groupByFile: boolean
 }
 
@@ -82,6 +84,7 @@ function loadFilters(): Partial<PersistedFilters> {
       hiddenNodeKinds: Array.isArray(p.hiddenNodeKinds) ? (p.hiddenNodeKinds as NodeKind[]) : undefined,
       hiddenEdgeKinds: Array.isArray(p.hiddenEdgeKinds) ? (p.hiddenEdgeKinds as EdgeKind[]) : undefined,
       hideTestFiles: typeof p.hideTestFiles === 'boolean' ? p.hideTestFiles : undefined,
+      hideDevFiles: typeof p.hideDevFiles === 'boolean' ? p.hideDevFiles : undefined,
       groupByFile: typeof p.groupByFile === 'boolean' ? p.groupByFile : undefined
     }
   } catch {
@@ -95,6 +98,7 @@ function persistFilters(): void {
       hiddenNodeKinds: state.hiddenNodeKinds,
       hiddenEdgeKinds: state.hiddenEdgeKinds,
       hideTestFiles: state.hideTestFiles,
+      hideDevFiles: state.hideDevFiles,
       groupByFile: state.groupByFile
     }
     localStorage.setItem(FILTER_KEY, JSON.stringify(f))
@@ -121,6 +125,7 @@ export const [state, setState] = createStore<AppState>({
   hiddenNodeKinds: _saved.hiddenNodeKinds ?? [],
   hiddenEdgeKinds: _saved.hiddenEdgeKinds ?? [],
   hideTestFiles: _saved.hideTestFiles ?? false,
+  hideDevFiles: _saved.hideDevFiles ?? false,
   groupByFile: _saved.groupByFile ?? false,
   focusedNodeId: null,
   baseSnapshot: null,
@@ -155,6 +160,11 @@ export function toggleHideTestFiles(): void {
   persistFilters()
 }
 
+export function toggleHideDevFiles(): void {
+  setState('hideDevFiles', (v) => !v)
+  persistFilters()
+}
+
 export function toggleGroupByFile(): void {
   setState('groupByFile', (v) => !v)
   persistFilters()
@@ -164,6 +174,7 @@ export function clearFilters(): void {
   setState('hiddenNodeKinds', [])
   setState('hiddenEdgeKinds', [])
   setState('hideTestFiles', false)
+  setState('hideDevFiles', false)
   setState('groupByFile', false)
   persistFilters()
 }
@@ -209,6 +220,23 @@ export function visibleGraph(): { nodes: GraphNode[]; edges: GraphEdge[] } {
   if (state.hideTestFiles) {
     const TEST_RE = /(\.(test|spec)\.[jt]sx?$|__tests__[\\/]|__mocks__[\\/]|\.stories\.[jt]sx?$)/i
     nodes = nodes.filter((n) => !TEST_RE.test(n.filePath ?? ''))
+    nodeIds = new Set(nodes.map((n) => n.id))
+  }
+
+  // 1b2. Apply dev-file filter — package manifests, lock files, config files,
+  //      toolchain configs, CI/CD directories, env files, and docs.
+  //      Combined with the test filter, what remains is pure application source.
+  if (state.hideDevFiles) {
+    // Directory segments that are never source: node_modules, .git, .github, etc.
+    const DEV_DIR_RE =
+      /[\\/](node_modules|\.git|\.github|\.circleci|\.gitlab|dist|build|coverage|\.next|\.nuxt|\.output|\.cache)[\\/]/i
+    // Individual files by name/extension at any depth
+    const DEV_FILE_RE =
+      /([\\/]|^)(package(-lock)?\.json|yarn\.lock|pnpm-lock\.yaml|pnpm-workspace\.yaml|bun\.lockb|[^/\\]+\.config\.[cm]?[jt]sx?|tsconfig[^/\\]*\.json|jsconfig[^/\\]*\.json|\.eslintrc[^/\\]*|\.prettierrc[^/\\]*|\.stylelintrc[^/\\]*|\.babelrc[^/\\]*|\.editorconfig|\.browserslistrc|Dockerfile[^/\\]*|docker-compose[^/\\]*|\.dockerignore|\.env(\.[^/\\]*)?|Makefile|Jenkinsfile|\.nvmrc|\.node-version|\.tool-versions|\.gitignore|\.gitattributes|\.npmignore|\.npmrc|README[^/\\]*|LICENSE[^/\\]*|CHANGELOG[^/\\]*|CONTRIBUTING[^/\\]*)$/i
+    nodes = nodes.filter((n) => {
+      const fp = n.filePath ?? ''
+      return !DEV_DIR_RE.test(fp) && !DEV_FILE_RE.test(fp)
+    })
     nodeIds = new Set(nodes.map((n) => n.id))
   }
 
