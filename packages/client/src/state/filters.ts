@@ -1,9 +1,21 @@
 import type { EdgeKind, GraphEdge, GraphNode, NodeKind } from '@graphcoder/core'
 import { state, setState } from './core.js'
 import { saveFilters } from './storage.js'
-import type { PersistedFilters } from './types.js'
+import type { PersistedFilters } from './storage.js'
 
 // ── Filters & focus ───────────────────────────────────────────────────────────
+
+export interface FiltersState {
+  hiddenNodeKinds: NodeKind[]
+  hiddenEdgeKinds: EdgeKind[]
+  hideTestFiles: boolean
+  hideDevFiles: boolean
+  groupByFile: boolean
+  groupByContract: boolean
+  groupByClass: boolean
+  groupByPackage: boolean
+  focusedNodeId: string | null
+}
 
 function persist(): void {
   const f: PersistedFilters = {

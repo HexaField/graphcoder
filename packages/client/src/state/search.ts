@@ -1,7 +1,14 @@
+import type { GraphNode } from '@graphcoder/core'
 import * as api from '../api/graph.js'
 import { setState } from './core.js'
 
 // ── Search ────────────────────────────────────────────────────────────────────
+
+export interface SearchState {
+  searchQuery: string
+  searchResults: { node: GraphNode; score: number }[]
+  isSearching: boolean
+}
 
 /** Run a fuzzy search against the server and update the search results. */
 export async function search(query: string): Promise<void> {

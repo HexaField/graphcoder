@@ -1,10 +1,17 @@
-import type { GraphEdge, GraphNode, ViewMode } from '@graphcoder/core'
+import type { GraphEdge, GraphNode, ProjectStats, ViewMode } from '@graphcoder/core'
 import * as api from '../api/graph.js'
 import { state, setState } from './core.js'
 import { recomputeDiff } from './diff.js'
 import { syncUrlParams, VIEW_MODES } from './url.js'
 
 // ── Project ───────────────────────────────────────────────────────────────────
+
+export interface ProjectState {
+  projectRoot: string | null
+  projectStats: ProjectStats | null
+  isLoading: boolean
+  error: string | null
+}
 
 /**
  * Open a project by root path. Clears any stale graph data before fetching

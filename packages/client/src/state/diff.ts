@@ -1,8 +1,13 @@
-import type { GraphEdge, GraphNode } from '@graphcoder/core'
+import type { ArchDiff, GraphEdge, GraphNode, GraphSnapshot } from '@graphcoder/core'
 import { computeArchDiff } from '@graphcoder/core'
 import { state, setState } from './core.js'
 
 // ── Diff ──────────────────────────────────────────────────────────────────────
+
+export interface DiffState {
+  baseSnapshot: GraphSnapshot | null
+  currentDiff: ArchDiff | null
+}
 
 /** Capture the current graph as the diff baseline. */
 export function captureSnapshot(): void {

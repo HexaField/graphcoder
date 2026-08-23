@@ -6,14 +6,13 @@
  * implementation detail.
  */
 
-// Core state (reactive SolidJS store proxy + setter)
+// Core state (reactive SolidJS store proxy + setter) + composed AppState type
 export { state, setState } from './core.js'
-
-// Section: Graph  (nodes + edges managed by project / view / websocket)
-export { state as graphState } from './graph.js'
+export type { AppState } from './core.js'
 
 // Section: Diff
 export { captureSnapshot, clearDiff } from './diff.js'
+export type { DiffState } from './diff.js'
 
 // Section: Filters & focus
 export {
@@ -30,31 +29,29 @@ export {
   toggleNodeKind,
   visibleGraph
 } from './filters.js'
+export type { FiltersState } from './filters.js'
+
+// Section: Graph  (nodes + edges managed by project / view / websocket)
+export type { GraphState } from './graph.js'
 
 // Section: Project
 export { connectWebSocket, initFromUrl, openProject } from './project.js'
+export type { ProjectState } from './project.js'
 
 // Section: Search
 export { search } from './search.js'
+export type { SearchState } from './search.js'
 
 // Section: Selection
 export { clearSelection, selectNode } from './selection.js'
+export type { SelectionState } from './selection.js'
+
+// Section: Storage  (PersistedFilters lives here — it owns the serialisation schema)
+export type { PersistedFilters } from './storage.js'
 
 // Section: View
 export { setViewMode } from './view.js'
+export type { ViewState } from './view.js'
 
 // Utilities
 export { VIEW_MODES } from './url.js'
-
-// Types (re-exported so consumers don't need to know the internal layout)
-export type {
-  AppState,
-  DiffState,
-  FiltersState,
-  GraphState,
-  PersistedFilters,
-  ProjectState,
-  SearchState,
-  SelectionState,
-  ViewState
-} from './types.js'

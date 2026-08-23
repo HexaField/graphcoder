@@ -1,7 +1,17 @@
 import type { EdgeKind, NodeKind } from '@graphcoder/core'
-import type { PersistedFilters } from './types.js'
 
 const FILTER_KEY = 'graphcoder-filters'
+
+export interface PersistedFilters {
+  hiddenNodeKinds: NodeKind[]
+  hiddenEdgeKinds: EdgeKind[]
+  hideTestFiles: boolean
+  hideDevFiles: boolean
+  groupByFile: boolean
+  groupByContract: boolean
+  groupByClass: boolean
+  groupByPackage: boolean
+}
 
 /** Load persisted filter state from localStorage. Returns partial on missing/corrupt data. */
 export function loadFilters(): Partial<PersistedFilters> {

@@ -6,6 +6,10 @@ import { syncUrlParams } from './url.js'
 
 // ── View ──────────────────────────────────────────────────────────────────────
 
+export interface ViewState {
+  viewMode: ViewMode
+}
+
 /**
  * Switch the active view mode. Fetches the appropriate graph data for the
  * new mode (call-graph and impact-radius operate on the selected node; all

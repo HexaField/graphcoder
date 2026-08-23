@@ -1,8 +1,16 @@
+import type { GraphEdge, GraphNode } from '@graphcoder/core'
+
+// ── Graph ─────────────────────────────────────────────────────────────────────
+
 /**
- * Graph section — nodes and edges are managed directly in the core store
- * and updated by the project, view, and WebSocket sections.
- *
- * This module re-exports `state` and `setState` for consumers that need
- * access to the raw graph data without importing unrelated sections.
+ * Graph state — nodes and edges are managed by the project, view, and
+ * WebSocket sections. This section owns the type definition and re-exports
+ * the core store for consumers that need raw graph access without pulling in
+ * unrelated sections.
  */
+export interface GraphState {
+  nodes: GraphNode[]
+  edges: GraphEdge[]
+}
+
 export { state, setState } from './core.js'
