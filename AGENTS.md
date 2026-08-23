@@ -84,6 +84,22 @@ WebSocket at `ws://localhost:3001/ws`:
 - `NODE_KINDS` from the package enumerates all node types for `getNodesByKind()`
 - `getStats()` returns `{ nodeCount, edgeCount, fileCount }`
 
+## HTTP Bridge
+
+`packages/server/src/codegraph/http-bridge.ts` — custom analysis layer that bridges the HTTP boundary.
+
+CodeGraph cannot link `fetch()` calls to route handlers because the URL is a runtime string. The bridge:
+
+1. Scans all TS/JS source files for `fetch()` calls using a character-level state machine (handles nested `${...}` in template literals without truncation).
+2. Normalises URL templates: strips base-URL variable prefix + API mount path (e.g. `/api`), replaces `/${encodeURIComponent(x)}` → `/:x`, strips query strings and trailing `${params}` suffixes.
+3. Matches normalised (method, path) against route nodes — most-specific routes sorted first (fewer `:param` segments, then longer paths) to mirror Express first-match-wins.
+4. Finds the narrowest containing function/method for the fetch call line via per-file line-range index.
+5. Produces synthetic `Edge` objects with `provenance: 'heuristic'` and `metadata.synthetic: true`.
+
+`GraphService` caches synthetic edges in `this.httpEdges` — refreshed on `open()` and after `POST /sync`. `getAllNodesAndEdges()` merges them (deduped). `getIncomingEdgesAugmented()` / `getOutgoingEdgesAugmented()` augment per-node queries (used by `/nodes/:id`, `/nodes/:id/callers`, `/nodes/:id/callees`).
+
+**Gotcha:** The look-ahead for HTTP method detection is capped at the next `fetch(` occurrence to prevent a later `method: 'POST'` from contaminating earlier same-file fetch calls that have no options object.
+
 ## Client architecture
 
 ```
