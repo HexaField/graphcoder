@@ -78,6 +78,12 @@ export interface FileGroup {
    * Passed through to FileContainer for coloured-border rendering.
    */
   color?: string
+  /**
+   * Package path (e.g. 'packages/client') — triggers 4-tier layout when combined
+   * with filePath. File groups with this set get wrapped in a package compound.
+   * Omit for flat groups (contract groups, package-only groups).
+   */
+  packagePath?: string
 }
 
 /** A rendered container box returned from a grouped layout. */
@@ -94,12 +100,14 @@ export interface FileContainer {
 export interface LayoutResult {
   nodes: Map<string, LayoutNode>
   edges: LayoutEdge[]
-  /** Primary containers (file-level groups or flat contract groups). */
+  /** Primary containers (file-level groups or flat contract/package groups). */
   containers: FileContainer[]
   /** Sub-containers one level inside primary containers (class groups inside file groups). */
   classContainers: FileContainer[]
   /** Directory-level containers — one per unique parent directory of nested groups. */
   dirContainers: FileContainer[]
+  /** Package-level containers — outermost tier when groupByPackage + groupByFile are both on. */
+  packageContainers: FileContainer[]
   width: number
   height: number
 }
@@ -186,6 +194,7 @@ async function layoutFlat(
     containers: [],
     classContainers: [],
     dirContainers: [],
+    packageContainers: [],
     width: maxX,
     height: maxY
   }
@@ -282,13 +291,39 @@ async function layoutGrouped(
 
   // ── Determine layout tier ─────────────────────────────────────────────────
   //
+  // Use 4-tier (package → dir → file → node) when any nested group carries packagePath.
   // Use 3-tier (dir → group → node) when:
   //   - ≥2 meaningful dirs exist among nested groups, OR
   //   - flat groups and nested groups coexist (contract + file together)
   // Otherwise use 2-tier (all groups as direct root compounds).
 
   const meaningfulDirCount = [...dirPathToFiles.keys()].filter((dp) => dp !== '.').length
+  const usePackageTier = nestedGroups.some((fg) => fg.packagePath)
   const useThreeTier = meaningfulDirCount >= 2 || (flatGroups.length > 0 && nestedGroups.length > 0)
+
+  // ── Package mappings (only needed for 4-tier) ─────────────────────────────
+
+  let packagePathToId = new Map<string, string>()
+  let packageIdToLabel = new Map<string, string>()
+  let packageIdSet = new Set<string>()
+  let fileIdToPackageId = new Map<string, string>() // fileGroup id → pkgCompound id
+
+  if (usePackageTier) {
+    let pkgIdx = 0
+    for (const fg of nestedGroups) {
+      if (fg.packagePath && !packagePathToId.has(fg.packagePath)) {
+        const id = `__pkg${pkgIdx++}`
+        packagePathToId.set(fg.packagePath, id)
+        packageIdToLabel.set(id, fg.packagePath.split('/').pop() ?? fg.packagePath)
+      }
+    }
+    for (const fg of nestedGroups) {
+      if (fg.packagePath) {
+        fileIdToPackageId.set(fg.id, packagePathToId.get(fg.packagePath)!)
+      }
+    }
+    packageIdSet = new Set(packageIdToLabel.keys())
+  }
 
   // ── Helper: build a file-level ELK compound node (handles childGroups) ────
 
@@ -399,7 +434,7 @@ async function layoutGrouped(
   // All groups (flat contract + single-dir nested) as direct root compounds.
   // ─────────────────────────────────────────────────────────────────────────
 
-  if (!useThreeTier) {
+  if (!useThreeTier && !usePackageTier) {
     // Edge classification: same-group → group edge map, else → root
     const groupEdgeMap = new Map<string, ElkExtendedEdge[]>()
     const rootEdges2: ElkExtendedEdge[] = []
@@ -479,8 +514,300 @@ async function layoutGrouped(
       containers: flat2Containers,
       classContainers: flat2ClassContainers,
       dirContainers: [],
+      packageContainers: [],
       width: flat2MaxX,
       height: flat2MaxY
+    }
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // 4-TIER PACKAGE LAYOUT
+  // root → [package compounds → dir compounds → file compounds → (class →) nodes]
+  //      → flat contract groups (no package wrapping)
+  //      → ungrouped flat nodes
+  //
+  // Edge routing: same-file → file, same-dir → dir, same-package diff-dir → package,
+  // otherwise → root. Flat group edges stay at flat group level.
+  // ─────────────────────────────────────────────────────────────────────────
+
+  if (usePackageTier) {
+    const pkg4RootEdges: ElkExtendedEdge[] = []
+    const pkg4PackageEdgeMap = new Map<string, ElkExtendedEdge[]>()
+    const pkg4DirEdgeMap = new Map<string, ElkExtendedEdge[]>()
+    const pkg4FileEdgeMap = new Map<string, ElkExtendedEdge[]>()
+    const pkg4FlatEdgeMap = new Map<string, ElkExtendedEdge[]>()
+
+    validEdges.forEach((e, i) => {
+      const id = `e${i}`
+      const elk_edge: ElkExtendedEdge = { id, sources: [e.source], targets: [e.target] }
+      const srcTop = nodeToTopGroup.get(e.source)
+      const tgtTop = nodeToTopGroup.get(e.target)
+
+      if (srcTop !== undefined && srcTop === tgtTop) {
+        const fg = topGroupMap.get(srcTop)!
+        if (fg.filePath) {
+          if (!pkg4FileEdgeMap.has(srcTop)) pkg4FileEdgeMap.set(srcTop, [])
+          pkg4FileEdgeMap.get(srcTop)!.push(elk_edge)
+        } else {
+          if (!pkg4FlatEdgeMap.has(srcTop)) pkg4FlatEdgeMap.set(srcTop, [])
+          pkg4FlatEdgeMap.get(srcTop)!.push(elk_edge)
+        }
+      } else if (srcTop !== undefined && tgtTop !== undefined) {
+        const srcFg = topGroupMap.get(srcTop)!
+        const tgtFg = topGroupMap.get(tgtTop)!
+        if (srcFg.filePath && tgtFg.filePath) {
+          const srcDirId = fileIdToDirId.get(srcTop)
+          const tgtDirId = fileIdToDirId.get(tgtTop)
+          if (srcDirId && tgtDirId && srcDirId === tgtDirId) {
+            if (!pkg4DirEdgeMap.has(srcDirId)) pkg4DirEdgeMap.set(srcDirId, [])
+            pkg4DirEdgeMap.get(srcDirId)!.push(elk_edge)
+          } else {
+            const srcPkgId = fileIdToPackageId.get(srcTop)
+            const tgtPkgId = fileIdToPackageId.get(tgtTop)
+            if (srcPkgId && tgtPkgId && srcPkgId === tgtPkgId) {
+              if (!pkg4PackageEdgeMap.has(srcPkgId)) pkg4PackageEdgeMap.set(srcPkgId, [])
+              pkg4PackageEdgeMap.get(srcPkgId)!.push(elk_edge)
+            } else {
+              pkg4RootEdges.push(elk_edge)
+            }
+          }
+        } else {
+          pkg4RootEdges.push(elk_edge)
+        }
+      } else {
+        pkg4RootEdges.push(elk_edge)
+      }
+    })
+
+    // Build file ELK compounds (same helper as 3-tier)
+    const pkg4FileElkMap = new Map<string, ElkNode>()
+    for (const fg of nestedGroups) {
+      const n = buildFileElkNode(fg, rootDir)
+      if (!n) continue
+      const fe = pkg4FileEdgeMap.get(fg.id)
+      if (fe?.length) n.edges = fe
+      pkg4FileElkMap.set(fg.id, n)
+    }
+
+    // Build dir ELK compounds (per package — may share dir IDs across packages if dirs differ)
+    const pkg4DirElkMap = new Map<string, ElkNode>() // dirId → ElkNode
+    for (const [dp, fgs] of dirPathToFiles) {
+      const dirId = dirPathToId.get(dp)!
+      const children = fgs.map((fg) => pkg4FileElkMap.get(fg.id)).filter((n): n is ElkNode => n !== undefined)
+      if (children.length === 0) continue
+      const dn: ElkNode = {
+        id: dirId,
+        layoutOptions: {
+          'elk.algorithm': 'layered',
+          'elk.direction': perpDir,
+          'elk.hierarchyHandling': 'INCLUDE_CHILDREN',
+          'elk.padding': '[top=30,left=12,bottom=12,right=12]',
+          'elk.spacing.nodeNode': '30',
+          'elk.layered.spacing.nodeNodeBetweenLayers': '40'
+        },
+        children
+      }
+      const de = pkg4DirEdgeMap.get(dirId)
+      if (de?.length) dn.edges = de
+      pkg4DirElkMap.set(dirId, dn)
+    }
+
+    // Build package ELK compounds, each containing its dir compounds
+    // Group dirs by package: packageId → dirIds
+    const pkgIdToDirIds = new Map<string, string[]>()
+    for (const [dp, fgs] of dirPathToFiles) {
+      const dirId = dirPathToId.get(dp)!
+      // Determine package from first file group in this dir
+      const pkgPath = fgs[0]?.packagePath
+      if (!pkgPath) continue // dir without package stays unpacked (added at root below)
+      const pkgId = packagePathToId.get(pkgPath)!
+      if (!pkgIdToDirIds.has(pkgId)) pkgIdToDirIds.set(pkgId, [])
+      pkgIdToDirIds.get(pkgId)!.push(dirId)
+    }
+
+    const pkg4PackageElkNodes: ElkNode[] = []
+    for (const [pkgId, dirIds] of pkgIdToDirIds) {
+      const children = dirIds.map((did) => pkg4DirElkMap.get(did)).filter((n): n is ElkNode => n !== undefined)
+      if (children.length === 0) continue
+      const pn: ElkNode = {
+        id: pkgId,
+        layoutOptions: {
+          'elk.algorithm': 'layered',
+          'elk.direction': perpDir,
+          'elk.hierarchyHandling': 'INCLUDE_CHILDREN',
+          'elk.padding': '[top=44,left=18,bottom=18,right=18]',
+          'elk.spacing.nodeNode': '40',
+          'elk.layered.spacing.nodeNodeBetweenLayers': '60'
+        },
+        children
+      }
+      const pe = pkg4PackageEdgeMap.get(pkgId)
+      if (pe?.length) pn.edges = pe
+      pkg4PackageElkNodes.push(pn)
+    }
+
+    // Dirs not assigned to any package sit at root alongside package compounds
+    const pkg4UnpackedDirElkNodes: ElkNode[] = []
+    for (const [dp, _fgs] of dirPathToFiles) {
+      const dirId = dirPathToId.get(dp)!
+      const pkgPath = _fgs[0]?.packagePath
+      if (!pkgPath) {
+        const dn = pkg4DirElkMap.get(dirId)
+        if (dn) pkg4UnpackedDirElkNodes.push(dn)
+      }
+    }
+
+    // Flat contract groups at root (same as 3-tier)
+    const pkg4FlatElkNodes: ElkNode[] = []
+    for (const fg of flatGroups) {
+      const n = buildFileElkNode(fg, rootDir)
+      if (!n) continue
+      const fe = pkg4FlatEdgeMap.get(fg.id)
+      if (fe?.length) n.edges = fe
+      pkg4FlatElkNodes.push(n)
+    }
+
+    const pkg4Graph: ElkNode = {
+      id: 'root',
+      layoutOptions: {
+        ...LAYOUT_OPTIONS[viewMode],
+        'elk.hierarchyHandling': 'INCLUDE_CHILDREN',
+        'elk.spacing.nodeNode': '100',
+        'elk.layered.spacing.nodeNodeBetweenLayers': '120'
+      },
+      children: [...pkg4PackageElkNodes, ...pkg4UnpackedDirElkNodes, ...pkg4FlatElkNodes, ...ungroupedFlatNodes],
+      edges: pkg4RootEdges
+    }
+
+    const pkg4Layouted = await elk.layout(pkg4Graph)
+
+    // ── Extract positions ───────────────────────────────────────────────────
+
+    const pkg4Nodes = new Map<string, LayoutNode>()
+    const pkg4Containers: FileContainer[] = []
+    const pkg4ClassContainers: FileContainer[] = []
+    const pkg4DirContainers: FileContainer[] = []
+    const pkg4PkgContainers: FileContainer[] = []
+    let pkg4MaxX = 0
+    let pkg4MaxY = 0
+
+    for (const rootChild of pkg4Layouted.children ?? []) {
+      const rx = rootChild.x ?? 0
+      const ry = rootChild.y ?? 0
+      const rw = rootChild.width ?? NODE_WIDTH
+      const rh = rootChild.height ?? NODE_HEIGHT
+      if (rx + rw > pkg4MaxX) pkg4MaxX = rx + rw
+      if (ry + rh > pkg4MaxY) pkg4MaxY = ry + rh
+
+      if (packageIdSet.has(rootChild.id)) {
+        // Package compound
+        const pkgLabel = packageIdToLabel.get(rootChild.id)!
+        pkg4PkgContainers.push({ id: rootChild.id, label: pkgLabel, x: rx, y: ry, width: rw, height: rh })
+
+        for (const dirChild of rootChild.children ?? []) {
+          const dx = rx + (dirChild.x ?? 0)
+          const dy = ry + (dirChild.y ?? 0)
+          const dw = dirChild.width ?? NODE_WIDTH
+          const dh = dirChild.height ?? NODE_HEIGHT
+
+          if (dirIdSet.has(dirChild.id)) {
+            const dp = dirIdToPath.get(dirChild.id)!
+            pkg4DirContainers.push({ id: dirChild.id, label: dirLabel(dp), x: dx, y: dy, width: dw, height: dh })
+
+            for (const fileChild of dirChild.children ?? []) {
+              const fx = dx + (fileChild.x ?? 0)
+              const fy = dy + (fileChild.y ?? 0)
+              const fw = fileChild.width ?? NODE_WIDTH
+              const fh = fileChild.height ?? NODE_HEIGHT
+
+              if (topGroupMap.has(fileChild.id)) {
+                const fg = topGroupMap.get(fileChild.id)!
+                pkg4Containers.push({ id: fileChild.id, label: fg.label, x: fx, y: fy, width: fw, height: fh })
+                extractFileGroupPositions(fileChild, fx, fy, pkg4Nodes, pkg4ClassContainers)
+              } else {
+                pkg4Nodes.set(fileChild.id, { id: fileChild.id, x: fx, y: fy, width: fw, height: fh })
+              }
+            }
+          }
+        }
+      } else if (dirIdSet.has(rootChild.id)) {
+        // Unpacked dir at root (no package)
+        const dp = dirIdToPath.get(rootChild.id)!
+        pkg4DirContainers.push({ id: rootChild.id, label: dirLabel(dp), x: rx, y: ry, width: rw, height: rh })
+        for (const fileChild of rootChild.children ?? []) {
+          const fx = rx + (fileChild.x ?? 0)
+          const fy = ry + (fileChild.y ?? 0)
+          const fw = fileChild.width ?? NODE_WIDTH
+          const fh = fileChild.height ?? NODE_HEIGHT
+          if (topGroupMap.has(fileChild.id)) {
+            const fg = topGroupMap.get(fileChild.id)!
+            pkg4Containers.push({ id: fileChild.id, label: fg.label, x: fx, y: fy, width: fw, height: fh })
+            extractFileGroupPositions(fileChild, fx, fy, pkg4Nodes, pkg4ClassContainers)
+          } else {
+            pkg4Nodes.set(fileChild.id, { id: fileChild.id, x: fx, y: fy, width: fw, height: fh })
+          }
+        }
+      } else if (topGroupMap.has(rootChild.id)) {
+        // Flat contract group at root
+        const fg = topGroupMap.get(rootChild.id)!
+        pkg4Containers.push({ id: rootChild.id, label: fg.label, color: fg.color, x: rx, y: ry, width: rw, height: rh })
+        extractFileGroupPositions(rootChild, rx, ry, pkg4Nodes, pkg4ClassContainers)
+      } else {
+        // Ungrouped flat node
+        pkg4Nodes.set(rootChild.id, { id: rootChild.id, x: rx, y: ry, width: rw, height: rh })
+      }
+    }
+
+    // ── Extract edges ───────────────────────────────────────────────────────
+
+    const pkg4Edges: LayoutEdge[] = []
+    extractEdgeSections(pkg4Layouted, edgeKindMap, pkg4Edges) // root-level
+
+    for (const rootChild of pkg4Layouted.children ?? []) {
+      const rx = rootChild.x ?? 0
+      const ry = rootChild.y ?? 0
+
+      if (packageIdSet.has(rootChild.id)) {
+        if (rootChild.edges?.length) extractEdgeSections(rootChild, edgeKindMap, pkg4Edges, rx, ry)
+        for (const dirChild of rootChild.children ?? []) {
+          const dx = rx + (dirChild.x ?? 0)
+          const dy = ry + (dirChild.y ?? 0)
+          if (dirIdSet.has(dirChild.id)) {
+            if (dirChild.edges?.length) extractEdgeSections(dirChild, edgeKindMap, pkg4Edges, dx, dy)
+            for (const fileChild of dirChild.children ?? []) {
+              if (topGroupMap.has(fileChild.id)) {
+                extractFileGroupEdges(
+                  fileChild,
+                  dx + (fileChild.x ?? 0),
+                  dy + (fileChild.y ?? 0),
+                  edgeKindMap,
+                  pkg4Edges
+                )
+              }
+            }
+          }
+        }
+      } else if (dirIdSet.has(rootChild.id)) {
+        if (rootChild.edges?.length) extractEdgeSections(rootChild, edgeKindMap, pkg4Edges, rx, ry)
+        for (const fileChild of rootChild.children ?? []) {
+          if (topGroupMap.has(fileChild.id)) {
+            extractFileGroupEdges(fileChild, rx + (fileChild.x ?? 0), ry + (fileChild.y ?? 0), edgeKindMap, pkg4Edges)
+          }
+        }
+      } else if (topGroupMap.has(rootChild.id)) {
+        extractFileGroupEdges(rootChild, rx, ry, edgeKindMap, pkg4Edges)
+      }
+    }
+
+    return {
+      nodes: pkg4Nodes,
+      edges: pkg4Edges,
+      containers: pkg4Containers,
+      classContainers: pkg4ClassContainers,
+      dirContainers: pkg4DirContainers,
+      packageContainers: pkg4PkgContainers,
+      width: pkg4MaxX,
+      height: pkg4MaxY
     }
   }
 
@@ -707,6 +1034,7 @@ async function layoutGrouped(
     containers,
     classContainers,
     dirContainers,
+    packageContainers: [],
     width: maxX,
     height: maxY
   }

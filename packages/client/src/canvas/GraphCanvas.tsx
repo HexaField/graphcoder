@@ -12,6 +12,32 @@ import {
   type LayoutResult
 } from '../layout/elk.js'
 import { clearFocus, selectNode, state, visibleGraph } from '../state/store.js'
+
+// ── Package container draw helper ─────────────────────────────────────────────
+
+function drawPackageContainer(target: Container, container: FileContainer, isDark: boolean): void {
+  const { x, y, width, height, label } = container
+  const g = new Graphics()
+
+  // Outermost tier — slightly more prominent than dir containers
+  g.roundRect(0, 0, width, height, 18)
+  g.fill({ color: isDark ? 0x020710 : 0xcdd5e0, alpha: isDark ? 0.5 : 0.35 })
+  g.roundRect(0, 0, width, height, 18)
+  g.stroke({ color: isDark ? 0x1e3a5f : 0x64748b, width: 1.5, alpha: isDark ? 0.6 : 0.45 })
+
+  g.position.set(x, y)
+  target.addChild(g)
+
+  const labelStyle = new TextStyle({
+    fontSize: 11,
+    fill: isDark ? '#4b6a8a' : '#475569',
+    fontFamily: 'monospace',
+    fontWeight: 'bold'
+  })
+  const text = new Text({ text: label.toUpperCase(), style: labelStyle })
+  text.position.set(x + 16, y + 10)
+  target.addChild(text)
+}
 import { resolvedTheme } from '../state/theme.js'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -324,7 +350,8 @@ export const GraphCanvas: Component = () => {
   // We access them in effects already gated by pixiReady().
   let pixiApp: Application | null = null
   let worldContainer: Container | null = null
-  let dirGroupLayer: Container | null = null // directory containers — deepest background
+  let packageGroupLayer: Container | null = null // package containers — outermost background (4-tier)
+  let dirGroupLayer: Container | null = null // directory containers — second background layer
   let groupLayer: Container | null = null // file + contract container boxes
   let classGroupLayer: Container | null = null // class sub-containers (inside file containers)
   let edgeLayer: Container | null = null
@@ -362,13 +389,24 @@ export const GraphCanvas: Component = () => {
    *      sub-group rather than the file group.
    *   3. When ONLY groupByClass is on (no file grouping), class nodes become
    *      top-level groups with filePath — ELK places them inside dir compounds.
+   *   4. Package groups (groupByPackage) wrap dir compounds as the outermost tier
+   *      when combined with groupByFile (4-tier). Without groupByFile they produce
+   *      flat root compounds, one per package.
    */
   const combinedGroups = createMemo((): FileGroup[] | undefined => {
     const gf = state.groupByFile
     const gc = state.groupByClass
     const gct = state.groupByContract
+    const gp = state.groupByPackage
 
-    if (!gf && !gc && !gct) return undefined
+    if (!gf && !gc && !gct && !gp) return undefined
+
+    /** Extract 'packages/server' from 'packages/server/src/routes/graph.ts'. */
+    function extractPackagePath(fp?: string): string | undefined {
+      if (!fp) return undefined
+      const m = fp.match(/^(packages\/[^/]+)/)
+      return m?.[1]
+    }
 
     const visibleNodeIds = new Set(visible().nodes.map((n) => n.id))
 
@@ -453,13 +491,20 @@ export const GraphCanvas: Component = () => {
             label: fileLabel(fn),
             childIds: leafIds,
             childGroups: childGroups.length > 0 ? childGroups : undefined,
-            filePath: fn.filePath
+            filePath: fn.filePath,
+            packagePath: gp ? extractPackagePath(fn.filePath) : undefined
           })
         } else {
           // File groups without class sub-grouping — all descendants as leaves
           const childIds = [...allDesc].filter((id) => visibleNodeIds.has(id))
           if (childIds.length === 0) continue
-          groups.push({ id: fn.id, label: fileLabel(fn), childIds, filePath: fn.filePath })
+          groups.push({
+            id: fn.id,
+            label: fileLabel(fn),
+            childIds,
+            filePath: fn.filePath,
+            packagePath: gp ? extractPackagePath(fn.filePath) : undefined
+          })
         }
       }
     } else if (gc) {
@@ -472,6 +517,29 @@ export const GraphCanvas: Component = () => {
         if (childIds.length === 0) continue
         // filePath → placed inside dir compound by ELK
         groups.push({ id: cn.id, label: cn.name, filePath: cn.filePath, color: '#818cf8', childIds })
+      }
+    }
+
+    // ── 3. Package-only groups (groupByPackage without groupByFile) ────────
+    // When file grouping is also active, packagePath on each file group (above)
+    // triggers the 4-tier ELK path instead. This branch handles the standalone
+    // case — one flat compound per package, all visible package nodes inside it.
+    if (gp && !gf) {
+      const visibleNodes = visible().nodes
+      const pkgMap = new Map<string, string[]>()
+      for (const n of visibleNodes) {
+        if (claimedByContract.has(n.id)) continue
+        const pkg = extractPackagePath(n.filePath)
+        if (!pkg) continue
+        if (!pkgMap.has(pkg)) pkgMap.set(pkg, [])
+        pkgMap.get(pkg)!.push(n.id)
+      }
+      for (const [pkg, childIds] of pkgMap) {
+        if (childIds.length === 0) continue
+        const label = pkg.split('/').pop() ?? pkg
+        // Flat root compound — treated like a contract group (no filePath)
+        // Rendered in groupLayer (neutral file-container style, no color)
+        groups.push({ id: `__pkg_${label}`, label, childIds })
       }
     }
 
@@ -551,13 +619,23 @@ export const GraphCanvas: Component = () => {
   // those without needing a GPU re-upload.
 
   createEffect(() => {
-    if (!pixiReady() || !dirGroupLayer || !groupLayer || !classGroupLayer || !edgeLayer || !nodeLayer) return
+    if (
+      !pixiReady() ||
+      !packageGroupLayer ||
+      !dirGroupLayer ||
+      !groupLayer ||
+      !classGroupLayer ||
+      !edgeLayer ||
+      !nodeLayer
+    )
+      return
     const l = layout()
     const selectedId = state.selectedNodeId
     const overlay = diffOverlay()
     const byId = nodeById()
     const colors = makeColors(resolvedTheme() === 'dark') // reactive: redraws on theme change
 
+    clearContainer(packageGroupLayer)
     clearContainer(dirGroupLayer)
     clearContainer(groupLayer)
     clearContainer(classGroupLayer)
@@ -565,7 +643,12 @@ export const GraphCanvas: Component = () => {
     clearContainer(nodeLayer)
     if (!l) return
 
-    // Draw directory containers (deepest background layer)
+    // Draw package containers (outermost background — 4-tier only)
+    for (const pc of l.packageContainers) {
+      drawPackageContainer(packageGroupLayer, pc, colors.isDark)
+    }
+
+    // Draw directory containers above package backgrounds
     for (const dc of l.dirContainers) {
       drawDirContainer(dirGroupLayer, dc, colors.isDark)
     }
@@ -619,18 +702,20 @@ export const GraphCanvas: Component = () => {
       autoDensity: true
     })
 
-    // Build scene graph: world → [dir containers, file containers, class containers, edges, nodes]
+    // Build scene graph: world → [package, dir, file, class containers, edges, nodes]
     const wc = new Container()
-    const dgl = new Container() // dir group layer — directory bounding boxes (deepest)
+    const pgl = new Container() // package group layer — outermost bounding boxes (4-tier)
+    const dgl = new Container() // dir group layer — directory bounding boxes
     const gl = new Container() // group layer — file + contract container boxes
     const cgl = new Container() // class group layer — class sub-container boxes
     const el = new Container()
     const nl = new Container()
-    wc.addChild(dgl, gl, cgl, el, nl)
+    wc.addChild(pgl, dgl, gl, cgl, el, nl)
     app.stage.addChild(wc)
 
     pixiApp = app
     worldContainer = wc
+    packageGroupLayer = pgl
     dirGroupLayer = dgl
     groupLayer = gl
     classGroupLayer = cgl
@@ -664,6 +749,7 @@ export const GraphCanvas: Component = () => {
       window.removeEventListener('mouseup', onWindowMouseUp)
       pixiApp = null
       worldContainer = null
+      packageGroupLayer = null
       dirGroupLayer = null
       groupLayer = null
       classGroupLayer = null

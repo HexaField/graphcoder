@@ -9,6 +9,7 @@ import {
   toggleGroupByClass,
   toggleGroupByContract,
   toggleGroupByFile,
+  toggleGroupByPackage,
   toggleHideDevFiles,
   toggleHideTestFiles,
   toggleNodeKind
@@ -71,7 +72,8 @@ export const FilterPanel: Component = () => {
       state.hideDevFiles ||
       state.groupByFile ||
       state.groupByContract ||
-      state.groupByClass
+      state.groupByClass ||
+      state.groupByPackage
   )
 
   return (
@@ -154,6 +156,13 @@ export const FilterPanel: Component = () => {
               hover:bg-gray-200 dark:hover:bg-gray-800 transition-colors ${state.groupByContract ? "bg-orange-50 dark:bg-orange-900/20 ring-1 ring-orange-400/60 dark:ring-orange-600/60" : ''}`} onClick={toggleGroupByContract} title={state.groupByContract ? 'Disable contract grouping' : 'Group nodes by API surface (REST, WebSocket, GraphQL…)'} data-testid="filter-scope-group-contracts">
             <span class="w-2.5 h-2.5 rounded-sm flex-shrink-0" style={{ background: '#f97316' }} />
             <span class="text-gray-600 dark:text-gray-300 truncate">group contracts</span>
+          </button>
+
+          {/* group packages — highlighted when active (feature is ON) */}
+          <button class={`flex items-center gap-2 w-full px-2 py-1 rounded text-xs font-mono text-left
+              hover:bg-gray-200 dark:hover:bg-gray-800 transition-colors ${state.groupByPackage ? "bg-sky-50 dark:bg-sky-900/20 ring-1 ring-sky-400/60 dark:ring-sky-600/60" : ''}`} onClick={toggleGroupByPackage} title={state.groupByPackage ? 'Disable package grouping' : 'Group nodes by monorepo package (packages/client, packages/server…)'} data-testid="filter-scope-group-packages">
+            <span class="w-2.5 h-2.5 rounded-sm flex-shrink-0" style={{ background: '#38bdf8' }} />
+            <span class="text-gray-600 dark:text-gray-300 truncate">group packages</span>
           </button>
         </div>
       </div>
