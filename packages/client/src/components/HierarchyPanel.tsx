@@ -103,6 +103,9 @@ function buildTree(nodes: GraphNode[], edges: GraphEdge[]): HierarchyTree {
     if (dir === '') continue
     const pkg = pkgOf(dir)
     if (pkg) {
+      // Skip the package root itself — its files already go to pkg.files via
+      // dirToFiles.get(pkgPath). Adding it as a child dir too creates duplicates.
+      if (dir === pkg) continue
       const list = pkgToDirs.get(pkg) ?? []
       list.push(dir)
       pkgToDirs.set(pkg, list)
