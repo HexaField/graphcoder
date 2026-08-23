@@ -83,7 +83,7 @@ export const DiffPanel: Component = () => {
         data-testid="diff-panel"
       >
         {/* Summary bar */}
-        <div class="flex items-center gap-3 px-3 py-1.5 border-b border-gray-200 dark:border-gray-700 flex-shrink-0">
+        <div class="flex flex-wrap items-center gap-x-3 gap-y-1 px-3 py-1.5 border-b border-gray-200 dark:border-gray-700 flex-shrink-0">
           <span class="text-xs font-semibold text-gray-600 dark:text-gray-300 mr-1">DIFF</span>
 
           {/* Temporal range label — shown when diff came from git comparison */}

@@ -37,8 +37,9 @@ const DrawerToggle = (props: DrawerToggleProps) => {
 // ── App ───────────────────────────────────────────────────────────────────────
 
 export default function App() {
-  const [hierarchyOpen, setHierarchyOpen] = createSignal(true)
-  const [filterOpen, setFilterOpen] = createSignal(true)
+  const [isMobile, setIsMobile] = createSignal(window.innerWidth < 768)
+  const [hierarchyOpen, setHierarchyOpen] = createSignal(!isMobile())
+  const [filterOpen, setFilterOpen] = createSignal(!isMobile())
 
   // Auto-open inspector when a node gets selected
   createEffect(() => {
@@ -52,6 +53,10 @@ export default function App() {
     connectWebSocket()
     void initFromUrl()
 
+    // Track viewport width for responsive panel layout
+    const onResize = () => setIsMobile(window.innerWidth < 768)
+    window.addEventListener('resize', onResize, { passive: true })
+
     // ── Keyboard shortcuts ────────────────────────────────────────────────
     const handleKey = (e: KeyboardEvent) => {
       // Skip when focus is in a text input / select / textarea.
@@ -64,7 +69,11 @@ export default function App() {
           if (state.nodes.length > 0) void toggleGitBar()
           break
         case 'Escape':
-          if (state.gitBarOpen) {
+          if (hierarchyOpen() && isMobile()) {
+            setHierarchyOpen(false)
+          } else if (filterOpen() && isMobile()) {
+            setFilterOpen(false)
+          } else if (state.gitBarOpen) {
             void toggleGitBar()
           } else if (state.currentDiff) {
             clearDiff()
@@ -74,8 +83,21 @@ export default function App() {
     }
 
     document.addEventListener('keydown', handleKey)
-    onCleanup(() => document.removeEventListener('keydown', handleKey))
+    onCleanup(() => {
+      document.removeEventListener('keydown', handleKey)
+      window.removeEventListener('resize', onResize)
+    })
   })
+
+  const openHierarchy = () => {
+    setHierarchyOpen(true)
+    if (isMobile()) setFilterOpen(false)
+  }
+
+  const openFilter = () => {
+    setFilterOpen(true)
+    if (isMobile()) setHierarchyOpen(false)
+  }
 
   return (
     <div class="flex flex-col h-screen bg-gray-50 dark:bg-gray-950 text-gray-900 dark:text-white" data-testid="app">
@@ -90,13 +112,31 @@ export default function App() {
         )}
       </Show>
 
+      {/* Mobile: semi-transparent backdrop behind open overlay panels */}
+      <Show when={isMobile() && (hierarchyOpen() || filterOpen())}>
+        <div
+          class="fixed inset-0 bg-black/40 z-30"
+          onClick={() => {
+            setHierarchyOpen(false)
+            setFilterOpen(false)
+          }}
+        />
+      </Show>
+
       {/* ── Middle row — hierarchy | canvas | filters ── */}
-      <div class="flex flex-1 overflow-hidden min-h-0">
-        {/* Left drawer — hierarchy / explorer panel */}
-        <Show when={hierarchyOpen()}>
-          <HierarchyPanel />
+      <div class="flex flex-1 overflow-hidden min-h-0 relative">
+        {/* Left panel — inline on desktop, fixed overlay on mobile */}
+        <Show when={!isMobile()}>
+          <Show when={hierarchyOpen()}>
+            <HierarchyPanel />
+          </Show>
+          <DrawerToggle side="left" open={hierarchyOpen()} onToggle={() => setHierarchyOpen((v) => !v)} />
         </Show>
-        <DrawerToggle side="left" open={hierarchyOpen()} onToggle={() => setHierarchyOpen((v) => !v)} />
+        <Show when={isMobile() && hierarchyOpen()}>
+          <div class="fixed inset-y-0 left-0 z-40 shadow-2xl flex flex-col" style={{ top: '0', bottom: '0' }}>
+            <HierarchyPanel />
+          </div>
+        </Show>
 
         {/* Centre column — canvas + node inspector at the bottom */}
         <div class="flex flex-col flex-1 overflow-hidden min-h-0">
@@ -106,12 +146,52 @@ export default function App() {
           </Show>
         </div>
 
-        {/* Right drawer — graph parameters panel */}
-        <DrawerToggle side="right" open={filterOpen()} onToggle={() => setFilterOpen((v) => !v)} />
-        <Show when={filterOpen()}>
-          <GraphParamsPanel />
+        {/* Right panel — inline on desktop, fixed overlay on mobile */}
+        <Show when={!isMobile()}>
+          <DrawerToggle side="right" open={filterOpen()} onToggle={() => setFilterOpen((v) => !v)} />
+          <Show when={filterOpen()}>
+            <GraphParamsPanel />
+          </Show>
+        </Show>
+        <Show when={isMobile() && filterOpen()}>
+          <div class="fixed inset-y-0 right-0 z-40 shadow-2xl flex flex-col" style={{ top: '0', bottom: '0' }}>
+            <GraphParamsPanel />
+          </div>
         </Show>
       </div>
+
+      {/* Mobile bottom navigation bar */}
+      <Show when={isMobile()}>
+        <div
+          class="flex items-center justify-around px-2 pt-2 pb-safe bg-gray-100 dark:bg-gray-900 border-t border-gray-200 dark:border-gray-700 flex-shrink-0"
+          style={{ 'padding-bottom': 'max(0.5rem, env(safe-area-inset-bottom))' }}
+        >
+          <button
+            class={`flex flex-col items-center gap-0.5 px-5 py-1.5 rounded-xl text-xs font-medium transition-colors ${
+              hierarchyOpen()
+                ? "bg-blue-100 dark:bg-blue-900/40 text-blue-600 dark:text-blue-400"
+                : "text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200"
+            }`}
+            onClick={() => (hierarchyOpen() ? setHierarchyOpen(false) : openHierarchy())}
+            aria-label="Toggle file explorer"
+          >
+            <span class="text-lg leading-none">🗂</span>
+            <span>Explorer</span>
+          </button>
+          <button
+            class={`flex flex-col items-center gap-0.5 px-5 py-1.5 rounded-xl text-xs font-medium transition-colors ${
+              filterOpen()
+                ? "bg-blue-100 dark:bg-blue-900/40 text-blue-600 dark:text-blue-400"
+                : "text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200"
+            }`}
+            onClick={() => (filterOpen() ? setFilterOpen(false) : openFilter())}
+            aria-label="Toggle graph filters"
+          >
+            <span class="text-lg leading-none">⚙</span>
+            <span>Filters</span>
+          </button>
+        </div>
+      </Show>
 
       {/* ── Bottom — diff panel (full width, outside middle row) ── */}
       <DiffPanel />

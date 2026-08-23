@@ -347,9 +347,78 @@ export const GraphCanvas: Component = () => {
     }
     wrapperRef.addEventListener('wheel', handleWheel, { passive: false })
 
+    // ── Touch: single-finger pan, two-finger pinch-zoom, tap-to-select ─────
+    let activeTouches: Touch[] = []
+    let pinchDist = 0
+    let touchMoved = false
+
+    const handleTouchStart = (e: TouchEvent) => {
+      e.preventDefault()
+      activeTouches = Array.from(e.touches)
+      touchMoved = false
+      if (activeTouches.length === 2) {
+        pinchDist = Math.hypot(
+          activeTouches[0].clientX - activeTouches[1].clientX,
+          activeTouches[0].clientY - activeTouches[1].clientY
+        )
+      }
+    }
+
+    const handleTouchMove = (e: TouchEvent) => {
+      e.preventDefault()
+      const curr = Array.from(e.touches)
+      if (curr.length === 1 && activeTouches.length >= 1) {
+        const dx = curr[0].clientX - activeTouches[0].clientX
+        const dy = curr[0].clientY - activeTouches[0].clientY
+        if (Math.abs(dx) > 3 || Math.abs(dy) > 3) touchMoved = true
+        setCam((c) => ({ ...c, panX: c.panX + dx, panY: c.panY + dy }))
+      } else if (curr.length === 2 && activeTouches.length >= 2) {
+        touchMoved = true
+        const newDist = Math.hypot(curr[0].clientX - curr[1].clientX, curr[0].clientY - curr[1].clientY)
+        if (pinchDist > 0) {
+          const factor = newDist / pinchDist
+          const rect = canvasRef!.getBoundingClientRect()
+          const cx = (curr[0].clientX + curr[1].clientX) / 2 - rect.left
+          const cy = (curr[0].clientY + curr[1].clientY) / 2 - rect.top
+          setCam((c) => ({
+            zoom: c.zoom * factor,
+            panX: cx - (cx - c.panX) * factor,
+            panY: cy - (cy - c.panY) * factor
+          }))
+        }
+        pinchDist = newDist
+      }
+      activeTouches = curr
+    }
+
+    const handleTouchEnd = (e: TouchEvent) => {
+      // Tap-to-select: single touch, minimal movement, all fingers lifted
+      if (!touchMoved && activeTouches.length === 1 && e.touches.length === 0) {
+        const touch = activeTouches[0]
+        const rect = canvasRef!.getBoundingClientRect()
+        const sx = touch.clientX - rect.left
+        const sy = touch.clientY - rect.top
+        const { panX, panY, zoom } = cam()
+        if (r3) {
+          const nodeId = r3.hitTest(sx, sy, panX, panY, zoom)
+          if (nodeId) void selectNode(nodeId)
+          else clearFocus()
+        }
+      }
+      activeTouches = Array.from(e.touches)
+      if (activeTouches.length === 0) touchMoved = false
+    }
+
+    wrapperRef.addEventListener('touchstart', handleTouchStart, { passive: false })
+    wrapperRef.addEventListener('touchmove', handleTouchMove, { passive: false })
+    wrapperRef.addEventListener('touchend', handleTouchEnd)
+
     onCleanup(() => {
       ro.disconnect()
       wrapperRef?.removeEventListener('wheel', handleWheel)
+      wrapperRef?.removeEventListener('touchstart', handleTouchStart)
+      wrapperRef?.removeEventListener('touchmove', handleTouchMove)
+      wrapperRef?.removeEventListener('touchend', handleTouchEnd)
       window.removeEventListener('mousemove', onWindowMouseMove)
       window.removeEventListener('mouseup', onWindowMouseUp)
       renderer.dispose()

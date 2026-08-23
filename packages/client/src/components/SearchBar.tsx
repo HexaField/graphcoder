@@ -4,12 +4,13 @@ import { search, selectNode, setState, state } from '../state/store.js'
 
 export const SearchBar: Component = () => {
   return (
-    <div class="relative" data-testid="search-bar">
+    <div class="relative w-full sm:w-auto" data-testid="search-bar">
       <input
         type="text"
         placeholder="Search symbols…"
         class="bg-white dark:bg-gray-800 text-gray-900 dark:text-white
-          border border-gray-300 dark:border-gray-600 rounded px-3 py-1.5 text-sm w-64
+          border border-gray-300 dark:border-gray-600 rounded px-3 py-1.5 text-sm
+          w-full sm:w-64 min-w-0
           focus:outline-none focus:border-blue-500
           placeholder-gray-400 dark:placeholder-gray-500"
         data-testid="search-input"
@@ -18,13 +19,16 @@ export const SearchBar: Component = () => {
       />
       <Show when={state.searchResults.length > 0}>
         <div
-          class="absolute top-full left-0 w-80 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-600 rounded mt-1 z-50 max-h-64 overflow-auto shadow-lg"
+          class="absolute top-full right-0 sm:left-0 sm:right-auto
+            w-full sm:w-80 min-w-[240px]
+            bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-600
+            rounded mt-1 z-50 max-h-64 overflow-auto shadow-lg"
           data-testid="search-results"
         >
           <For each={state.searchResults}>
             {(result) => (
               <button
-                class="w-full text-left px-3 py-2 hover:bg-gray-100 dark:hover:bg-gray-700 flex items-center gap-2"
+                class="w-full text-left px-3 py-2.5 sm:py-2 hover:bg-gray-100 dark:hover:bg-gray-700 flex items-center gap-2"
                 onClick={() => {
                   void selectNode(result.node.id)
                   setState('searchResults', [])

@@ -14,8 +14,9 @@ export const NodeInspector: Component = () => {
 
   return (
     <div
-      class="flex-shrink-0 bg-gray-50 dark:bg-gray-900 border-t border-gray-200 dark:border-gray-700 flex flex-col"
-      style={{ height: collapsed() ? '28px' : '13rem' }}
+      class={`flex-shrink-0 bg-gray-50 dark:bg-gray-900 border-t border-gray-200 dark:border-gray-700 flex flex-col ${
+        collapsed() ? 'h-7' : "h-[40vh] sm:h-52"
+      }`}
       data-testid="node-inspector"
     >
       <Show
@@ -95,11 +96,11 @@ export const NodeInspector: Component = () => {
               </div>
             </div>
 
-            {/* ── Body (two columns) ── */}
+            {/* ── Body — stacks vertically on mobile, two columns on sm+ ── */}
             <Show when={!collapsed()}>
-              <div class="flex flex-1 overflow-hidden min-h-0">
-                {/* Left — metadata */}
-                <div class="w-72 flex-shrink-0 border-r border-gray-200 dark:border-gray-700 overflow-y-auto px-3 py-2 flex flex-col gap-2">
+              <div class="flex flex-col sm:flex-row flex-1 overflow-auto sm:overflow-hidden min-h-0">
+                {/* Metadata — full width on mobile, left column on sm+ */}
+                <div class="w-full sm:w-72 sm:flex-shrink-0 border-b sm:border-b-0 sm:border-r border-gray-200 dark:border-gray-700 overflow-y-auto px-3 py-2 flex flex-col gap-2">
                   <Show when={detail().node.signature}>
                     <div>
                       <div class="text-[10px] uppercase tracking-wider text-gray-400 dark:text-gray-500 mb-0.5">

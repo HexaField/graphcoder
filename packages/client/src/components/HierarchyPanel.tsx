@@ -400,7 +400,7 @@ const Row: Component<RowProps> = (props) => {
           class={`flex-shrink-0 p-0.5 rounded transition-colors ${
             props.hidden
               ? "text-gray-400 dark:text-gray-500 opacity-100"
-              : "text-gray-300 dark:text-gray-600 opacity-0 group-hover:opacity-100"
+              : "text-gray-300 dark:text-gray-600 opacity-0 group-hover:opacity-100 [@media(hover:none)]:opacity-100"
           } hover:text-gray-700 dark:hover:text-gray-200 hover:bg-gray-200 dark:hover:bg-gray-700`}
           onClick={props.onToggleHide}
           title={props.hidden ? 'Show in graph' : 'Hide from graph'}
@@ -486,11 +486,15 @@ interface CtxMenuProps {
 }
 
 const ContextMenu: Component<CtxMenuProps> = (props) => {
-  const handleOutside = (e: MouseEvent) => {
+  const handleOutside = (e: Event) => {
     if (!(e.target as Element).closest('[data-ctx-menu]')) props.onClose()
   }
   document.addEventListener('mousedown', handleOutside, { capture: true })
-  onCleanup(() => document.removeEventListener('mousedown', handleOutside, { capture: true }))
+  document.addEventListener('touchstart', handleOutside, { capture: true, passive: true })
+  onCleanup(() => {
+    document.removeEventListener('mousedown', handleOutside, { capture: true })
+    document.removeEventListener('touchstart', handleOutside, { capture: true })
+  })
 
   const items: Array<{ label: string; action: () => void }> = [
     {
