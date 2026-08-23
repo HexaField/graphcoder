@@ -14,6 +14,17 @@ function diffStatusStroke(status: DiffStatus): string {
   return 'transparent'
 }
 
+function nodeDiffStatus(
+  semId: string | null,
+  overlay: { added: Set<string>; modified: Set<string>; moved: Set<string> }
+): DiffStatus {
+  if (!semId) return 'none'
+  if (overlay.added.has(semId)) return 'added'
+  if (overlay.modified.has(semId)) return 'modified'
+  if (overlay.moved.has(semId)) return 'moved'
+  return 'none'
+}
+
 // ── Sub-components ────────────────────────────────────────────────────────────
 
 interface NodeRectProps {
@@ -120,7 +131,11 @@ export const GraphCanvas: Component = () => {
   // Memo so that filter/focus changes invalidate the layout exactly once per tick
   const visible = createMemo(visibleGraph)
 
-  // Diff overlay: set of semantic IDs per change type
+  // O(1) node lookup by id — avoids O(n²) find() inside the For factory
+  const nodeById = createMemo(() => new Map(state.nodes.map((n) => [n.id, n])))
+
+  // Diff overlay: set of semantic IDs per change type.
+  // Only computed when a diff is active — skips SHA-256 hashing otherwise.
   const diffOverlay = createMemo(() => {
     const diff = state.currentDiff
     if (!diff) return { added: new Set<string>(), modified: new Set<string>(), moved: new Set<string>() }
@@ -243,20 +258,11 @@ export const GraphCanvas: Component = () => {
         <g data-testid="graph-nodes">
           <For each={layout() ? [...layout()!.nodes.values()] : []}>
             {(node) => {
-              // Lookup in full state.nodes so kind/name are always available
-              const graphNode = state.nodes.find((n) => n.id === node.id)
-              // Resolve diff status via semantic ID
-              const semId = graphNode ? nodeSemanticId(graphNode) : null
-              const overlay = diffOverlay()
-              const diffStatus: DiffStatus = semId
-                ? overlay.added.has(semId)
-                  ? 'added'
-                  : overlay.modified.has(semId)
-                    ? 'modified'
-                    : overlay.moved.has(semId)
-                      ? 'moved'
-                      : 'none'
-                : 'none'
+              // O(1) lookup — nodeById memo is a Map over state.nodes
+              const graphNode = nodeById().get(node.id)
+              // SHA-256 only runs when a diff is active (diffOverlay returns empty Sets otherwise)
+              const semId = state.currentDiff && graphNode ? nodeSemanticId(graphNode) : null
+              const diffStatus = nodeDiffStatus(semId, diffOverlay())
               return (
                 <NodeRect
                   layoutNode={node}

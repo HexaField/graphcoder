@@ -12,27 +12,21 @@ const OP_ORDER: Record<ArchOp['op'], number> = {
   add_edge: 5
 }
 
-function edgeKey(e: EdgeTuple): string {
+export function edgeKey(e: EdgeTuple): string {
   return `${e.source}|${e.target}|${e.kind}`
+}
+
+function opSortKey(op: ArchOp): string {
+  if (op.op === 'add_node') return op.node.id
+  if (op.op === 'remove_node' || op.op === 'modify_node' || op.op === 'move_node') return op.id
+  return edgeKey(op.edge)
 }
 
 export function sortOps(ops: ArchOp[]): ArchOp[] {
   return [...ops].sort((a, b) => {
     const orderDiff = OP_ORDER[a.op] - OP_ORDER[b.op]
     if (orderDiff !== 0) return orderDiff
-    const aKey =
-      a.op === 'add_node'
-        ? a.node.id
-        : a.op === 'remove_node' || a.op === 'modify_node' || a.op === 'move_node'
-          ? a.id
-          : edgeKey(a.edge)
-    const bKey =
-      b.op === 'add_node'
-        ? b.node.id
-        : b.op === 'remove_node' || b.op === 'modify_node' || b.op === 'move_node'
-          ? b.id
-          : edgeKey(b.edge)
-    return aKey.localeCompare(bKey)
+    return opSortKey(a).localeCompare(opSortKey(b))
   })
 }
 
@@ -55,6 +49,9 @@ function toNodeSnapshot(node: GraphSnapshot['nodes'][number], semId: string): No
     typeParameters: node.typeParameters
   }
 }
+
+// Fields that require deep comparison (arrays) vs. scalar equality.
+const ARRAY_FIELDS: ReadonlySet<keyof NodeProps> = new Set(['decorators', 'typeParameters'])
 
 function diffNodeProps(
   base: GraphSnapshot['nodes'][number],
@@ -79,7 +76,8 @@ function diffNodeProps(
   for (const f of fields) {
     const bv = base[f as keyof typeof base]
     const tv = target[f as keyof typeof target]
-    if (JSON.stringify(bv) !== JSON.stringify(tv)) {
+    const equal = ARRAY_FIELDS.has(f) ? JSON.stringify(bv) === JSON.stringify(tv) : bv === tv
+    if (!equal) {
       ;(prev as Record<string, unknown>)[f] = bv
       ;(next as Record<string, unknown>)[f] = tv
       changed = true
@@ -140,15 +138,26 @@ export function computeArchDiff(base: GraphSnapshot, target: GraphSnapshot): Arc
   }
 
   const addedNodes = [...addedSemIds].map((sid) => ({ sid, node: targetMap.get(sid)! }))
-  const removedNodesArr = [...removedSemIds].map((sid) => ({ sid, node: baseMap.get(sid)! }))
+
+  // Pre-bucket removed nodes by `kind|filePath` so rename lookup is O(1) per bucket.
+  const removedByKindFile = new Map<string, Array<{ sid: string; node: (typeof base.nodes)[number] }>>()
+  for (const sid of removedSemIds) {
+    const node = baseMap.get(sid)!
+    const bucket = `${node.kind}|${node.filePath}`
+    let list = removedByKindFile.get(bucket)
+    if (!list) {
+      list = []
+      removedByKindFile.set(bucket, list)
+    }
+    list.push({ sid, node })
+  }
 
   for (const { sid: addedSid, node: addedNode } of addedNodes) {
     const snap = toNodeSnapshot(addedNode, addedSid)
-    const renamedFrom = removedNodesArr.find(
-      ({ node: removedNode }) =>
-        removedNode.kind === addedNode.kind &&
-        removedNode.filePath === addedNode.filePath &&
-        Math.abs(removedNode.startLine - addedNode.startLine) <= 5
+    const bucket = `${addedNode.kind}|${addedNode.filePath}`
+    const candidates = removedByKindFile.get(bucket)
+    const renamedFrom = candidates?.find(
+      ({ node: removedNode }) => Math.abs(removedNode.startLine - addedNode.startLine) <= 5
     )
     if (renamedFrom) {
       snap.properties = { ...snap.properties, renameOf: renamedFrom.sid }

@@ -1,6 +1,7 @@
 import type { GraphEdge, GraphNode, GraphSnapshot } from '../index.js'
 import { nodeSemanticId } from '../identity.js'
 import { snapshotHash } from './hash.js'
+import { edgeKey } from './compute.js'
 import type { ArchDiff, NodeSnapshot } from './types.js'
 
 function snapshotToNode(snap: NodeSnapshot): GraphNode {
@@ -74,7 +75,7 @@ export function applyArchDiff(snapshot: GraphSnapshot, diff: ArchDiff): GraphSna
   const removeEdgeKeys = new Set(
     diff.operations
       .filter((o): o is Extract<typeof o, { op: 'remove_edge' }> => o.op === 'remove_edge')
-      .map((o) => `${o.edge.source}|${o.edge.target}|${o.edge.kind}`)
+      .map((o) => edgeKey(o.edge))
   )
 
   const outputEdgeKeys = new Set<string>()
@@ -83,7 +84,7 @@ export function applyArchDiff(snapshot: GraphSnapshot, diff: ArchDiff): GraphSna
   for (const e of snapshot.edges) {
     const srcSem = cgToSemId.get(e.source) ?? e.source
     const tgtSem = cgToSemId.get(e.target) ?? e.target
-    const key = `${srcSem}|${tgtSem}|${e.kind}`
+    const key = edgeKey({ source: srcSem, target: tgtSem, kind: e.kind })
     if (!removeEdgeKeys.has(key) && !outputEdgeKeys.has(key)) {
       if (outputSemIds.has(srcSem) && outputSemIds.has(tgtSem)) {
         outputEdgeKeys.add(key)
@@ -94,7 +95,7 @@ export function applyArchDiff(snapshot: GraphSnapshot, diff: ArchDiff): GraphSna
 
   for (const op of diff.operations) {
     if (op.op !== 'add_edge') continue
-    const key = `${op.edge.source}|${op.edge.target}|${op.edge.kind}`
+    const key = edgeKey(op.edge)
     if (!outputEdgeKeys.has(key) && outputSemIds.has(op.edge.source) && outputSemIds.has(op.edge.target)) {
       outputEdgeKeys.add(key)
       outputEdges.push({ source: op.edge.source, target: op.edge.target, kind: op.edge.kind })

@@ -1,5 +1,5 @@
 import { computeDiffHash } from './hash.js'
-import type { ArchDiff, ArchOp, NodeProps, NodeSnapshot } from './types.js'
+import type { ArchDiff, ArchOp, NodeProps } from './types.js'
 import { sortOps } from './compute.js'
 
 function opKey(op: ArchOp): string {
@@ -14,10 +14,6 @@ function opKey(op: ArchOp): string {
     case 'remove_edge':
       return `edge:${op.edge.source}|${op.edge.target}|${op.edge.kind}`
   }
-}
-
-function mergeNodeProps(base: NodeSnapshot, delta: Partial<NodeProps>): NodeSnapshot {
-  return { ...base, ...delta }
 }
 
 export function compose(abDiff: ArchDiff, bcDiff: ArchDiff): ArchDiff {
@@ -42,7 +38,7 @@ export function compose(abDiff: ArchDiff, bcDiff: ArchDiff): ArchDiff {
     if (abOp.op === 'add_node' && bcOp.op === 'remove_node' && abOp.node.id === bcOp.id) {
       opsByKey.delete(key)
     } else if (abOp.op === 'add_node' && bcOp.op === 'modify_node' && abOp.node.id === bcOp.id) {
-      opsByKey.set(key, { op: 'add_node', node: mergeNodeProps(abOp.node, bcOp.next) })
+      opsByKey.set(key, { op: 'add_node', node: { ...abOp.node, ...bcOp.next } })
     } else if (abOp.op === 'add_node' && bcOp.op === 'move_node' && abOp.node.id === bcOp.id) {
       opsByKey.set(key, { op: 'add_node', node: { ...abOp.node, filePath: bcOp.to.filePath } })
     } else if (abOp.op === 'modify_node' && bcOp.op === 'modify_node') {

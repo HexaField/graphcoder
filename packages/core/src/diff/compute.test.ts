@@ -1,33 +1,7 @@
 import { describe, expect, it } from 'vitest'
-import type { GraphEdge, GraphNode, GraphSnapshot } from '../index.js'
+import type { GraphSnapshot } from '../index.js'
+import { makeEdge, makeNode } from './fixtures.js'
 import { computeArchDiff } from './compute.js'
-
-function makeNode(
-  id: string,
-  name: string,
-  kind: GraphNode['kind'] = 'function',
-  filePath = 'src/a.ts',
-  extra: Partial<GraphNode> = {}
-): GraphNode {
-  return {
-    id,
-    kind,
-    name,
-    qualifiedName: name,
-    filePath,
-    language: 'typescript',
-    startLine: 1,
-    endLine: 5,
-    startColumn: 0,
-    endColumn: 0,
-    updatedAt: 0,
-    ...extra
-  }
-}
-
-function makeEdge(source: string, target: string, kind: GraphEdge['kind'] = 'calls'): GraphEdge {
-  return { source, target, kind }
-}
 
 describe('computeArchDiff', () => {
   it('returns empty diff for identical snapshots', () => {

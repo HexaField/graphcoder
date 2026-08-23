@@ -19,9 +19,11 @@ export function canonicalJson(value: unknown): string {
 const enc = new TextEncoder()
 
 export function snapshotHash(snapshot: GraphSnapshot): string {
-  const nodes = [...snapshot.nodes]
-    .sort((a, b) => nodeSemanticId(a).localeCompare(nodeSemanticId(b)))
-    .map((n) => ({
+  // Schwartzian transform — compute each semId once, sort by it, then discard.
+  const nodes = snapshot.nodes
+    .map((n) => [nodeSemanticId(n), n] as const)
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([, n]) => ({
       kind: n.kind,
       name: n.name,
       qualifiedName: n.qualifiedName,

@@ -1,25 +1,9 @@
 import { describe, expect, it } from 'vitest'
-import type { GraphNode, GraphSnapshot } from '../index.js'
+import type { GraphSnapshot } from '../index.js'
 import { nodeSemanticId } from '../identity.js'
+import { makeNode } from './fixtures.js'
 import { applyArchDiff } from './apply.js'
 import { computeArchDiff } from './compute.js'
-
-function makeNode(id: string, name: string, filePath = 'src/a.ts', extra: Partial<GraphNode> = {}): GraphNode {
-  return {
-    id,
-    kind: 'function',
-    name,
-    qualifiedName: name,
-    filePath,
-    language: 'typescript',
-    startLine: 1,
-    endLine: 5,
-    startColumn: 0,
-    endColumn: 0,
-    updatedAt: 0,
-    ...extra
-  }
-}
 
 function semIds(snap: GraphSnapshot): Set<string> {
   return new Set(snap.nodes.map(nodeSemanticId))
@@ -49,11 +33,11 @@ describe('applyArchDiff', () => {
 
   it('applies a move correctly', () => {
     const base: GraphSnapshot = {
-      nodes: [makeNode('n1', 'add', 'src/math.ts')],
+      nodes: [makeNode('n1', 'add', 'function', 'src/math.ts')],
       edges: []
     }
     const target: GraphSnapshot = {
-      nodes: [makeNode('n2', 'add', 'src/arithmetic.ts')],
+      nodes: [makeNode('n2', 'add', 'function', 'src/arithmetic.ts')],
       edges: []
     }
     const result = applyArchDiff(base, computeArchDiff(base, target))
@@ -62,11 +46,11 @@ describe('applyArchDiff', () => {
 
   it('applies a modification correctly', () => {
     const base: GraphSnapshot = {
-      nodes: [makeNode('n1', 'foo', 'src/a.ts', { visibility: 'private' })],
+      nodes: [makeNode('n1', 'foo', 'function', 'src/a.ts', { visibility: 'private' })],
       edges: []
     }
     const target: GraphSnapshot = {
-      nodes: [makeNode('n1', 'foo', 'src/a.ts', { visibility: 'public' })],
+      nodes: [makeNode('n1', 'foo', 'function', 'src/a.ts', { visibility: 'public' })],
       edges: []
     }
     const result = applyArchDiff(base, computeArchDiff(base, target))

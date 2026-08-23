@@ -174,6 +174,7 @@ export async function openProject(projectRoot: string): Promise<void> {
     const graph = await api.fetchGraph()
     setState('nodes', graph.nodes)
     setState('edges', graph.edges)
+    recomputeDiff(graph.nodes, graph.edges)
     syncUrlParams()
   } catch (e) {
     setState('error', e instanceof Error ? e.message : 'Failed to open project')
@@ -205,19 +206,24 @@ export async function setViewMode(mode: ViewMode): Promise<void> {
   setState('viewMode', mode)
   syncUrlParams()
   try {
+    let nodes: typeof state.nodes
+    let edges: typeof state.edges
     if (mode === 'call-graph' && state.selectedNodeId) {
       const subgraph = await api.fetchCallGraph(state.selectedNodeId)
-      setState('nodes', subgraph.nodes)
-      setState('edges', subgraph.edges)
+      nodes = subgraph.nodes
+      edges = subgraph.edges
     } else if (mode === 'impact-radius' && state.selectedNodeId) {
       const subgraph = await api.fetchImpactRadius(state.selectedNodeId)
-      setState('nodes', subgraph.nodes)
-      setState('edges', subgraph.edges)
+      nodes = subgraph.nodes
+      edges = subgraph.edges
     } else {
       const graph = await api.fetchGraph()
-      setState('nodes', graph.nodes)
-      setState('edges', graph.edges)
+      nodes = graph.nodes
+      edges = graph.edges
     }
+    setState('nodes', nodes)
+    setState('edges', edges)
+    recomputeDiff(nodes, edges)
   } catch (e) {
     setState('error', e instanceof Error ? e.message : 'Failed to load graph')
   }
@@ -262,6 +268,7 @@ export async function initFromUrl(): Promise<void> {
         const graph = await api.fetchGraph()
         setState('nodes', graph.nodes)
         setState('edges', graph.edges)
+        recomputeDiff(graph.nodes, graph.edges)
         syncUrlParams()
       }
     } catch {
@@ -291,11 +298,11 @@ export function connectWebSocket(): void {
           edges?: GraphEdge[]
         }
         if (data.type === 'graph_snapshot' || data.type === 'graph_update') {
-          const newNodes = data.nodes ?? state.nodes
-          const newEdges = data.edges ?? state.edges
-          if (data.nodes) setState('nodes', newNodes)
-          if (data.edges) setState('edges', newEdges)
-          recomputeDiff(newNodes, newEdges)
+          if (data.nodes) setState('nodes', data.nodes)
+          if (data.edges) setState('edges', data.edges)
+          if (data.nodes || data.edges) {
+            recomputeDiff(data.nodes ?? state.nodes, data.edges ?? state.edges)
+          }
         }
       } catch {
         // ignore malformed messages

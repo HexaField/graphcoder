@@ -23,11 +23,18 @@ function opLabel(op: ArchOp): string {
 }
 
 function opColor(op: ArchOp): string {
-  if (op.op === 'add_node' || op.op === 'add_edge') return 'text-green-400'
-  if (op.op === 'remove_node' || op.op === 'remove_edge') return 'text-red-400'
-  if (op.op === 'modify_node') return 'text-amber-400'
-  if (op.op === 'move_node') return 'text-cyan-400'
-  return 'text-gray-400'
+  switch (op.op) {
+    case 'add_node':
+    case 'add_edge':
+      return 'text-green-400'
+    case 'remove_node':
+    case 'remove_edge':
+      return 'text-red-400'
+    case 'modify_node':
+      return 'text-amber-400'
+    case 'move_node':
+      return 'text-cyan-400'
+  }
 }
 
 // ── Summary counts ────────────────────────────────────────────────────────────
