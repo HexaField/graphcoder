@@ -1,4 +1,11 @@
 @import 'tailwindcss';
+
+/* Tailwind v4: class-based dark mode.
+   The JS `darkMode: 'class'` config has no effect in v4; this variant
+   declaration makes `dark:` utilities activate when .dark exists on any
+   ancestor element instead of relying on prefers-color-scheme. */
+@custom-variant dark (&:where(.dark, .dark *));
+
 * {
   box-sizing: border-box;
 }
