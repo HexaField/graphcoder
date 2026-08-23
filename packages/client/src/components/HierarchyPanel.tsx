@@ -677,17 +677,20 @@ export const HierarchyPanel: Component = () => {
         </div>
 
         {/* ── Exclude patterns ── */}
-        <div class="px-2 py-1.5 border-b border-gray-200 dark:border-gray-700 flex-shrink-0">
+        <div class="px-2 pt-1.5 pb-1 border-b border-gray-200 dark:border-gray-700 flex-shrink-0">
           <input
             type="text"
             class="w-full text-xs font-mono bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-600
               rounded px-2 py-1 text-gray-700 dark:text-gray-300 placeholder-gray-300 dark:placeholder-gray-600
               focus:outline-none focus:ring-1 focus:ring-blue-400 dark:focus:ring-blue-500"
-            placeholder="exclude: *.test.ts, *.spec.*"
+            placeholder="*.test.ts, *.spec.*"
             value={localPatterns()}
             onInput={(e) => handlePatternsChange(e.currentTarget.value)}
             title="Comma-separated glob patterns to exclude from graph. Use * as wildcard."
           />
+          <p class="text-[10px] text-gray-400 dark:text-gray-600 mt-0.5 px-0.5 leading-tight">
+            exclude file patterns · * wildcard · comma separated
+          </p>
         </div>
 
         {/* ── Tree ── */}
