@@ -39,17 +39,17 @@ function nodeDiffStatus(
   return 'none'
 }
 
-/** Destroy all direct children of a container and free GPU resources. */
+/** Destroy all direct children of a container and release GPU resources. */
 function clearContainer(c: Container): void {
   const removed = c.removeChildren()
   for (const child of removed) {
-    child.destroy({ children: true })
+    // true = destroy texture + children recursively
+    child.destroy(true)
   }
 }
 
 // ── Shared text styles ─────────────────────────────────────────────────────────
-// Allocated once per module; reused across every Text object in the scene to
-// share glyph cache and avoid per-text style allocation.
+// Allocated once per module; every Text object shares the glyph cache.
 
 const NAME_STYLE = new TextStyle({ fontSize: 11, fill: 'white', fontFamily: 'monospace' })
 const BADGE_STYLE = new TextStyle({ fontSize: 8, fill: '#6b7280', fontFamily: 'monospace' })
@@ -104,7 +104,7 @@ function drawNode(
   const { x, y, width, height } = layoutNode
   const g = new Graphics()
 
-  // Diff overlay ring (drawn first so it sits behind the node fill)
+  // Diff overlay ring (behind fill)
   if (diffStatus !== 'none') {
     g.roundRect(-3, -3, width + 6, height + 6, 6)
     g.stroke({ color: diffStatusColor(diffStatus), width: 2.5, alpha: 0.85 })
@@ -123,16 +123,16 @@ function drawNode(
   g.position.set(x, y)
   target.addChild(g)
 
-  // Kind badge — right-aligned via anchor
+  // Kind badge — right-aligned
   const badgeStr = graphNode?.kind ?? ''
   if (badgeStr) {
     const badge = new Text({ text: badgeStr, style: BADGE_STYLE })
-    badge.anchor.set(1, 0) // right-top origin
+    badge.anchor.set(1, 0)
     badge.position.set(x + width - 4, y + 2)
     target.addChild(badge)
   }
 
-  // Name label — left edge, vertically centred via anchor
+  // Name label — left edge, vertically centred
   const rawName = graphNode?.name ?? layoutNode.id
   const label = rawName.length > 18 ? `${rawName.slice(0, 16)}…` : rawName
   const nameText = new Text({ text: label, style: NAME_STYLE })
@@ -146,12 +146,16 @@ function drawNode(
 export const GraphCanvas: Component = () => {
   const [layout, setLayout] = createSignal<LayoutResult | null>(null)
   const [isLayouting, setIsLayouting] = createSignal(false)
-  // Camera signal drives both the Pixi world container and the DOM overlay.
-  // All pan/zoom writes go through setCamera; Pixi reads it in a sync effect.
+  // Single source of truth for camera; drives both Pixi world container
+  // and the DOM hit-test overlay via reactive effects.
   const [camera, setCamera] = createSignal({ tx: 0, ty: 0, scale: 1 })
+  // pixiReady gates all Pixi writes. Must be a signal so effects
+  // re-evaluate when Pixi finishes its async init.
   const [pixiReady, setPixiReady] = createSignal(false)
 
   let canvasRef: HTMLCanvasElement | undefined
+  // Plain refs — written once in onMount; never reactive.
+  // We access them in effects that are already gated by pixiReady().
   let worldContainer: Container | null = null
   let edgeLayer: Container | null = null
   let nodeLayer: Container | null = null
@@ -175,9 +179,8 @@ export const GraphCanvas: Component = () => {
     return { added, modified, moved }
   })
 
-  // DOM overlay: one transparent button per node, pixel-positioned to match the
-  // Pixi world. Playwright tests and screen readers use these; all rendering
-  // happens in WebGL. pointer-events: none on the container; auto on each button.
+  // Overlay positions: camera × ELK layout → CSS pixel rects for each node.
+  // Updates on every pan/zoom and every layout change.
   const overlayNodes = createMemo((): OverlayNode[] => {
     const l = layout()
     if (!l) return []
@@ -194,6 +197,8 @@ export const GraphCanvas: Component = () => {
   })
 
   // ── ELK layout effect ───────────────────────────────────────────────────────
+  // Only computes layout. Camera fit lives in a separate effect so it can
+  // wait for pixiReady without coupling to the ELK async lifecycle.
 
   createEffect(async () => {
     const { nodes, edges } = visible()
@@ -206,25 +211,35 @@ export const GraphCanvas: Component = () => {
     try {
       const result = await layoutGraph(nodes, edges, viewMode)
       setLayout(result)
-      // Fit-and-centre camera on every new layout
-      const pad = 40
-      const cw = canvasRef?.clientWidth ?? 800
-      const ch = canvasRef?.clientHeight ?? 600
-      const scale = Math.min(cw / (result.width + pad), ch / (result.height + pad))
-      setCamera({
-        tx: (cw - result.width * scale) / 2,
-        ty: (ch - result.height * scale) / 2,
-        scale
-      })
     } finally {
       setIsLayouting(false)
     }
   })
 
+  // ── Camera fit effect ───────────────────────────────────────────────────────
+  // Fires whenever layout changes AND Pixi has initialised. Separating this
+  // from the ELK effect means the fit is always applied after WebGL is ready,
+  // regardless of which completes first (Pixi init vs ELK).
+
+  createEffect(() => {
+    if (!pixiReady()) return // waits for Pixi; re-runs when it's ready
+    const l = layout()
+    if (!l) return
+    const pad = 40
+    const cw = canvasRef?.clientWidth ?? 800
+    const ch = canvasRef?.clientHeight ?? 600
+    const scale = Math.min(cw / (l.width + pad), ch / (l.height + pad))
+    setCamera({
+      tx: (cw - l.width * scale) / 2,
+      ty: (ch - l.height * scale) / 2,
+      scale
+    })
+  })
+
   // ── Pixi draw effect ────────────────────────────────────────────────────────
   // Full scene redraw on layout, selection, or diff change.
-  // Camera changes alone do NOT trigger a redraw — the camera sync effect
-  // moves worldContainer.position directly (no GPU re-upload needed).
+  // Camera changes alone do NOT trigger this — worldContainer.position handles
+  // those without needing a GPU re-upload.
 
   createEffect(() => {
     if (!pixiReady() || !edgeLayer || !nodeLayer) return
@@ -250,10 +265,11 @@ export const GraphCanvas: Component = () => {
 
   // ── Camera sync ─────────────────────────────────────────────────────────────
   // Keeps the Pixi world container in sync with the camera signal.
-  // Runs on every setCamera call — cheap: just two property writes, no redraws.
+  // Tracks pixiReady() so this fires once on Pixi init (applying whatever
+  // camera value is already set) and on every subsequent setCamera call.
 
   createEffect(() => {
-    if (!worldContainer) return
+    if (!pixiReady() || !worldContainer) return
     const { tx, ty, scale } = camera()
     worldContainer.position.set(tx, ty)
     worldContainer.scale.set(scale)
@@ -274,9 +290,10 @@ export const GraphCanvas: Component = () => {
       autoDensity: true
     })
 
+    // Build scene graph: world → [edges, nodes]
     const wc = new Container()
-    const el = new Container() // edges — drawn before nodes
-    const nl = new Container() // nodes
+    const el = new Container()
+    const nl = new Container()
     wc.addChild(el, nl)
     app.stage.addChild(wc)
 
@@ -284,8 +301,10 @@ export const GraphCanvas: Component = () => {
     edgeLayer = el
     nodeLayer = nl
 
+    // Signal to gated effects that Pixi is now usable
     setPixiReady(true)
 
+    // Wheel zoom — passive:false so we can preventDefault
     const handleWheel = (e: WheelEvent) => {
       e.preventDefault()
       const rect = canvasRef!.getBoundingClientRect()
@@ -313,11 +332,18 @@ export const GraphCanvas: Component = () => {
   })
 
   // ── Pan ──────────────────────────────────────────────────────────────────────
-  // movementX/Y maps 1:1 to tx/ty — no coordinate conversion needed.
-  // Listeners attach to window so fast drags never lose tracking when the cursor
-  // leaves the canvas.
+  // onMouseDown lives on the wrapper div (not the canvas) so it fires for
+  // clicks on both the canvas AND overlay node buttons. Pixi v8 registers its
+  // own pointerdown listener on the canvas which can mask mousedown; the wrapper
+  // div is outside Pixi's event scope so it receives events reliably.
+  //
+  // Distinguishing pan-start from node-click is not needed: if the user
+  // presses + releases without dragging, the camera barely moves and the
+  // button's onClick fires normally. If they drag, click doesn't fire on
+  // the button (browser suppresses click after significant movement).
 
   const onWindowMouseMove = (e: MouseEvent) => {
+    // movementX/Y are in CSS logical pixels — direct 1:1 to camera tx/ty
     setCamera((c) => ({ ...c, tx: c.tx + e.movementX, ty: c.ty + e.movementY }))
   }
 
@@ -335,7 +361,13 @@ export const GraphCanvas: Component = () => {
   // ── Render ───────────────────────────────────────────────────────────────────
 
   return (
-    <div class="relative w-full h-full overflow-hidden select-none" data-testid="graph-canvas">
+    // onMouseDown on wrapper: receives events from canvas AND overlay buttons
+    // onClick/clearFocus stays on canvas so it only fires for background clicks
+    <div
+      class="relative w-full h-full overflow-hidden select-none"
+      data-testid="graph-canvas"
+      onMouseDown={handleMouseDown}
+    >
       <Show when={isLayouting()}>
         <div class="absolute inset-0 flex items-center justify-center text-gray-400 z-10 pointer-events-none">
           <span>Computing layout…</span>
@@ -347,20 +379,15 @@ export const GraphCanvas: Component = () => {
         </div>
       </Show>
 
-      {/* WebGL canvas — all rendering lives here. data-testid="graph-svg" kept
-          for backward-compat with E2E tests that assert the element exists. */}
-      <canvas
-        ref={canvasRef}
-        class="block w-full h-full"
-        data-testid="graph-svg"
-        onMouseDown={handleMouseDown}
-        onClick={clearFocus}
-      />
+      {/* WebGL canvas — all rendering.
+          data-testid="graph-svg" kept for E2E backward compat.
+          onClick handles background-click → clearFocus (node buttons use
+          stopPropagation so they don't trigger this). */}
+      <canvas ref={canvasRef} class="block w-full h-full" data-testid="graph-svg" onClick={clearFocus} />
 
-      {/* Invisible hit-test overlay.
-          The container is pointer-events:none so background clicks pass through
-          to the canvas. Each button is pointer-events:auto so tests and screen
-          readers can interact with individual nodes. */}
+      {/* Invisible DOM overlay: one transparent button per node.
+          Container is pointer-events:none (background clicks reach canvas).
+          Each button is pointer-events:auto for tests + screen readers. */}
       <div class="absolute inset-0 overflow-hidden pointer-events-none">
         <For each={overlayNodes()}>
           {(n) => (
