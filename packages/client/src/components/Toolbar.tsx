@@ -2,7 +2,29 @@ import type { Component } from 'solid-js'
 import { createSignal, For, Show } from 'solid-js'
 import type { ViewMode } from '@graphcoder/core'
 import { captureSnapshot, clearDiff, openProject, setViewMode, state } from '../state/store.js'
+import { cycleTheme, theme } from '../state/theme.js'
 import { SearchBar } from './SearchBar.js'
+
+// ── Theme toggle ───────────────────────────────────────────────────────────────
+
+const THEME_ICONS = { light: '☀', dark: '◑', system: '⊙' } as const
+const THEME_LABELS = { light: 'Light', dark: 'Dark', system: 'Auto' } as const
+
+const ThemeToggle: Component = () => (
+  <button
+    class="flex items-center gap-1 text-xs px-2 py-1 rounded border
+      border-gray-200 dark:border-gray-700
+      text-gray-600 dark:text-gray-400
+      hover:bg-gray-100 dark:hover:bg-gray-800
+      hover:text-gray-900 dark:hover:text-white transition-colors"
+    onClick={cycleTheme}
+    title={`Theme: ${THEME_LABELS[theme()]} — click to cycle`}
+    data-testid="theme-toggle"
+  >
+    <span>{THEME_ICONS[theme()]}</span>
+    <span class="hidden sm:inline">{THEME_LABELS[theme()]}</span>
+  </button>
+)
 
 // ── Project path input ─────────────────────────────────────────────────────
 
@@ -20,7 +42,9 @@ const ProjectInput: Component = () => {
       <input
         type="text"
         placeholder="Project path…"
-        class="bg-gray-800 text-white border border-gray-600 rounded px-3 py-1.5 text-sm w-64 focus:outline-none focus:border-blue-500"
+        class="bg-white dark:bg-gray-800 text-gray-900 dark:text-white
+          border border-gray-300 dark:border-gray-600 rounded px-3 py-1.5 text-sm w-64
+          focus:outline-none focus:border-blue-500 placeholder-gray-400 dark:placeholder-gray-500"
         data-testid="project-path-input"
         value={path()}
         onInput={(e) => setPath(e.currentTarget.value)}
@@ -51,7 +75,9 @@ const ViewModeSwitcher: Component = () => {
         {({ mode, label }) => (
           <button
             class={`px-3 py-1 text-sm rounded ${
-              state.viewMode === mode ? "bg-blue-600 text-white" : "text-gray-400 hover:text-white hover:bg-gray-700"
+              state.viewMode === mode
+                ? "bg-blue-600 text-white"
+                : "text-gray-500 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white hover:bg-gray-200 dark:hover:bg-gray-700"
             }`}
             data-testid={`view-mode-${mode}`}
             onClick={() => void setViewMode(mode)}
@@ -68,17 +94,20 @@ const ViewModeSwitcher: Component = () => {
 
 export const Toolbar: Component = () => {
   return (
-    <div class="flex items-center gap-3 px-4 py-2 bg-gray-900 border-b border-gray-700" data-testid="toolbar">
-      <span class="text-white font-semibold text-sm">GraphCoder</span>
-      <div class="h-4 border-l border-gray-600" />
+    <div
+      class="flex items-center gap-3 px-4 py-2 bg-gray-100 dark:bg-gray-900 border-b border-gray-200 dark:border-gray-700"
+      data-testid="toolbar"
+    >
+      <span class="text-gray-900 dark:text-white font-semibold text-sm">GraphCoder</span>
+      <div class="h-4 border-l border-gray-300 dark:border-gray-600" />
 
       <ProjectInput />
 
-      <div class="h-4 border-l border-gray-600" />
+      <div class="h-4 border-l border-gray-300 dark:border-gray-600" />
 
       <ViewModeSwitcher />
 
-      <div class="h-4 border-l border-gray-600" />
+      <div class="h-4 border-l border-gray-300 dark:border-gray-600" />
 
       {/* Diff controls */}
       <Show when={state.nodes.length > 0}>
@@ -86,7 +115,9 @@ export const Toolbar: Component = () => {
           when={state.baseSnapshot}
           fallback={
             <button
-              class="text-xs px-2 py-1 rounded border border-gray-600 text-gray-300 hover:bg-gray-700 hover:text-white"
+              class="text-xs px-2 py-1 rounded border border-gray-300 dark:border-gray-600
+                text-gray-600 dark:text-gray-300
+                hover:bg-gray-200 dark:hover:bg-gray-700 hover:text-gray-900 dark:hover:text-white"
               onClick={captureSnapshot}
               data-testid="snapshot-btn"
               title="Capture current graph as diff baseline"
@@ -95,9 +126,11 @@ export const Toolbar: Component = () => {
             </button>
           }
         >
-          <span class="text-xs text-blue-400 font-mono">diff active</span>
+          <span class="text-xs text-blue-500 dark:text-blue-400 font-mono">diff active</span>
           <button
-            class="text-xs px-2 py-1 rounded border border-gray-700 text-gray-400 hover:text-red-400 hover:border-red-700"
+            class="text-xs px-2 py-1 rounded border border-gray-300 dark:border-gray-700
+              text-gray-500 dark:text-gray-400
+              hover:text-red-600 dark:hover:text-red-400 hover:border-red-400 dark:hover:border-red-700"
             onClick={clearDiff}
             data-testid="clear-diff-toolbar-btn"
           >
@@ -106,13 +139,14 @@ export const Toolbar: Component = () => {
         </Show>
       </Show>
 
-      <div class="ml-auto">
+      <div class="ml-auto flex items-center gap-3">
         <SearchBar />
+        <ThemeToggle />
       </div>
 
       <Show when={state.projectStats}>
         {(stats) => (
-          <div class="text-xs text-gray-400" data-testid="project-stats">
+          <div class="text-xs text-gray-500 dark:text-gray-400" data-testid="project-stats">
             {stats().nodeCount} nodes · {stats().edgeCount} edges · {stats().fileCount} files
           </div>
         )}

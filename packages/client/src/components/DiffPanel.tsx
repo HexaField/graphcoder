@@ -26,14 +26,14 @@ function opColor(op: ArchOp): string {
   switch (op.op) {
     case 'add_node':
     case 'add_edge':
-      return 'text-green-400'
+      return 'text-green-500'
     case 'remove_node':
     case 'remove_edge':
-      return 'text-red-400'
+      return 'text-red-500'
     case 'modify_node':
-      return 'text-amber-400'
+      return 'text-amber-500'
     case 'move_node':
-      return 'text-cyan-400'
+      return 'text-cyan-500'
   }
 }
 
@@ -78,13 +78,13 @@ export const DiffPanel: Component = () => {
   return (
     <Show when={diff()}>
       <div
-        class="flex-shrink-0 bg-gray-900 border-t border-gray-700 flex flex-col"
+        class="flex-shrink-0 bg-gray-50 dark:bg-gray-900 border-t border-gray-200 dark:border-gray-700 flex flex-col"
         style={{ 'max-height': expanded() ? '192px' : '36px' }}
         data-testid="diff-panel"
       >
         {/* Summary bar */}
-        <div class="flex items-center gap-3 px-3 py-1.5 border-b border-gray-700 flex-shrink-0">
-          <span class="text-xs font-semibold text-gray-300 mr-1">DIFF</span>
+        <div class="flex items-center gap-3 px-3 py-1.5 border-b border-gray-200 dark:border-gray-700 flex-shrink-0">
+          <span class="text-xs font-semibold text-gray-600 dark:text-gray-300 mr-1">DIFF</span>
 
           <Show when={summary().added > 0}>
             <span class="text-xs text-green-400">+{summary().added} added</span>
@@ -107,14 +107,14 @@ export const DiffPanel: Component = () => {
 
           <div class="ml-auto flex items-center gap-2">
             <button
-              class="text-xs text-gray-400 hover:text-white px-2 py-0.5 rounded hover:bg-gray-700"
+              class="text-xs text-gray-500 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white px-2 py-0.5 rounded hover:bg-gray-200 dark:hover:bg-gray-700"
               onClick={() => setExpanded((v) => !v)}
               data-testid="diff-toggle"
             >
               {expanded() ? '▾ collapse' : '▸ expand'}
             </button>
             <button
-              class="text-xs text-gray-400 hover:text-red-400 px-2 py-0.5 rounded hover:bg-gray-800"
+              class="text-xs text-gray-500 dark:text-gray-400 hover:text-red-600 dark:hover:text-red-400 px-2 py-0.5 rounded hover:bg-gray-200 dark:hover:bg-gray-800"
               onClick={clearDiff}
               data-testid="clear-diff-btn"
             >

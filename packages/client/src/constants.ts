@@ -1,6 +1,6 @@
 import type { EdgeKind, NodeKind } from '@graphcoder/core'
 
-// ── Node kind colours ─────────────────────────────────────────────────────────
+// ── Node kind colours — dark ──────────────────────────────────────────────────
 
 export const NODE_KIND_FILL: Record<NodeKind, string> = {
   file: '#374151',
@@ -28,11 +28,40 @@ export const NODE_KIND_FILL: Record<NodeKind, string> = {
   union: '#2d3748'
 }
 
-export function nodeKindColor(kind: string | undefined): string {
-  return NODE_KIND_FILL[(kind as NodeKind) ?? ''] ?? '#1f2937'
+// ── Node kind colours — light ─────────────────────────────────────────────────
+
+export const NODE_KIND_FILL_LIGHT: Record<NodeKind, string> = {
+  file: '#dde6f0',
+  module: '#dde6f0',
+  class: '#ede9fe',
+  struct: '#ede9fe',
+  interface: '#ccfbf1',
+  trait: '#ccfbf1',
+  protocol: '#ccfbf1',
+  function: '#dbeafe',
+  method: '#dbeafe',
+  property: '#fef9c3',
+  field: '#fef9c3',
+  variable: '#dcfce7',
+  constant: '#dcfce7',
+  enum: '#fce7f3',
+  enum_member: '#fce7f3',
+  type_alias: '#e8ecf0',
+  namespace: '#e0f2fe',
+  parameter: '#e8ecf0',
+  import: '#f0fdf4',
+  export: '#f0fdf4',
+  route: '#dbeafe',
+  component: '#dbeafe',
+  union: '#e8ecf0'
 }
 
-// ── Edge kind colours ─────────────────────────────────────────────────────────
+export function nodeKindColor(kind: string | undefined, dark = true): string {
+  const map = dark ? NODE_KIND_FILL : NODE_KIND_FILL_LIGHT
+  return map[(kind as NodeKind) ?? ''] ?? (dark ? '#1f2937' : '#dde6f0')
+}
+
+// ── Edge kind colours — dark ──────────────────────────────────────────────────
 
 export const EDGE_KIND_STROKE: Record<EdgeKind, string> = {
   contains: '#4b5563',
@@ -49,6 +78,25 @@ export const EDGE_KIND_STROKE: Record<EdgeKind, string> = {
   decorates: '#ec4899'
 }
 
-export function edgeKindColor(kind: string | undefined): string {
-  return EDGE_KIND_STROKE[(kind as EdgeKind) ?? ''] ?? '#4b5563'
+// ── Edge kind colours — light ─────────────────────────────────────────────────
+// Slightly darker / more saturated where the dark palette was too muted on white.
+
+export const EDGE_KIND_STROKE_LIGHT: Record<EdgeKind, string> = {
+  contains: '#64748b',
+  calls: '#2563eb',
+  imports: '#64748b',
+  exports: '#64748b',
+  extends: '#7c3aed',
+  implements: '#7c3aed',
+  references: '#4b5563',
+  type_of: '#1d4ed8',
+  returns: '#059669',
+  instantiates: '#d97706',
+  overrides: '#ea580c',
+  decorates: '#db2777'
+}
+
+export function edgeKindColor(kind: string | undefined, dark = true): string {
+  const map = dark ? EDGE_KIND_STROKE : EDGE_KIND_STROKE_LIGHT
+  return map[(kind as EdgeKind) ?? ''] ?? (dark ? '#4b5563' : '#64748b')
 }

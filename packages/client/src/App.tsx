@@ -5,6 +5,8 @@ import { FilterPanel } from './components/FilterPanel.js'
 import { NodeInspector } from './components/NodeInspector.js'
 import { Toolbar } from './components/Toolbar.js'
 import { connectWebSocket, initFromUrl, state } from './state/store.js'
+// Import theme module to ensure the root-level createRoot runs on startup
+import './state/theme.js'
 
 // Thin toggle-strip button shared by both drawers
 interface DrawerToggleProps {
@@ -21,8 +23,9 @@ const DrawerToggle = (props: DrawerToggleProps) => {
   }
   const border = props.side === 'left' ? 'border-r' : 'border-l'
   return (
-    <button class={`w-5 flex-shrink-0 bg-gray-900 ${border} border-gray-700 flex items-center justify-center
-        hover:bg-gray-800 text-gray-500 hover:text-gray-300 transition-colors`} onClick={props.onToggle} title={props.open ? 'Close panel' : 'Open panel'}>
+    <button class={`w-5 flex-shrink-0 bg-gray-100 dark:bg-gray-900 ${border} border-gray-200 dark:border-gray-700
+        flex items-center justify-center hover:bg-gray-200 dark:hover:bg-gray-800
+        text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 transition-colors`} onClick={props.onToggle} title={props.open ? 'Close panel' : 'Open panel'}>
       <span class="text-xs leading-none">{arrow()}</span>
     </button>
   )
@@ -43,9 +46,13 @@ export default function App() {
   })
 
   return (
-    <div class="flex flex-col h-screen bg-gray-950 text-white" data-testid="app">
+    <div class="flex flex-col h-screen bg-gray-50 dark:bg-gray-950 text-gray-900 dark:text-white" data-testid="app">
       <Toolbar />
-      <Show when={state.error}>{(err) => <div class="bg-red-900 text-red-200 px-4 py-2 text-sm">{err()}</div>}</Show>
+      <Show when={state.error}>
+        {(err) => (
+          <div class="bg-red-100 dark:bg-red-900 text-red-800 dark:text-red-200 px-4 py-2 text-sm">{err()}</div>
+        )}
+      </Show>
       <div class="flex flex-1 overflow-hidden">
         {/* Left drawer — filter panel */}
         <Show when={filterOpen()}>

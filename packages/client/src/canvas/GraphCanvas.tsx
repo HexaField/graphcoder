@@ -5,6 +5,7 @@ import { nodeSemanticId } from '@graphcoder/core'
 import { edgeKindColor, nodeKindColor } from '../constants.js'
 import { layoutGraph, type LayoutEdge, type LayoutNode, type LayoutResult } from '../layout/elk.js'
 import { clearFocus, selectNode, state, visibleGraph } from '../state/store.js'
+import { resolvedTheme } from '../state/theme.js'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -17,6 +18,12 @@ interface OverlayNode {
   top: number
   width: number
   height: number
+}
+
+interface DrawColors {
+  isDark: boolean
+  nameStyle: TextStyle
+  badgeStyle: TextStyle
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -43,20 +50,28 @@ function nodeDiffStatus(
 function clearContainer(c: Container): void {
   const removed = c.removeChildren()
   for (const child of removed) {
-    // true = destroy texture + children recursively
-    child.destroy(true)
+    child.destroy(true) // true = destroy textures + children recursively
   }
 }
 
-// ── Shared text styles ─────────────────────────────────────────────────────────
-// Allocated once per module; every Text object shares the glyph cache.
+// ── Shared text styles — two variants, allocated once per module ───────────────
 
-const NAME_STYLE = new TextStyle({ fontSize: 11, fill: 'white', fontFamily: 'monospace' })
-const BADGE_STYLE = new TextStyle({ fontSize: 8, fill: '#6b7280', fontFamily: 'monospace' })
+const NAME_STYLE_DARK = new TextStyle({ fontSize: 11, fill: '#ffffff', fontFamily: 'monospace' })
+const NAME_STYLE_LIGHT = new TextStyle({ fontSize: 11, fill: '#0f172a', fontFamily: 'monospace' })
+const BADGE_STYLE_DARK = new TextStyle({ fontSize: 8, fill: '#9ca3af', fontFamily: 'monospace' })
+const BADGE_STYLE_LIGHT = new TextStyle({ fontSize: 8, fill: '#475569', fontFamily: 'monospace' })
+
+function makeColors(isDark: boolean): DrawColors {
+  return {
+    isDark,
+    nameStyle: isDark ? NAME_STYLE_DARK : NAME_STYLE_LIGHT,
+    badgeStyle: isDark ? BADGE_STYLE_DARK : BADGE_STYLE_LIGHT
+  }
+}
 
 // ── Draw functions ────────────────────────────────────────────────────────────
 
-function drawEdge(target: Container, edge: LayoutEdge): void {
+function drawEdge(target: Container, edge: LayoutEdge, colors: DrawColors): void {
   const pts: number[] = []
   for (const section of edge.sections) {
     pts.push(section.startPoint.x, section.startPoint.y)
@@ -67,7 +82,7 @@ function drawEdge(target: Container, edge: LayoutEdge): void {
   }
   if (pts.length < 4) return
 
-  const color = edgeKindColor(edge.kind)
+  const color = edgeKindColor(edge.kind, colors.isDark)
   const g = new Graphics()
 
   // Polyline
@@ -99,9 +114,11 @@ function drawNode(
   layoutNode: LayoutNode,
   graphNode: GraphNode | undefined,
   selected: boolean,
-  diffStatus: DiffStatus
+  diffStatus: DiffStatus,
+  colors: DrawColors
 ): void {
   const { x, y, width, height } = layoutNode
+  const { isDark, nameStyle, badgeStyle } = colors
   const g = new Graphics()
 
   // Diff overlay ring (behind fill)
@@ -112,7 +129,7 @@ function drawNode(
 
   // Node background
   g.roundRect(0, 0, width, height, 4)
-  g.fill(nodeKindColor(graphNode?.kind))
+  g.fill(nodeKindColor(graphNode?.kind, isDark))
 
   // Selection border — re-define path so fill and stroke stay independent
   if (selected) {
@@ -126,7 +143,7 @@ function drawNode(
   // Kind badge — right-aligned
   const badgeStr = graphNode?.kind ?? ''
   if (badgeStr) {
-    const badge = new Text({ text: badgeStr, style: BADGE_STYLE })
+    const badge = new Text({ text: badgeStr, style: badgeStyle })
     badge.anchor.set(1, 0)
     badge.position.set(x + width - 4, y + 2)
     target.addChild(badge)
@@ -135,7 +152,7 @@ function drawNode(
   // Name label — left edge, vertically centred
   const rawName = graphNode?.name ?? layoutNode.id
   const label = rawName.length > 18 ? `${rawName.slice(0, 16)}…` : rawName
-  const nameText = new Text({ text: label, style: NAME_STYLE })
+  const nameText = new Text({ text: label, style: nameStyle })
   nameText.anchor.set(0, 0.5)
   nameText.position.set(x + 8, y + height / 2)
   target.addChild(nameText)
@@ -155,7 +172,8 @@ export const GraphCanvas: Component = () => {
 
   let canvasRef: HTMLCanvasElement | undefined
   // Plain refs — written once in onMount; never reactive.
-  // We access them in effects that are already gated by pixiReady().
+  // We access them in effects already gated by pixiReady().
+  let pixiApp: Application | null = null
   let worldContainer: Container | null = null
   let edgeLayer: Container | null = null
   let nodeLayer: Container | null = null
@@ -236,8 +254,17 @@ export const GraphCanvas: Component = () => {
     })
   })
 
+  // ── Pixi background effect ──────────────────────────────────────────────────
+  // Updates the WebGL clear color when the resolved theme changes.
+
+  createEffect(() => {
+    if (!pixiReady() || !pixiApp) return
+    const isDark = resolvedTheme() === 'dark'
+    pixiApp.renderer.background.color = isDark ? 0x030712 : 0xf1f5f9
+  })
+
   // ── Pixi draw effect ────────────────────────────────────────────────────────
-  // Full scene redraw on layout, selection, or diff change.
+  // Full scene redraw on layout, selection, diff change, or theme change.
   // Camera changes alone do NOT trigger this — worldContainer.position handles
   // those without needing a GPU re-upload.
 
@@ -247,19 +274,20 @@ export const GraphCanvas: Component = () => {
     const selectedId = state.selectedNodeId
     const overlay = diffOverlay()
     const byId = nodeById()
+    const colors = makeColors(resolvedTheme() === 'dark') // reactive: redraws on theme change
 
     clearContainer(edgeLayer)
     clearContainer(nodeLayer)
     if (!l) return
 
     for (const edge of l.edges) {
-      drawEdge(edgeLayer, edge)
+      drawEdge(edgeLayer, edge, colors)
     }
     for (const layoutNode of l.nodes.values()) {
       const graphNode = byId.get(layoutNode.id)
       const semId = state.currentDiff && graphNode ? nodeSemanticId(graphNode) : null
       const diffStatus = nodeDiffStatus(semId, overlay)
-      drawNode(nodeLayer, layoutNode, graphNode, selectedId === layoutNode.id, diffStatus)
+      drawNode(nodeLayer, layoutNode, graphNode, selectedId === layoutNode.id, diffStatus, colors)
     }
   })
 
@@ -280,11 +308,12 @@ export const GraphCanvas: Component = () => {
   onMount(async () => {
     if (!canvasRef) return
 
+    const isDark = resolvedTheme() === 'dark'
     const app = new Application()
     await app.init({
       canvas: canvasRef,
       resizeTo: canvasRef.parentElement ?? undefined,
-      background: '#030712', // gray-950
+      background: isDark ? 0x030712 : 0xf1f5f9,
       antialias: true,
       resolution: window.devicePixelRatio || 1,
       autoDensity: true
@@ -297,6 +326,7 @@ export const GraphCanvas: Component = () => {
     wc.addChild(el, nl)
     app.stage.addChild(wc)
 
+    pixiApp = app
     worldContainer = wc
     edgeLayer = el
     nodeLayer = nl
@@ -324,6 +354,7 @@ export const GraphCanvas: Component = () => {
       canvasRef?.removeEventListener('wheel', handleWheel)
       window.removeEventListener('mousemove', onWindowMouseMove)
       window.removeEventListener('mouseup', onWindowMouseUp)
+      pixiApp = null
       worldContainer = null
       edgeLayer = null
       nodeLayer = null
@@ -369,12 +400,12 @@ export const GraphCanvas: Component = () => {
       onMouseDown={handleMouseDown}
     >
       <Show when={isLayouting()}>
-        <div class="absolute inset-0 flex items-center justify-center text-gray-400 z-10 pointer-events-none">
+        <div class="absolute inset-0 flex items-center justify-center text-gray-500 dark:text-gray-400 z-10 pointer-events-none">
           <span>Computing layout…</span>
         </div>
       </Show>
       <Show when={state.nodes.length === 0 && !state.isLoading}>
-        <div class="absolute inset-0 flex items-center justify-center text-gray-500 pointer-events-none">
+        <div class="absolute inset-0 flex items-center justify-center text-gray-400 dark:text-gray-500 pointer-events-none">
           <span>No project open. Enter a project path above.</span>
         </div>
       </Show>

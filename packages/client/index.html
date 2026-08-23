@@ -5,6 +5,15 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="theme-color" content="#000000" />
     <title>GraphCoder</title>
+    <!-- Apply theme class before first paint to prevent flash of unstyled content -->
+    <script>
+      ;(function () {
+        var t = localStorage.getItem('graphcoder-theme') || 'system'
+        if (t === 'dark' || (t === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
+          document.documentElement.classList.add('dark')
+        }
+      })()
+    </script>
   </head>
   <body>
     <noscript>You need to enable JavaScript to run this app.</noscript>
