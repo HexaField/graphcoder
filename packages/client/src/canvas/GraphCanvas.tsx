@@ -405,6 +405,50 @@ export const GraphCanvas: Component = () => {
   })
 
   /**
+   * Class groups for structural method layout. Each class node with at least one
+   * visible `contains` child becomes a compound container. Only active when
+   * groupByClass is on and groupByFile is off (file mode keeps classes as nodes
+   * inside file containers and doesn't need a separate class grouping layer).
+   */
+  const classGroups = createMemo((): FileGroup[] | undefined => {
+    if (!state.groupByClass || state.groupByFile) return undefined
+
+    const visibleNodeIds = new Set(visible().nodes.map((n) => n.id))
+
+    // One-level contains-children index (class → direct children only).
+    // Methods and properties are always direct children of their class in codegraph.
+    const containsChildren = new Map<string, string[]>()
+    for (const e of state.edges) {
+      if (e.kind !== 'contains') continue
+      let children = containsChildren.get(e.source)
+      if (!children) containsChildren.set(e.source, (children = []))
+      children.push(e.target)
+    }
+
+    // All class-kind nodes in the full node set (class nodes are stripped from
+    // visible() when groupByClass is on, so we look at state.nodes directly).
+    const classNodes = state.nodes.filter((n) => n.kind === 'class')
+    const groups: FileGroup[] = []
+
+    for (const classNode of classNodes) {
+      const childIds = (containsChildren.get(classNode.id) ?? []).filter((id) => visibleNodeIds.has(id))
+      if (childIds.length === 0) continue
+
+      // filePath triggers directory-nesting layout (same as file groups) — classes
+      // from the same directory are visually co-located under a dir container.
+      groups.push({
+        id: classNode.id,
+        label: classNode.name,
+        filePath: classNode.filePath,
+        color: '#818cf8', // indigo-400 — distinguishes class containers from neutral file containers
+        childIds
+      })
+    }
+
+    return groups.length > 0 ? groups : undefined
+  })
+
+  /**
    * Contract groups for semantic API surface layout. Each visible node matches
    * the first ContractGroupDef whose test() returns true. Nodes that match no
    * group stay ungrouped (rendered flat alongside the contract compounds).
@@ -429,8 +473,11 @@ export const GraphCanvas: Component = () => {
     return groups.length > 0 ? groups : undefined
   })
 
-  /** Active groups for ELK layout: file grouping takes precedence over contract grouping. */
-  const activeGroups = createMemo((): FileGroup[] | undefined => fileGroups() ?? contractGroups())
+  /**
+   * Active groups for ELK layout: file grouping takes precedence over class
+   * grouping which takes precedence over contract grouping.
+   */
+  const activeGroups = createMemo((): FileGroup[] | undefined => fileGroups() ?? classGroups() ?? contractGroups())
 
   // Overlay positions: camera × ELK layout → CSS pixel rects for each node.
   // Updates on every pan/zoom and every layout change.

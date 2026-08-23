@@ -6,6 +6,7 @@ import {
   clearFocus,
   state,
   toggleEdgeKind,
+  toggleGroupByClass,
   toggleGroupByContract,
   toggleGroupByFile,
   toggleHideDevFiles,
@@ -69,7 +70,8 @@ export const FilterPanel: Component = () => {
       state.hideTestFiles ||
       state.hideDevFiles ||
       state.groupByFile ||
-      state.groupByContract
+      state.groupByContract ||
+      state.groupByClass
   )
 
   return (
@@ -138,6 +140,13 @@ export const FilterPanel: Component = () => {
               hover:bg-gray-200 dark:hover:bg-gray-800 transition-colors ${state.groupByFile ? "bg-teal-50 dark:bg-teal-900/20 ring-1 ring-teal-400/60 dark:ring-teal-600/60" : ''}`} onClick={toggleGroupByFile} title={state.groupByFile ? 'Disable file grouping' : 'Group nodes by source file'} data-testid="filter-scope-group-files">
             <span class="w-2.5 h-2.5 rounded-sm flex-shrink-0" style={{ background: '#0d9488' }} />
             <span class="text-gray-600 dark:text-gray-300 truncate">group files</span>
+          </button>
+
+          {/* group methods — highlighted when active (feature is ON) */}
+          <button class={`flex items-center gap-2 w-full px-2 py-1 rounded text-xs font-mono text-left
+              hover:bg-gray-200 dark:hover:bg-gray-800 transition-colors ${state.groupByClass ? "bg-indigo-50 dark:bg-indigo-900/20 ring-1 ring-indigo-400/60 dark:ring-indigo-600/60" : ''}`} onClick={toggleGroupByClass} title={state.groupByClass ? 'Disable method grouping' : 'Group methods and properties under their parent class'} data-testid="filter-scope-group-methods">
+            <span class="w-2.5 h-2.5 rounded-sm flex-shrink-0" style={{ background: '#818cf8' }} />
+            <span class="text-gray-600 dark:text-gray-300 truncate">group methods</span>
           </button>
 
           {/* group contracts — highlighted when active (feature is ON) */}
