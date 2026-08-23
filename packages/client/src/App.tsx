@@ -168,9 +168,10 @@ export default function App() {
         </Show>
       </div>
 
-      {/* Mobile bottom navigation bar — CSS-controlled so it renders even if JS detection lags */}
+      {/* Mobile bottom navigation bar — CSS-controlled so it renders even if JS detection lags.
+          z-50 keeps it above the backdrop (z-30) so both buttons remain tappable while a panel is open. */}
       <div
-        class="flex sm:hidden items-center justify-around px-2 pt-2 bg-gray-100 dark:bg-gray-900 border-t border-gray-200 dark:border-gray-700 flex-shrink-0"
+        class="flex sm:hidden items-center justify-around px-2 pt-2 bg-gray-100 dark:bg-gray-900 border-t border-gray-200 dark:border-gray-700 flex-shrink-0 relative z-50"
         style={{ 'padding-bottom': 'max(0.5rem, env(safe-area-inset-bottom))' }}
       >
         <button
