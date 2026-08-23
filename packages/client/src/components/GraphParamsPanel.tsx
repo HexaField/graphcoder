@@ -1,10 +1,9 @@
-import { createMemo, createSignal, For, onCleanup, Show, type Component } from 'solid-js'
+import { createMemo, For, Show, type Component } from 'solid-js'
 import type { EdgeKind, NodeKind } from '@graphcoder/core'
 import { edgeKindColor, nodeKindColor } from '../constants.js'
 import {
   clearFilters,
   clearFocus,
-  setExcludePatterns,
   state,
   toggleEdgeKind,
   toggleGroupByClass,
@@ -86,18 +85,6 @@ const SectionHead: Component<{ label: string }> = (props) => (
 export const GraphParamsPanel: Component = () => {
   const isDark = () => resolvedTheme() === 'dark'
 
-  // ── Exclude patterns input — debounced to avoid re-filtering on every keystroke
-  const [localPatterns, setLocalPatterns] = createSignal(state.excludePatterns)
-  let debounceTimer: ReturnType<typeof setTimeout> | undefined
-
-  function handlePatternsChange(value: string) {
-    setLocalPatterns(value)
-    clearTimeout(debounceTimer)
-    debounceTimer = setTimeout(() => setExcludePatterns(value), 300)
-  }
-
-  onCleanup(() => clearTimeout(debounceTimer))
-
   // ── Derived ──────────────────────────────────────────────────────────────────
 
   const presentNodeKinds = createMemo<NodeKind[]>(() => {
@@ -139,10 +126,7 @@ export const GraphParamsPanel: Component = () => {
         <Show when={hasFilters()}>
           <button
             class="text-xs text-gray-400 dark:text-gray-500 hover:text-gray-900 dark:hover:text-white"
-            onClick={() => {
-              clearFilters()
-              setLocalPatterns('')
-            }}
+            onClick={clearFilters}
             title="Reset all parameters"
           >
             clear
@@ -175,27 +159,6 @@ export const GraphParamsPanel: Component = () => {
           </div>
         )}
       </Show>
-
-      {/* ── Exclude patterns ── */}
-      <div class="border-b border-gray-200 dark:border-gray-700 pb-3">
-        <SectionHead label="Exclude" />
-        <div class="px-3">
-          <textarea
-            class="w-full text-xs font-mono bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-600
-              rounded px-2 py-1.5 text-gray-700 dark:text-gray-300 placeholder-gray-300 dark:placeholder-gray-600
-              focus:outline-none focus:ring-1 focus:ring-blue-400 dark:focus:ring-blue-500
-              resize-none leading-relaxed"
-            rows="2"
-            placeholder={'*.test.ts, *.spec.*\n*.stories.tsx'}
-            value={localPatterns()}
-            onInput={(e) => handlePatternsChange(e.currentTarget.value)}
-            title="Comma-separated glob patterns. Use * as a wildcard. Matches against file path."
-          />
-          <p class="text-[10px] text-gray-400 dark:text-gray-600 mt-1 leading-tight">
-            Comma-separated globs, * as wildcard
-          </p>
-        </div>
-      </div>
 
       {/* ── Group ── */}
       <div class="border-b border-gray-200 dark:border-gray-700 pb-3">

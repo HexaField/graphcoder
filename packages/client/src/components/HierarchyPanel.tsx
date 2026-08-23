@@ -1,7 +1,13 @@
 import { createMemo, createSignal, For, onCleanup, Show, type Component } from 'solid-js'
 import type { GraphEdge, GraphNode, NodeKind } from '@graphcoder/core'
 import { nodeKindColor } from '../constants.js'
-import { clearHierarchyHidden, setHiddenPaths, state, toggleHierarchyHidden } from '../state/store.js'
+import {
+  clearHierarchyHidden,
+  setExcludePatterns,
+  setHiddenPaths,
+  state,
+  toggleHierarchyHidden
+} from '../state/store.js'
 import { resolvedTheme } from '../state/theme.js'
 
 // ── Tree types ────────────────────────────────────────────────────────────────
@@ -523,6 +529,16 @@ export const HierarchyPanel: Component = () => {
   const hiddenSet = createMemo(() => new Set(state.hiddenPaths))
   const [ctxMenu, setCtxMenu] = createSignal<CtxMenuState | null>(null)
 
+  // ── Exclude patterns — debounced so the graph isn't refiltered on every keystroke
+  const [localPatterns, setLocalPatterns] = createSignal(state.excludePatterns)
+  let debounceTimer: ReturnType<typeof setTimeout> | undefined
+  function handlePatternsChange(value: string) {
+    setLocalPatterns(value)
+    clearTimeout(debounceTimer)
+    debounceTimer = setTimeout(() => setExcludePatterns(value), 300)
+  }
+  onCleanup(() => clearTimeout(debounceTimer))
+
   function toggleExpanded(key: string): void {
     setExpandedSet((prev) => {
       const next = new Set(prev)
@@ -658,6 +674,20 @@ export const HierarchyPanel: Component = () => {
               show all
             </button>
           </Show>
+        </div>
+
+        {/* ── Exclude patterns ── */}
+        <div class="px-2 py-1.5 border-b border-gray-200 dark:border-gray-700 flex-shrink-0">
+          <input
+            type="text"
+            class="w-full text-xs font-mono bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-600
+              rounded px-2 py-1 text-gray-700 dark:text-gray-300 placeholder-gray-300 dark:placeholder-gray-600
+              focus:outline-none focus:ring-1 focus:ring-blue-400 dark:focus:ring-blue-500"
+            placeholder="exclude: *.test.ts, *.spec.*"
+            value={localPatterns()}
+            onInput={(e) => handlePatternsChange(e.currentTarget.value)}
+            title="Comma-separated glob patterns to exclude from graph. Use * as wildcard."
+          />
         </div>
 
         {/* ── Tree ── */}
