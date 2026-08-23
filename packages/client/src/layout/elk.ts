@@ -4,6 +4,11 @@ import type { GraphDirection, GraphEdge, GraphNode } from '@graphcoder/core'
 
 const elk = new ELK()
 
+// Below this node count: full layered layout with crossing minimisation.
+// At or above: disable crossing minimisation + use simple node placement to
+// avoid the O(n²) internal array allocation that throws Invalid array length.
+const LARGE_GRAPH_THRESHOLD = 2_000
+
 const LAYOUT_OPTIONS: Record<GraphDirection, Record<string, string>> = {
   TB: {
     'elk.algorithm': 'layered',
@@ -17,6 +22,14 @@ const LAYOUT_OPTIONS: Record<GraphDirection, Record<string, string>> = {
     'elk.spacing.nodeNode': '30',
     'elk.layered.spacing.nodeNodeBetweenLayers': '50'
   }
+}
+
+/** Additional ELK options that avoid the O(n²) crossing-minimisation step. */
+const LARGE_GRAPH_OVERRIDES: Record<string, string> = {
+  'elk.layered.crossingMinimization.strategy': 'NONE',
+  'elk.layered.nodePlacement.strategy': 'SIMPLE',
+  'elk.layered.cycleBreaking.strategy': 'GREEDY',
+  'elk.layered.considerModelOrder.strategy': 'NONE'
 }
 
 const NODE_WIDTH = 160
@@ -158,9 +171,12 @@ async function layoutFlat(
     targets: [e.target]
   }))
 
+  const baseOpts = LAYOUT_OPTIONS[direction]
+  const layoutOptions = nodes.length >= LARGE_GRAPH_THRESHOLD ? { ...baseOpts, ...LARGE_GRAPH_OVERRIDES } : baseOpts
+
   const graph: ElkNode = {
     id: 'root',
-    layoutOptions: LAYOUT_OPTIONS[direction],
+    layoutOptions,
     children: elkNodes,
     edges: elkEdges
   }
@@ -232,6 +248,7 @@ async function layoutGrouped(
   fileGroups: FileGroup[],
   nodeIds: Set<string>
 ): Promise<LayoutResult> {
+  const isLarge = nodes.length >= LARGE_GRAPH_THRESHOLD
   // ── Build group registry ──────────────────────────────────────────────────
 
   // All top-level groups (fileGroups param) and their sub-groups.
@@ -686,6 +703,7 @@ async function layoutGrouped(
       id: 'root',
       layoutOptions: {
         ...LAYOUT_OPTIONS[direction],
+        ...(isLarge ? LARGE_GRAPH_OVERRIDES : {}),
         'elk.hierarchyHandling': 'INCLUDE_CHILDREN',
         'elk.spacing.nodeNode': '100',
         'elk.layered.spacing.nodeNodeBetweenLayers': '120'
@@ -939,6 +957,7 @@ async function layoutGrouped(
     id: 'root',
     layoutOptions: {
       ...LAYOUT_OPTIONS[direction],
+      ...(isLarge ? LARGE_GRAPH_OVERRIDES : {}),
       'elk.hierarchyHandling': 'INCLUDE_CHILDREN',
       'elk.spacing.nodeNode': '80',
       'elk.layered.spacing.nodeNodeBetweenLayers': '100'
