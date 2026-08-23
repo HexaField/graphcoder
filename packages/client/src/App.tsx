@@ -36,10 +36,13 @@ const DrawerToggle = (props: DrawerToggleProps) => {
 
 // ── App ───────────────────────────────────────────────────────────────────────
 
+// ── Mobile breakpoint query — shared so init + listener use the same threshold ──
+const mobileMediaQuery = window.matchMedia('(max-width: 767px)')
+
 export default function App() {
-  const [isMobile, setIsMobile] = createSignal(window.innerWidth < 768)
-  const [hierarchyOpen, setHierarchyOpen] = createSignal(!isMobile())
-  const [filterOpen, setFilterOpen] = createSignal(!isMobile())
+  const [isMobile, setIsMobile] = createSignal(mobileMediaQuery.matches)
+  const [hierarchyOpen, setHierarchyOpen] = createSignal(!mobileMediaQuery.matches)
+  const [filterOpen, setFilterOpen] = createSignal(!mobileMediaQuery.matches)
 
   // Auto-open inspector when a node gets selected
   createEffect(() => {
@@ -53,9 +56,10 @@ export default function App() {
     connectWebSocket()
     void initFromUrl()
 
-    // Track viewport width for responsive panel layout
-    const onResize = () => setIsMobile(window.innerWidth < 768)
-    window.addEventListener('resize', onResize, { passive: true })
+    // matchMedia fires reliably in DevTools emulation, real devices, and on resize —
+    // unlike window 'resize' which can miss DevTools viewport changes.
+    const onMqChange = (e: MediaQueryListEvent) => setIsMobile(e.matches)
+    mobileMediaQuery.addEventListener('change', onMqChange)
 
     // ── Keyboard shortcuts ────────────────────────────────────────────────
     const handleKey = (e: KeyboardEvent) => {
@@ -85,7 +89,7 @@ export default function App() {
     document.addEventListener('keydown', handleKey)
     onCleanup(() => {
       document.removeEventListener('keydown', handleKey)
-      window.removeEventListener('resize', onResize)
+      mobileMediaQuery.removeEventListener('change', onMqChange)
     })
   })
 
