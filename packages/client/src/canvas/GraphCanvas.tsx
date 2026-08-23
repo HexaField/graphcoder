@@ -357,15 +357,36 @@ export const GraphCanvas: Component = () => {
 
     const visibleNodeIds = new Set(visible().nodes.map((n) => n.id))
 
+    // Build a contains-children index for recursive descent.
+    // Methods inside classes, routes registered inside function bodies, etc.
+    // are grandchildren of the file — a single-level filter misses them.
+    const containsChildren = new Map<string, string[]>()
+    for (const e of state.edges) {
+      if (e.kind !== 'contains') continue
+      let children = containsChildren.get(e.source)
+      if (!children) containsChildren.set(e.source, (children = []))
+      children.push(e.target)
+    }
+
+    /** Recursively collect all descendants of nodeId through contains edges. */
+    function collectDescendants(nodeId: string, out: Set<string>): void {
+      for (const child of containsChildren.get(nodeId) ?? []) {
+        out.add(child)
+        collectDescendants(child, out)
+      }
+    }
+
     // Find all file-kind nodes in the full (unfiltered) node set
     const fileNodes = state.nodes.filter((n) => n.kind === 'file')
 
     const groups: FileGroup[] = []
     for (const fileNode of fileNodes) {
-      // Collect children that are currently visible
-      const childIds = state.edges
-        .filter((e) => e.kind === 'contains' && e.source === fileNode.id && visibleNodeIds.has(e.target))
-        .map((e) => e.target)
+      // Collect ALL descendants (direct + indirect) that are currently visible.
+      // This ensures methods inside classes, routes registered inside functions,
+      // and any other deeply-nested symbols appear inside their file container.
+      const allDescendants = new Set<string>()
+      collectDescendants(fileNode.id, allDescendants)
+      const childIds = [...allDescendants].filter((id) => visibleNodeIds.has(id))
 
       if (childIds.length === 0) continue // skip files with no visible children
 
