@@ -1,5 +1,5 @@
 import { createStore } from 'solid-js/store'
-import { loadFilters } from './storage.js'
+import { loadFilters, loadHierarchy } from './storage.js'
 
 // `import type` is erased at build time — no runtime circular dependency.
 import type { DiffState } from './diff.js'
@@ -27,6 +27,7 @@ export type AppState = ProjectState &
   HierarchyState
 
 const _saved = loadFilters()
+const _savedHierarchy = loadHierarchy()
 
 /**
  * The single SolidJS store for all app state.
@@ -74,5 +75,5 @@ export const [state, setState] = createStore<AppState>({
   isSearching: false,
 
   // Hierarchy
-  hiddenPaths: []
+  hiddenPaths: _savedHierarchy.hiddenPaths ?? []
 })

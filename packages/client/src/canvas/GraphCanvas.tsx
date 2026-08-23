@@ -113,10 +113,12 @@ interface ContractGroupDef {
 }
 
 const ROUTE_KINDS: NodeKind[] = ['route']
-const DATA_KINDS: NodeKind[] = ['class', 'interface', 'struct', 'type_alias']
-const SERVICE_KINDS: NodeKind[] = ['class']
-const UI_KINDS: NodeKind[] = ['function', 'class']
 
+/**
+ * API boundary contract groups — only external protocol surfaces qualify.
+ * Internal groupings (data models, services, UI components) use the hierarchy
+ * panel or file/class grouping instead.
+ */
 const CONTRACT_GROUPS: ContractGroupDef[] = [
   {
     id: '__contract_rest',
@@ -144,33 +146,6 @@ const CONTRACT_GROUPS: ContractGroupDef[] = [
       /\.(graphql|gql)$/i.test(n.filePath ?? '') ||
       /[\\/](resolvers?|graphql)[\\/]/i.test(n.filePath ?? '') ||
       /(Query|Mutation|Subscription|Resolver)$/.test(n.name)
-  },
-  {
-    id: '__contract_data',
-    label: 'Data Models',
-    color: '#f97316',
-    test: (n) =>
-      (DATA_KINDS as string[]).includes(n.kind) &&
-      (/\.(model|entity|schema|dto|repository)\.[jt]sx?$/i.test(n.filePath ?? '') ||
-        /[\\/](models?|entities|schemas?|dtos?|repositories?)[\\/]/i.test(n.filePath ?? ''))
-  },
-  {
-    id: '__contract_service',
-    label: 'Services',
-    color: '#a78bfa',
-    test: (n) =>
-      (SERVICE_KINDS as string[]).includes(n.kind) &&
-      (/\.service\.[jt]sx?$/i.test(n.filePath ?? '') || /[\\/]services?[\\/]/i.test(n.filePath ?? ''))
-  },
-  {
-    id: '__contract_ui',
-    label: 'UI Components',
-    color: '#60a5fa',
-    test: (n) =>
-      n.kind === 'component' ||
-      ((UI_KINDS as string[]).includes(n.kind) &&
-        (/\.(component|view|page|screen|widget)\.[jt]sx?$/i.test(n.filePath ?? '') ||
-          /[\\/](components?|views?|pages?|screens?)[\\/]/i.test(n.filePath ?? '')))
   }
 ]
 

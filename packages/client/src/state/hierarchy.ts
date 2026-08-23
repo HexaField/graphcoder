@@ -1,4 +1,9 @@
-import { setState } from './core.js'
+import { state, setState } from './core.js'
+import { saveHierarchy } from './storage.js'
+
+function persist(): void {
+  saveHierarchy({ hiddenPaths: state.hiddenPaths })
+}
 
 // ── Hierarchy ─────────────────────────────────────────────────────────────────
 
@@ -22,14 +27,17 @@ export interface HierarchyState {
 /** Toggle the explicit hidden state of a hierarchy item by its key. */
 export function toggleHierarchyHidden(key: string): void {
   setState('hiddenPaths', (prev) => (prev.includes(key) ? prev.filter((k) => k !== key) : [...prev, key]))
+  persist()
 }
 
 /** Replace the entire hidden set atomically (used for bulk operations). */
 export function setHiddenPaths(paths: string[]): void {
   setState('hiddenPaths', paths)
+  persist()
 }
 
 /** Remove all hierarchy visibility overrides. */
 export function clearHierarchyHidden(): void {
   setState('hiddenPaths', [])
+  persist()
 }
