@@ -9,6 +9,7 @@ Bidirectional architectural flow & mutation platform. Digests codebases into det
 - **Server:** Express 5, port 3001
 - **Client:** SolidJS + Vite + Tailwind v4, port 3000
 - **Layout:** elkjs (ELK Eclipse Layout Kernel)
+- **Canvas renderer:** Three.js (WebGL2) — `packages/client/src/canvas/`
 - **Graph extraction:** `@colbymchenry/codegraph` v1.5.0 (tree-sitter + SQLite, 37 languages)
 - **Testing:** Playwright E2E (client), Vitest unit (server/core)
 - **Build:** tsdown (server/core), Vite (client)
@@ -44,17 +45,34 @@ CodeGraph cannot link `fetch()` calls to route handlers because the URL is a run
 
 ## Phase roadmap
 
-| Phase | Status  | Description                                                     |
-| ----- | ------- | --------------------------------------------------------------- |
-| 0     | ✅ Done | Read-only graph explorer, ELK layout, Pixi.js canvas, E2E tests |
-| 1     | ✅ Done | ArchDiff v2 format, semantic identity layer, diff visualization |
-| 2     | Planned | Temporal mapper (Git history → per-commit diffs via worktrees)  |
-| 3     | Planned | Prospective state engine (in-memory graph mutations)            |
-| 4     | Planned | Code synthesis engine (ArchDiff → file changes → commit loop)   |
-| 5     | Planned | Flow generation (LLM-narrated source→sink flows, tethered)      |
-| 6     | Planned | AI agent MCP interface                                          |
+| Phase | Status  | Description                                                                       |
+| ----- | ------- | --------------------------------------------------------------------------------- |
+| 0     | ✅ Done | Read-only graph explorer, ELK layout, Pixi.js canvas, E2E tests                   |
+| 1     | ✅ Done | ArchDiff v2 format, semantic identity layer, diff visualization                   |
+| 2     | ✅ Done | Temporal mapper (Git history → per-commit diffs via worktrees, SQLite cache, SSE) |
+| —     | ✅ Done | Three.js WebGL renderer replacing PixiJS (5 draw calls, handles 10k+ nodes)       |
+| 3     | Planned | Prospective state engine (in-memory graph mutations)                              |
+| 4     | Planned | Code synthesis engine (ArchDiff → file changes → commit loop)                     |
+| 5     | Planned | Flow generation (LLM-narrated source→sink flows, tethered)                        |
+| 6     | Planned | AI agent MCP interface                                                            |
 
 See `~/.sovereign/membranes/personal/plans/graphcoder.md` for the full design.
+
+## Canvas renderer (Three.js)
+
+`packages/client/src/canvas/` contains:
+
+- `ThreeRenderer.ts` — WebGL renderer class; 5 draw calls regardless of graph size:
+  1. `containerMesh` — InstancedBufferGeometry for all container boxes (package/dir/file/class)
+  2. `edgeLines` — LineSegments2 (three/addons) for all edge polylines at 2px screen-space width
+  3. `nodeMesh` — InstancedBufferGeometry for all node boxes; per-instance diff/selection state
+  4. `arrowMesh` — InstancedBufferGeometry for arrowhead triangles
+  5. `glyphMesh` — InstancedBufferGeometry for SDF glyph quads (all text in one call)
+- `sdfAtlas.ts` — builds a single-channel SDF atlas from `@mapbox/tiny-sdf` for printable ASCII; RGBA DataTexture with SDF in alpha; `flipY=true` + inverted V coords
+- `shaders.ts` — GLSL ES 1.0 vertex/fragment shaders for rect (rounded-rect SDF), glyph (atlas sample), and arrow (rotated triangle)
+- `GraphCanvas.tsx` — SolidJS wrapper; `OrthographicCamera` with Y-down convention matching ELK; pan/zoom via World Group transform; `RBush` R-tree for hit testing (no DOM overlay)
+
+**No DOM overlay buttons** — click/hover hit-testing via RBush in world coordinates.
 
 ## Known gotchas
 
