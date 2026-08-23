@@ -124,7 +124,9 @@ const EdgeLine: Component<EdgeLineProps> = (props) => {
 export const GraphCanvas: Component = () => {
   const [layout, setLayout] = createSignal<LayoutResult | null>(null)
   const [isLayouting, setIsLayouting] = createSignal(false)
-  const [viewBox, setViewBox] = createSignal({ x: 0, y: 0, w: 800, h: 600 })
+  // Transform-based camera: no viewBox, no preserveAspectRatio math.
+  // Pan is tx += movementX (exact 1:1). Zoom pivots around cursor.
+  const [camera, setCamera] = createSignal({ tx: 0, ty: 0, scale: 1 })
 
   let svgRef: SVGSVGElement | undefined
 
@@ -150,7 +152,8 @@ export const GraphCanvas: Component = () => {
     return { added, modified, moved }
   })
 
-  // Recompute layout when visible nodes / edges / viewMode change
+  // Recompute layout when visible nodes / edges / viewMode change.
+  // After layout, fit-and-centre the graph in the SVG element.
   createEffect(async () => {
     const { nodes, edges } = visible()
     const viewMode = state.viewMode
@@ -162,7 +165,13 @@ export const GraphCanvas: Component = () => {
     try {
       const result = await layoutGraph(nodes, edges, viewMode)
       setLayout(result)
-      setViewBox({ x: -20, y: -20, w: result.width + 40, h: result.height + 40 })
+      const pad = 40
+      const svgW = svgRef?.clientWidth ?? 800
+      const svgH = svgRef?.clientHeight ?? 600
+      const scale = Math.min(svgW / (result.width + pad), svgH / (result.height + pad))
+      const tx = (svgW - result.width * scale) / 2
+      const ty = (svgH - result.height * scale) / 2
+      setCamera({ tx, ty, scale })
     } finally {
       setIsLayouting(false)
     }
@@ -170,19 +179,11 @@ export const GraphCanvas: Component = () => {
 
   // ── Pan / zoom ──────────────────────────────────────────────────────────────
   //
-  // mousemove/mouseup attach to window during an active pan so fast gestures
-  // that carry the cursor outside the SVG bounds don't kill the drag.
-
-  let panStart = { clientX: 0, clientY: 0 }
-  let vbAtPanStart = { x: 0, y: 0, w: 800, h: 600 }
+  // No viewBox coordinate conversion — screen pixels map directly to tx/ty.
+  // mousemove/mouseup attach to window so fast drags never lose tracking.
 
   const onWindowMouseMove = (e: MouseEvent) => {
-    if (!svgRef) return
-    const vb = vbAtPanStart
-    const rect = svgRef.getBoundingClientRect()
-    const dx = (e.clientX - panStart.clientX) * (vb.w / rect.width)
-    const dy = (e.clientY - panStart.clientY) * (vb.h / rect.height)
-    setViewBox({ x: vb.x - dx, y: vb.y - dy, w: vb.w, h: vb.h })
+    setCamera((c) => ({ ...c, tx: c.tx + e.movementX, ty: c.ty + e.movementY }))
   }
 
   const onWindowMouseUp = () => {
@@ -192,8 +193,6 @@ export const GraphCanvas: Component = () => {
 
   const handleMouseDown = (e: MouseEvent) => {
     if (e.button !== 0) return
-    panStart = { clientX: e.clientX, clientY: e.clientY }
-    vbAtPanStart = { ...viewBox() }
     window.addEventListener('mousemove', onWindowMouseMove)
     window.addEventListener('mouseup', onWindowMouseUp)
   }
@@ -201,21 +200,17 @@ export const GraphCanvas: Component = () => {
   const handleWheel = (e: WheelEvent) => {
     e.preventDefault()
     if (!svgRef) return
-    const vb = viewBox()
     const rect = svgRef.getBoundingClientRect()
-    const mouseXRatio = (e.clientX - rect.left) / rect.width
-    const mouseYRatio = (e.clientY - rect.top) / rect.height
-    // deltaMode 0 = pixels (trackpad), 1 = lines, 2 = pages
+    // Cursor position relative to SVG origin
+    const cx = e.clientX - rect.left
+    const cy = e.clientY - rect.top
     const sensitivity = e.deltaMode === 0 ? 0.002 : 0.08
-    const factor = Math.exp(e.deltaY * sensitivity)
-    const newW = vb.w * factor
-    const newH = vb.h * factor
-    setViewBox({
-      x: vb.x + mouseXRatio * (vb.w - newW),
-      y: vb.y + mouseYRatio * (vb.h - newH),
-      w: newW,
-      h: newH
-    })
+    const factor = Math.exp(-e.deltaY * sensitivity)
+    setCamera((c) => ({
+      scale: c.scale * factor,
+      tx: cx - (cx - c.tx) * factor,
+      ty: cy - (cy - c.ty) * factor
+    }))
   }
 
   onMount(() => {
@@ -240,45 +235,42 @@ export const GraphCanvas: Component = () => {
           <span>No project open. Enter a project path above.</span>
         </div>
       </Show>
-      <svg
-        ref={svgRef}
-        class="w-full h-full"
-        viewBox={`${viewBox().x} ${viewBox().y} ${viewBox().w} ${viewBox().h}`}
-        data-testid="graph-svg"
-        onMouseDown={handleMouseDown}
-      >
+      <svg ref={svgRef} class="w-full h-full" data-testid="graph-svg" onMouseDown={handleMouseDown}>
         <defs>
           <marker id="arrowhead" markerWidth="8" markerHeight="6" refX="6" refY="3" orient="auto">
             <polygon points="0 0, 8 3, 0 6" fill="#4b5563" />
           </marker>
         </defs>
         {/*
-          Background hit target — clicking empty canvas clears focus.
-          Browser only fires onClick (not drag), so no pan interference.
+          Background hit target at screen coords — clicking empty canvas clears focus.
+          Lives OUTSIDE the camera group so it always fills the SVG element exactly.
         */}
-        <rect x="-50000" y="-50000" width="100000" height="100000" fill="transparent" onClick={clearFocus} />
-        <g data-testid="graph-edges">
-          <For each={layout()?.edges ?? []}>{(edge) => <EdgeLine edge={edge} />}</For>
-        </g>
-        <g data-testid="graph-nodes">
-          <For each={layout() ? [...layout()!.nodes.values()] : []}>
-            {(node) => {
-              // O(1) lookup — nodeById memo is a Map over state.nodes
-              const graphNode = nodeById().get(node.id)
-              // SHA-256 only runs when a diff is active (diffOverlay returns empty Sets otherwise)
-              const semId = state.currentDiff && graphNode ? nodeSemanticId(graphNode) : null
-              const diffStatus = nodeDiffStatus(semId, diffOverlay())
-              return (
-                <NodeRect
-                  layoutNode={node}
-                  graphNode={graphNode}
-                  selected={state.selectedNodeId === node.id}
-                  diffStatus={diffStatus}
-                  onClick={() => void selectNode(node.id)}
-                />
-              )
-            }}
-          </For>
+        <rect width="100%" height="100%" fill="transparent" onClick={clearFocus} />
+        {/* All graph content lives inside this transform — pan+zoom via tx/ty/scale */}
+        <g transform={`translate(${camera().tx}, ${camera().ty}) scale(${camera().scale})`}>
+          <g data-testid="graph-edges">
+            <For each={layout()?.edges ?? []}>{(edge) => <EdgeLine edge={edge} />}</For>
+          </g>
+          <g data-testid="graph-nodes">
+            <For each={layout() ? [...layout()!.nodes.values()] : []}>
+              {(node) => {
+                // O(1) lookup — nodeById memo is a Map over state.nodes
+                const graphNode = nodeById().get(node.id)
+                // SHA-256 only runs when a diff is active (diffOverlay returns empty Sets otherwise)
+                const semId = state.currentDiff && graphNode ? nodeSemanticId(graphNode) : null
+                const diffStatus = nodeDiffStatus(semId, diffOverlay())
+                return (
+                  <NodeRect
+                    layoutNode={node}
+                    graphNode={graphNode}
+                    selected={state.selectedNodeId === node.id}
+                    diffStatus={diffStatus}
+                    onClick={() => void selectNode(node.id)}
+                  />
+                )
+              }}
+            </For>
+          </g>
         </g>
       </svg>
     </div>
