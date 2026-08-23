@@ -18,6 +18,7 @@ export type { DiffState } from './diff.js'
 export {
   clearFilters,
   clearFocus,
+  globToRegex,
   setExcludePatterns,
   setFocus,
   toggleEdgeKind,

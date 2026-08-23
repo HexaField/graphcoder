@@ -95,7 +95,7 @@ export function clearFilters(): void {
  *   `*.config.ts` → /.*\.config\.ts/i
  *   `__tests__`   → /__tests__/i
  */
-function globToRegex(pattern: string): RegExp | null {
+export function globToRegex(pattern: string): RegExp | null {
   const trimmed = pattern.trim()
   if (!trimmed) return null
   const regexStr = trimmed

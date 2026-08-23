@@ -3,6 +3,7 @@ import type { GraphEdge, GraphNode, NodeKind } from '@graphcoder/core'
 import { nodeKindColor } from '../constants.js'
 import {
   clearHierarchyHidden,
+  globToRegex,
   setExcludePatterns,
   setHiddenPaths,
   state,
@@ -337,57 +338,81 @@ interface RowProps {
   onExpand: () => void
   hidden: boolean
   ancestorHidden: boolean
+  /**
+   * When true, this item matches an active exclude pattern — it will not appear
+   * in the graph regardless of the manual hidden state. Rendered with a
+   * strikethrough label and a static ⊘ indicator instead of the eye toggle.
+   */
+  excluded?: boolean
   onToggleHide: (e: MouseEvent) => void
   onContextMenu?: (e: MouseEvent) => void
 }
 
-const Row: Component<RowProps> = (props) => (
-  <div class={`group flex items-center h-6 pr-1 cursor-default select-none
-      hover:bg-gray-100 dark:hover:bg-gray-800/60 ${props.hidden || props.ancestorHidden ? 'opacity-40' : ''}`} style={{ 'padding-left': `${props.depth * 12 + 4}px` }} onContextMenu={props.onContextMenu}>
-    <button
-      class={`w-4 h-4 flex items-center justify-center flex-shrink-0 text-gray-400 dark:text-gray-500 ${props.expandable ? "hover:text-gray-700 dark:hover:text-gray-200" : 'pointer-events-none'}`}
-      onClick={(e) => {
-        e.stopPropagation()
-        props.onExpand()
-      }}
-      tabIndex={-1}
-    >
-      <Show when={props.expandable}>
-        <span class="text-xs leading-none">{props.expanded ? '▾' : '›'}</span>
-      </Show>
-    </button>
-
-    <Show when={props.badge}>
-      <span
-        class="text-[9px] font-mono font-bold w-4 text-center flex-shrink-0 opacity-70"
-        style={{ color: props.badgeColor }}
+const Row: Component<RowProps> = (props) => {
+  const dimmed = () => (props.hidden || props.ancestorHidden) && !props.excluded
+  return (
+    <div class={`group flex items-center h-6 pr-1 cursor-default select-none
+        hover:bg-gray-100 dark:hover:bg-gray-800/60 ${dimmed() ? 'opacity-40' : ''}`} style={{ 'padding-left': `${props.depth * 12 + 4}px` }} onContextMenu={props.onContextMenu}>
+      <button
+        class={`w-4 h-4 flex items-center justify-center flex-shrink-0 text-gray-400 dark:text-gray-500 ${props.expandable ? "hover:text-gray-700 dark:hover:text-gray-200" : 'pointer-events-none'}`}
+        onClick={(e) => {
+          e.stopPropagation()
+          props.onExpand()
+        }}
+        tabIndex={-1}
       >
-        {props.badge}
-      </span>
-    </Show>
+        <Show when={props.expandable}>
+          <span class="text-xs leading-none">{props.expanded ? '▾' : '›'}</span>
+        </Show>
+      </button>
 
-    <button
-      class="flex-1 min-w-0 text-left text-xs font-mono truncate text-gray-700 dark:text-gray-300 px-1 leading-none"
-      onClick={props.onExpand}
-    >
-      {props.label}
-    </button>
-
-    <button
-      class={`flex-shrink-0 p-0.5 rounded transition-colors ${
-        props.hidden
-          ? "text-gray-400 dark:text-gray-500 opacity-100"
-          : "text-gray-300 dark:text-gray-600 opacity-0 group-hover:opacity-100"
-      } hover:text-gray-700 dark:hover:text-gray-200 hover:bg-gray-200 dark:hover:bg-gray-700`}
-      onClick={props.onToggleHide}
-      title={props.hidden ? 'Show in graph' : 'Hide from graph'}
-    >
-      <Show when={props.hidden} fallback={<EyeOpen />}>
-        <EyeSlash />
+      <Show when={props.badge}>
+        <span
+          class="text-[9px] font-mono font-bold w-4 text-center flex-shrink-0 opacity-70"
+          style={{ color: props.badgeColor }}
+        >
+          {props.badge}
+        </span>
       </Show>
-    </button>
-  </div>
-)
+
+      <button
+        class={`flex-1 min-w-0 text-left text-xs font-mono truncate px-1 leading-none ${
+          props.excluded ? "line-through text-gray-400 dark:text-gray-600" : "text-gray-700 dark:text-gray-300"
+        }`}
+        onClick={props.onExpand}
+      >
+        {props.label}
+      </button>
+
+      {/* Excluded indicator — static, replaces eye toggle */}
+      <Show
+        when={!props.excluded}
+        fallback={
+          <span
+            class="flex-shrink-0 w-5 text-center text-[10px] text-amber-400 dark:text-amber-600 opacity-70"
+            title="Excluded by pattern"
+          >
+            ⊘
+          </span>
+        }
+      >
+        <button
+          class={`flex-shrink-0 p-0.5 rounded transition-colors ${
+            props.hidden
+              ? "text-gray-400 dark:text-gray-500 opacity-100"
+              : "text-gray-300 dark:text-gray-600 opacity-0 group-hover:opacity-100"
+          } hover:text-gray-700 dark:hover:text-gray-200 hover:bg-gray-200 dark:hover:bg-gray-700`}
+          onClick={props.onToggleHide}
+          title={props.hidden ? 'Show in graph' : 'Hide from graph'}
+        >
+          <Show when={props.hidden} fallback={<EyeOpen />}>
+            <EyeSlash />
+          </Show>
+        </button>
+      </Show>
+    </div>
+  )
+}
 
 // ── Recursive symbol subtree ──────────────────────────────────────────────────
 
@@ -527,6 +552,18 @@ export const HierarchyPanel: Component = () => {
   })
 
   const hiddenSet = createMemo(() => new Set(state.hiddenPaths))
+
+  // Compile active exclude patterns once per change so file rows can check membership
+  const excludeRegexes = createMemo(() =>
+    state.excludePatterns
+      .split(',')
+      .map(globToRegex)
+      .filter((r): r is RegExp => r !== null)
+  )
+  const isExcluded = (filePath: string) => {
+    const rs = excludeRegexes()
+    return rs.length > 0 && rs.some((r) => r.test(filePath))
+  }
   const [ctxMenu, setCtxMenu] = createSignal<CtxMenuState | null>(null)
 
   // ── Exclude patterns — debounced so the graph isn't refiltered on every keystroke
@@ -563,6 +600,7 @@ export const HierarchyPanel: Component = () => {
       <For each={files}>
         {(file) => {
           const fileHidden = () => hiddenSet().has(file.key)
+          const fileExcluded = () => isExcluded(file.key)
           const fileExpanded = () => expandedSet().has(file.key)
           const hasSymbols = file.children.length > 0
 
@@ -576,6 +614,7 @@ export const HierarchyPanel: Component = () => {
                 onExpand={() => hasSymbols && toggleExpanded(file.key)}
                 hidden={fileHidden()}
                 ancestorHidden={ancestorHiddenFn()}
+                excluded={fileExcluded()}
                 onToggleHide={(e) => {
                   e.stopPropagation()
                   toggleHierarchyHidden(file.key)
