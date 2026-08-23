@@ -58,7 +58,7 @@ export const [state, setState] = createStore<AppState>({
   // Filters & focus
   hiddenNodeKinds: _saved.hiddenNodeKinds ?? [],
   hiddenEdgeKinds: _saved.hiddenEdgeKinds ?? [],
-  hideTestFiles: _saved.hideTestFiles ?? false,
+  excludePatterns: _saved.excludePatterns ?? '',
   groupByFile: _saved.groupByFile ?? false,
   groupByContract: _saved.groupByContract ?? false,
   groupByClass: _saved.groupByClass ?? false,

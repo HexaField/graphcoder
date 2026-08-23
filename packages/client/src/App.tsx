@@ -1,7 +1,7 @@
 import { createEffect, createSignal, onMount, Show } from 'solid-js'
 import { GraphCanvas } from './canvas/GraphCanvas.js'
 import { DiffPanel } from './components/DiffPanel.js'
-import { FilterPanel } from './components/FilterPanel.js'
+import { GraphParamsPanel } from './components/GraphParamsPanel.js'
 import { HierarchyPanel } from './components/HierarchyPanel.js'
 import { NodeInspector } from './components/NodeInspector.js'
 import { Toolbar } from './components/Toolbar.js'
@@ -80,10 +80,10 @@ export default function App() {
           </Show>
         </div>
 
-        {/* Right drawer — filter panel */}
+        {/* Right drawer — graph parameters panel */}
         <DrawerToggle side="right" open={filterOpen()} onToggle={() => setFilterOpen((v) => !v)} />
         <Show when={filterOpen()}>
-          <FilterPanel />
+          <GraphParamsPanel />
         </Show>
       </div>
 

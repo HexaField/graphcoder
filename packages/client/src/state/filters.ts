@@ -8,7 +8,8 @@ import type { PersistedFilters } from './storage.js'
 export interface FiltersState {
   hiddenNodeKinds: NodeKind[]
   hiddenEdgeKinds: EdgeKind[]
-  hideTestFiles: boolean
+  /** Comma-separated glob patterns excluded from the visible graph (e.g. `*.test.*, *.config.ts`). */
+  excludePatterns: string
   groupByFile: boolean
   groupByContract: boolean
   groupByClass: boolean
@@ -20,7 +21,7 @@ function persist(): void {
   const f: PersistedFilters = {
     hiddenNodeKinds: state.hiddenNodeKinds,
     hiddenEdgeKinds: state.hiddenEdgeKinds,
-    hideTestFiles: state.hideTestFiles,
+    excludePatterns: state.excludePatterns,
     groupByFile: state.groupByFile,
     groupByContract: state.groupByContract,
     groupByClass: state.groupByClass,
@@ -47,8 +48,8 @@ export function clearFocus(): void {
   setState('focusedNodeId', null)
 }
 
-export function toggleHideTestFiles(): void {
-  setState('hideTestFiles', (v) => !v)
+export function setExcludePatterns(value: string): void {
+  setState('excludePatterns', value)
   persist()
 }
 
@@ -75,7 +76,7 @@ export function toggleGroupByPackage(): void {
 export function clearFilters(): void {
   setState('hiddenNodeKinds', [])
   setState('hiddenEdgeKinds', [])
-  setState('hideTestFiles', false)
+  setState('excludePatterns', '')
   setState('groupByFile', false)
   setState('groupByContract', false)
   setState('groupByClass', false)
@@ -83,14 +84,40 @@ export function clearFilters(): void {
   persist()
 }
 
+// ── Glob-pattern matching ─────────────────────────────────────────────────────
+
+/**
+ * Convert a single glob pattern (using `*` as wildcard) to a case-insensitive RegExp.
+ * Returns `null` for empty patterns or patterns that produce an invalid regex.
+ *
+ * Examples:
+ *   `*.test.*`   → /.*\.test\..* /i  — matches any path containing `.test.`
+ *   `*.config.ts` → /.*\.config\.ts/i
+ *   `__tests__`   → /__tests__/i
+ */
+function globToRegex(pattern: string): RegExp | null {
+  const trimmed = pattern.trim()
+  if (!trimmed) return null
+  const regexStr = trimmed
+    .split('*')
+    .map((part) => part.replace(/[.+^${}()|[\]\\]/g, '\\$&'))
+    .join('.*')
+  try {
+    return new RegExp(regexStr, 'i')
+  } catch {
+    return null
+  }
+}
+
 // ── visibleGraph ──────────────────────────────────────────────────────────────
 
 /**
  * Derive the currently visible nodes and edges by applying:
  *   1. Node kind filter  (hiddenNodeKinds)
- *   2. Test file filter  (hideTestFiles)
- *   3. Grouping mode coercion  (groupByFile / groupByContract / groupByPackage → drop file nodes;
- *      groupByClass → drop class nodes)
+ *   1b. Hierarchy show/hide  (hiddenPaths — cascade via path prefix)
+ *   2. Exclude-pattern filter  (excludePatterns — comma-separated globs)
+ *   3a. Grouping mode coercion  (groupByFile / groupByContract / groupByPackage → drop file nodes)
+ *   3b. Class grouping coercion  (groupByClass → drop class nodes)
  *   4. Import-node elevation  (import nodes → synthetic `imports` edges)
  *   5. Focus neighbourhood  (focusedNodeId)
  *   6. Edge kind filter  (hiddenEdgeKinds) + endpoint visibility + deduplication
@@ -125,11 +152,20 @@ export function visibleGraph(): { nodes: GraphNode[]; edges: GraphEdge[] } {
     nodeIds = new Set(nodes.map((n) => n.id))
   }
 
-  // 2a. Apply test-file filter — matches .test.* / .spec.* / __tests__ / __mocks__ / .stories.*
-  if (state.hideTestFiles) {
-    const TEST_RE = /(\.(test|spec)\.[jt]sx?$|__tests__[\\/]|__mocks__[\\/]|\.stories\.[jt]sx?$)/i
-    nodes = nodes.filter((n) => !TEST_RE.test(n.filePath ?? ''))
-    nodeIds = new Set(nodes.map((n) => n.id))
+  // 2. Apply exclude-pattern filter — comma-separated glob patterns matched against filePath.
+  //    Each pattern uses `*` as a wildcard; patterns are case-insensitive.
+  if (state.excludePatterns.trim()) {
+    const regexes = state.excludePatterns
+      .split(',')
+      .map(globToRegex)
+      .filter((r): r is RegExp => r !== null)
+    if (regexes.length > 0) {
+      nodes = nodes.filter((n) => {
+        const fp = n.filePath ?? ''
+        return !regexes.some((r) => r.test(fp))
+      })
+      nodeIds = new Set(nodes.map((n) => n.id))
+    }
   }
 
   // 3a. When grouping by file, contract, or package, remove file-kind nodes —
@@ -140,9 +176,7 @@ export function visibleGraph(): { nodes: GraphNode[]; edges: GraphEdge[] } {
   }
 
   // 3b. When grouping by class, remove class-kind nodes — they become spatial
-  //     containers holding their method/property children. Applies whether or
-  //     not file grouping is also on; when both are active, class containers
-  //     appear as sub-compounds nested inside file containers.
+  //     containers holding their method/property children.
   if (state.groupByClass) {
     nodes = nodes.filter((n) => n.kind !== 'class')
     nodeIds = new Set(nodes.map((n) => n.id))
@@ -151,8 +185,6 @@ export function visibleGraph(): { nodes: GraphNode[]; edges: GraphEdge[] } {
   // 4. Elevate import nodes to direct edges — strip all import-kind nodes from
   //    the visible graph and replace each with synthetic `imports` edges that
   //    connect the containing file/module directly to the import target.
-  //    "file → contains → import:X → imports → target" becomes
-  //    "file → imports → target", making module dependencies first-class links.
   const syntheticImportEdges: GraphEdge[] = []
   {
     const importIds = new Set<string>()
@@ -161,8 +193,8 @@ export function visibleGraph(): { nodes: GraphNode[]; edges: GraphEdge[] } {
     }
 
     if (importIds.size > 0) {
-      const importContainers = new Map<string, Set<string>>() // importId → container ids
-      const importTargets = new Map<string, Set<string>>() // importId → target ids
+      const importContainers = new Map<string, Set<string>>()
+      const importTargets = new Map<string, Set<string>>()
 
       for (const e of state.edges) {
         if (e.kind === 'contains' && importIds.has(e.target)) {
@@ -205,9 +237,7 @@ export function visibleGraph(): { nodes: GraphNode[]; edges: GraphEdge[] } {
   }
 
   // 6. Filter edges: kind not hidden, both endpoints visible, deduplicated by
-  //    (src, tgt, kind). Import nodes were removed in step 4, so any edge that
-  //    referenced one fails the nodeIds check and gets dropped naturally.
-  //    Synthetic import-elevation edges are merged in after.
+  //    (src, tgt, kind). Synthetic import-elevation edges merged in after.
   const seenEdgeKeys = new Set<string>()
   const edges: GraphEdge[] = []
 

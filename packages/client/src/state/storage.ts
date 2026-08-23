@@ -7,7 +7,8 @@ const FILTER_KEY = 'graphcoder-filters'
 export interface PersistedFilters {
   hiddenNodeKinds: NodeKind[]
   hiddenEdgeKinds: EdgeKind[]
-  hideTestFiles: boolean
+  /** Comma-separated glob patterns to exclude from the graph (e.g. `*.test.*, *.config.ts`). */
+  excludePatterns: string
   groupByFile: boolean
   groupByContract: boolean
   groupByClass: boolean
@@ -24,7 +25,13 @@ export function loadFilters(): Partial<PersistedFilters> {
     return {
       hiddenNodeKinds: Array.isArray(p.hiddenNodeKinds) ? (p.hiddenNodeKinds as NodeKind[]) : undefined,
       hiddenEdgeKinds: Array.isArray(p.hiddenEdgeKinds) ? (p.hiddenEdgeKinds as EdgeKind[]) : undefined,
-      hideTestFiles: typeof p.hideTestFiles === 'boolean' ? p.hideTestFiles : undefined,
+      // Support migrating from the old boolean hideTestFiles — convert to a sensible default pattern
+      excludePatterns:
+        typeof p.excludePatterns === 'string'
+          ? p.excludePatterns
+          : p.hideTestFiles === true
+            ? '*.test.*, *.spec.*'
+            : undefined,
       groupByFile: typeof p.groupByFile === 'boolean' ? p.groupByFile : undefined,
       groupByContract: typeof p.groupByContract === 'boolean' ? p.groupByContract : undefined,
       groupByClass: typeof p.groupByClass === 'boolean' ? p.groupByClass : undefined,

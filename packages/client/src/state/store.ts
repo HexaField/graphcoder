@@ -18,13 +18,13 @@ export type { DiffState } from './diff.js'
 export {
   clearFilters,
   clearFocus,
+  setExcludePatterns,
   setFocus,
   toggleEdgeKind,
   toggleGroupByClass,
   toggleGroupByContract,
   toggleGroupByFile,
   toggleGroupByPackage,
-  toggleHideTestFiles,
   toggleNodeKind,
   visibleGraph
 } from './filters.js'
