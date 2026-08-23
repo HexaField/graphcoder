@@ -319,6 +319,7 @@ export const GraphCanvas: Component = () => {
   const [pixiReady, setPixiReady] = createSignal(false)
 
   let canvasRef: HTMLCanvasElement | undefined
+  let wrapperRef: HTMLDivElement | undefined
   // Plain refs — written once in onMount; never reactive.
   // We access them in effects already gated by pixiReady().
   let pixiApp: Application | null = null
@@ -585,7 +586,9 @@ export const GraphCanvas: Component = () => {
     // Signal to gated effects that Pixi is now usable
     setPixiReady(true)
 
-    // Wheel zoom — passive:false so we can preventDefault
+    // Wheel zoom — listener on the wrapper div so it fires whether the cursor is
+    // over the canvas or over a transparent overlay node button.
+    // passive:false required to call preventDefault() and stop page scroll.
     const handleWheel = (e: WheelEvent) => {
       e.preventDefault()
       const rect = canvasRef!.getBoundingClientRect()
@@ -599,10 +602,10 @@ export const GraphCanvas: Component = () => {
         ty: cy - (cy - c.ty) * factor
       }))
     }
-    canvasRef.addEventListener('wheel', handleWheel, { passive: false })
+    wrapperRef!.addEventListener('wheel', handleWheel, { passive: false })
 
     onCleanup(() => {
-      canvasRef?.removeEventListener('wheel', handleWheel)
+      wrapperRef?.removeEventListener('wheel', handleWheel)
       window.removeEventListener('mousemove', onWindowMouseMove)
       window.removeEventListener('mouseup', onWindowMouseUp)
       pixiApp = null
@@ -648,6 +651,7 @@ export const GraphCanvas: Component = () => {
     // onMouseDown on wrapper: receives events from canvas AND overlay buttons
     // onClick/clearFocus stays on canvas so it only fires for background clicks
     <div
+      ref={wrapperRef}
       class="relative w-full h-full overflow-hidden select-none"
       data-testid="graph-canvas"
       onMouseDown={handleMouseDown}
