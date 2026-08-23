@@ -1,7 +1,15 @@
 import { type Component, createMemo, For, Show } from 'solid-js'
 import type { EdgeKind, NodeKind } from '@graphcoder/core'
 import { edgeKindColor, nodeKindColor } from '../constants.js'
-import { clearFilters, clearFocus, state, toggleEdgeKind, toggleHideTestFiles, toggleNodeKind } from '../state/store.js'
+import {
+  clearFilters,
+  clearFocus,
+  state,
+  toggleEdgeKind,
+  toggleGroupByFile,
+  toggleHideTestFiles,
+  toggleNodeKind
+} from '../state/store.js'
 import { resolvedTheme } from '../state/theme.js'
 
 // ── Kind chip ─────────────────────────────────────────────────────────────────
@@ -50,7 +58,8 @@ export const FilterPanel: Component = () => {
   )
 
   const hasFilters = createMemo(
-    () => state.hiddenNodeKinds.length > 0 || state.hiddenEdgeKinds.length > 0 || state.hideTestFiles
+    () =>
+      state.hiddenNodeKinds.length > 0 || state.hiddenEdgeKinds.length > 0 || state.hideTestFiles || state.groupByFile
   )
 
   return (
@@ -97,13 +106,23 @@ export const FilterPanel: Component = () => {
       </Show>
 
       {/* Scope toggles */}
-      <div class="px-3 pt-3 pb-1 border-b border-gray-200 dark:border-gray-700">
+      <div class="px-3 pt-3 pb-2 border-b border-gray-200 dark:border-gray-700">
         <div class="text-xs text-gray-400 dark:text-gray-500 mb-1.5 uppercase tracking-wider">Scope</div>
-        <button class={`flex items-center gap-2 w-full px-2 py-1 rounded text-xs font-mono text-left
-            hover:bg-gray-200 dark:hover:bg-gray-800 transition-opacity ${state.hideTestFiles ? 'opacity-30' : 'opacity-100'}`} onClick={toggleHideTestFiles} title={state.hideTestFiles ? 'Show test files' : 'Hide test files'} data-testid="filter-scope-tests">
-          <span class="w-2.5 h-2.5 rounded-sm flex-shrink-0" style={{ background: '#f59e0b' }} />
-          <span class="text-gray-600 dark:text-gray-300 truncate">tests</span>
-        </button>
+        <div class="flex flex-col gap-0.5">
+          {/* tests — opacity-30 when active (items are filtered out) */}
+          <button class={`flex items-center gap-2 w-full px-2 py-1 rounded text-xs font-mono text-left
+              hover:bg-gray-200 dark:hover:bg-gray-800 transition-opacity ${state.hideTestFiles ? 'opacity-30' : 'opacity-100'}`} onClick={toggleHideTestFiles} title={state.hideTestFiles ? 'Show test files' : 'Hide test files'} data-testid="filter-scope-tests">
+            <span class="w-2.5 h-2.5 rounded-sm flex-shrink-0" style={{ background: '#f59e0b' }} />
+            <span class="text-gray-600 dark:text-gray-300 truncate">tests</span>
+          </button>
+
+          {/* group files — highlighted when active (feature is ON) */}
+          <button class={`flex items-center gap-2 w-full px-2 py-1 rounded text-xs font-mono text-left
+              hover:bg-gray-200 dark:hover:bg-gray-800 transition-colors ${state.groupByFile ? "bg-teal-50 dark:bg-teal-900/20 ring-1 ring-teal-400/60 dark:ring-teal-600/60" : ''}`} onClick={toggleGroupByFile} title={state.groupByFile ? 'Disable file grouping' : 'Group nodes by source file'} data-testid="filter-scope-group-files">
+            <span class="w-2.5 h-2.5 rounded-sm flex-shrink-0" style={{ background: '#0d9488' }} />
+            <span class="text-gray-600 dark:text-gray-300 truncate">group files</span>
+          </button>
+        </div>
       </div>
 
       {/* Node kinds */}

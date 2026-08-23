@@ -48,6 +48,7 @@ interface AppState {
   hiddenNodeKinds: NodeKind[]
   hiddenEdgeKinds: EdgeKind[]
   hideTestFiles: boolean
+  groupByFile: boolean
   focusedNodeId: string | null
 
   // Diff
@@ -74,6 +75,7 @@ export const [state, setState] = createStore<AppState>({
   hiddenNodeKinds: [],
   hiddenEdgeKinds: [],
   hideTestFiles: false,
+  groupByFile: false,
   focusedNodeId: null,
   baseSnapshot: null,
   currentDiff: null,
@@ -104,10 +106,15 @@ export function toggleHideTestFiles(): void {
   setState('hideTestFiles', (v) => !v)
 }
 
+export function toggleGroupByFile(): void {
+  setState('groupByFile', (v) => !v)
+}
+
 export function clearFilters(): void {
   setState('hiddenNodeKinds', [])
   setState('hiddenEdgeKinds', [])
   setState('hideTestFiles', false)
+  setState('groupByFile', false)
 }
 
 // ── Diff ──────────────────────────────────────────────────────────────────────
@@ -151,6 +158,13 @@ export function visibleGraph(): { nodes: GraphNode[]; edges: GraphEdge[] } {
   if (state.hideTestFiles) {
     const TEST_RE = /(\.(test|spec)\.[jt]sx?$|__tests__[\\/]|__mocks__[\\/]|\.stories\.[jt]sx?$)/i
     nodes = nodes.filter((n) => !TEST_RE.test(n.filePath ?? ''))
+    nodeIds = new Set(nodes.map((n) => n.id))
+  }
+
+  // 1c. When grouping by file, remove file-kind nodes — they become spatial
+  //     containers drawn in the canvas layer, not graph nodes.
+  if (state.groupByFile) {
+    nodes = nodes.filter((n) => n.kind !== 'file')
     nodeIds = new Set(nodes.map((n) => n.id))
   }
 

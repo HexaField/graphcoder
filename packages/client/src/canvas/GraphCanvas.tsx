@@ -3,7 +3,14 @@ import { Application, Container, Graphics, Text, TextStyle } from 'pixi.js'
 import type { GraphNode } from '@graphcoder/core'
 import { nodeSemanticId } from '@graphcoder/core'
 import { edgeKindColor, nodeKindColor } from '../constants.js'
-import { layoutGraph, type LayoutEdge, type LayoutNode, type LayoutResult } from '../layout/elk.js'
+import {
+  layoutGraph,
+  type FileGroup,
+  type FileContainer,
+  type LayoutEdge,
+  type LayoutNode,
+  type LayoutResult
+} from '../layout/elk.js'
 import { clearFocus, selectNode, state, visibleGraph } from '../state/store.js'
 import { resolvedTheme } from '../state/theme.js'
 
@@ -54,12 +61,14 @@ function clearContainer(c: Container): void {
   }
 }
 
-// ── Shared text styles — two variants, allocated once per module ───────────────
+// ── Shared text styles — allocated once per module ────────────────────────────
 
 const NAME_STYLE_DARK = new TextStyle({ fontSize: 11, fill: '#ffffff', fontFamily: 'monospace' })
 const NAME_STYLE_LIGHT = new TextStyle({ fontSize: 11, fill: '#0f172a', fontFamily: 'monospace' })
 const BADGE_STYLE_DARK = new TextStyle({ fontSize: 8, fill: '#9ca3af', fontFamily: 'monospace' })
 const BADGE_STYLE_LIGHT = new TextStyle({ fontSize: 8, fill: '#475569', fontFamily: 'monospace' })
+const CONTAINER_LABEL_STYLE_DARK = new TextStyle({ fontSize: 9, fill: '#6b7280', fontFamily: 'monospace' })
+const CONTAINER_LABEL_STYLE_LIGHT = new TextStyle({ fontSize: 9, fill: '#94a3b8', fontFamily: 'monospace' })
 
 function makeColors(isDark: boolean): DrawColors {
   return {
@@ -70,6 +79,30 @@ function makeColors(isDark: boolean): DrawColors {
 }
 
 // ── Draw functions ────────────────────────────────────────────────────────────
+
+function drawFileContainer(target: Container, container: FileContainer, isDark: boolean): void {
+  const { x, y, width, height, label } = container
+  const g = new Graphics()
+
+  // Translucent background
+  g.roundRect(0, 0, width, height, 8)
+  g.fill({ color: isDark ? 0x0f172a : 0xe2e8f0, alpha: isDark ? 0.55 : 0.5 })
+
+  // Border
+  g.roundRect(0, 0, width, height, 8)
+  g.stroke({ color: isDark ? 0x334155 : 0x94a3b8, width: 1.5, alpha: isDark ? 0.8 : 0.6 })
+
+  g.position.set(x, y)
+  target.addChild(g)
+
+  // File label — top-left, inside the container above the nodes
+  const labelStyle = isDark ? CONTAINER_LABEL_STYLE_DARK : CONTAINER_LABEL_STYLE_LIGHT
+  // Trim long paths to the last 30 chars with a leading ellipsis
+  const short = label.length > 32 ? `…${label.slice(-31)}` : label
+  const text = new Text({ text: short, style: labelStyle })
+  text.position.set(x + 10, y + 10)
+  target.addChild(text)
+}
 
 function drawEdge(target: Container, edge: LayoutEdge, colors: DrawColors): void {
   const pts: number[] = []
@@ -175,6 +208,7 @@ export const GraphCanvas: Component = () => {
   // We access them in effects already gated by pixiReady().
   let pixiApp: Application | null = null
   let worldContainer: Container | null = null
+  let groupLayer: Container | null = null // file container boxes — drawn below edges
   let edgeLayer: Container | null = null
   let nodeLayer: Container | null = null
 
@@ -195,6 +229,41 @@ export const GraphCanvas: Component = () => {
       else if (op.op === 'move_node') moved.add(op.id)
     }
     return { added, modified, moved }
+  })
+
+  /**
+   * File groups for compound layout. Computed from raw contains edges so that
+   * we can build groups even after file-kind nodes are stripped from visible().
+   * Only populated when state.groupByFile is on.
+   */
+  const fileGroups = createMemo((): FileGroup[] | undefined => {
+    if (!state.groupByFile) return undefined
+
+    const visibleNodeIds = new Set(visible().nodes.map((n) => n.id))
+
+    // Find all file-kind nodes in the full (unfiltered) node set
+    const fileNodes = state.nodes.filter((n) => n.kind === 'file')
+
+    const groups: FileGroup[] = []
+    for (const fileNode of fileNodes) {
+      // Collect children that are currently visible
+      const childIds = state.edges
+        .filter((e) => e.kind === 'contains' && e.source === fileNode.id && visibleNodeIds.has(e.target))
+        .map((e) => e.target)
+
+      if (childIds.length === 0) continue // skip files with no visible children
+
+      // Use name for display; fall back to last segment of filePath
+      const name = fileNode.name
+      const label =
+        name && !name.includes('/')
+          ? name
+          : ((fileNode.filePath ?? name ?? fileNode.id).split('/').pop() ?? fileNode.id)
+
+      groups.push({ id: fileNode.id, label, childIds })
+    }
+
+    return groups.length > 0 ? groups : undefined
   })
 
   // Overlay positions: camera × ELK layout → CSS pixel rects for each node.
@@ -221,13 +290,14 @@ export const GraphCanvas: Component = () => {
   createEffect(async () => {
     const { nodes, edges } = visible()
     const viewMode = state.viewMode
+    const groups = fileGroups() // reactive: re-layouts when groupByFile toggles
     if (nodes.length === 0) {
       setLayout(null)
       return
     }
     setIsLayouting(true)
     try {
-      const result = await layoutGraph(nodes, edges, viewMode)
+      const result = await layoutGraph(nodes, edges, viewMode, groups)
       setLayout(result)
     } finally {
       setIsLayouting(false)
@@ -269,16 +339,22 @@ export const GraphCanvas: Component = () => {
   // those without needing a GPU re-upload.
 
   createEffect(() => {
-    if (!pixiReady() || !edgeLayer || !nodeLayer) return
+    if (!pixiReady() || !groupLayer || !edgeLayer || !nodeLayer) return
     const l = layout()
     const selectedId = state.selectedNodeId
     const overlay = diffOverlay()
     const byId = nodeById()
     const colors = makeColors(resolvedTheme() === 'dark') // reactive: redraws on theme change
 
+    clearContainer(groupLayer)
     clearContainer(edgeLayer)
     clearContainer(nodeLayer)
     if (!l) return
+
+    // Draw file container boxes first (below edges + nodes)
+    for (const container of l.containers) {
+      drawFileContainer(groupLayer, container, colors.isDark)
+    }
 
     for (const edge of l.edges) {
       drawEdge(edgeLayer, edge, colors)
@@ -319,15 +395,17 @@ export const GraphCanvas: Component = () => {
       autoDensity: true
     })
 
-    // Build scene graph: world → [edges, nodes]
+    // Build scene graph: world → [group (file containers), edges, nodes]
     const wc = new Container()
+    const gl = new Container() // group layer — file bounding boxes
     const el = new Container()
     const nl = new Container()
-    wc.addChild(el, nl)
+    wc.addChild(gl, el, nl)
     app.stage.addChild(wc)
 
     pixiApp = app
     worldContainer = wc
+    groupLayer = gl
     edgeLayer = el
     nodeLayer = nl
 
@@ -356,6 +434,7 @@ export const GraphCanvas: Component = () => {
       window.removeEventListener('mouseup', onWindowMouseUp)
       pixiApp = null
       worldContainer = null
+      groupLayer = null
       edgeLayer = null
       nodeLayer = null
       app.destroy()
