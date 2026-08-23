@@ -61,6 +61,12 @@ export interface FileGroup {
    * When omitted the file is placed in a synthetic "root" directory.
    */
   filePath?: string
+  /**
+   * Optional accent color (CSS hex string, e.g. '#10b981') used to distinguish
+   * contract groups from plain file groups. Passed through to the rendered
+   * FileContainer so the canvas can draw a coloured border.
+   */
+  color?: string
 }
 
 /** A rendered container box returned from a grouped layout. */
@@ -71,6 +77,8 @@ export interface FileContainer {
   y: number
   width: number
   height: number
+  /** Optional accent color inherited from the FileGroup (contract groups only). */
+  color?: string
 }
 
 export interface LayoutResult {
@@ -222,6 +230,154 @@ async function layoutGrouped(
     dirPathToFiles.get(dir)!.push(fg)
   }
 
+  // ── Shared setup ──────────────────────────────────────────────────────────
+
+  const validEdges = edges.filter((e) => nodeIds.has(e.source) && nodeIds.has(e.target))
+  // Pre-fill kind map — shared by both layout paths
+  const edgeKindMap = new Map<string, string>()
+  validEdges.forEach((e, i) => edgeKindMap.set(`e${i}`, e.kind))
+
+  // Alternate layout directions between levels for 2D space coverage:
+  //   root (between top-level compounds) → primary direction (view-mode driven)
+  //   dir  (between file compounds)      → perpendicular
+  //   file (between leaf nodes)          → primary direction again
+  const rootDir = LAYOUT_OPTIONS[viewMode]['elk.direction'] ?? 'RIGHT'
+  const perpDir = rootDir === 'RIGHT' || rootDir === 'LEFT' ? 'DOWN' : 'RIGHT'
+
+  // Ungrouped nodes live at root level in both layouts
+  const ungroupedNodes = nodes.filter((n) => !nodeToFile.has(n.id))
+  const flatNodes: ElkNode[] = ungroupedNodes.map((n) => ({ id: n.id, width: NODE_WIDTH, height: NODE_HEIGHT }))
+
+  // ── Determine layout tier ─────────────────────────────────────────────────
+  //
+  // Use 3-tier nesting (root → dir → file → node) only when there are 2 or more
+  // meaningful directory paths. When all groups fall into the synthetic '.'
+  // directory (e.g. contract grouping, or all files in one folder), skip the
+  // dir tier and use a flat 2-tier layout (root → group → node) — a dir tier
+  // that wraps everything adds visual noise without spatial information.
+
+  const meaningfulDirCount = [...dirPathToFiles.keys()].filter((dp) => dp !== '.').length
+
+  if (meaningfulDirCount < 2) {
+    // ── Flat 2-tier layout (root → group compound → node) ────────────────────
+    //
+    // Used for contract grouping (no filePaths) and single-directory projects.
+    // elk.hierarchyHandling: INCLUDE_CHILDREN on root ensures cross-compound
+    // edges are routed correctly even though endpoints live inside compounds.
+
+    const groupFileEdgeMap = new Map<string, ElkExtendedEdge[]>()
+    const groupRootEdges: ElkExtendedEdge[] = []
+
+    validEdges.forEach((e, i) => {
+      const id = `e${i}`
+      const elk_edge: ElkExtendedEdge = { id, sources: [e.source], targets: [e.target] }
+      const srcGroup = nodeToFile.get(e.source)
+      const tgtGroup = nodeToFile.get(e.target)
+      if (srcGroup !== undefined && srcGroup === tgtGroup) {
+        if (!groupFileEdgeMap.has(srcGroup)) groupFileEdgeMap.set(srcGroup, [])
+        groupFileEdgeMap.get(srcGroup)!.push(elk_edge)
+      } else {
+        groupRootEdges.push(elk_edge)
+      }
+    })
+
+    const groupElkNodes: ElkNode[] = []
+    for (const fg of fileGroups) {
+      const childElkNodes = fg.childIds
+        .filter((id) => nodeIds.has(id))
+        .map((id) => ({ id, width: NODE_WIDTH, height: NODE_HEIGHT }))
+      if (childElkNodes.length === 0) continue
+      const n: ElkNode = {
+        id: fg.id,
+        layoutOptions: {
+          'elk.algorithm': 'layered',
+          'elk.direction': rootDir,
+          'elk.padding': '[top=36,left=10,bottom=10,right=10]',
+          'elk.spacing.nodeNode': '20',
+          'elk.layered.spacing.nodeNodeBetweenLayers': '30'
+        },
+        children: childElkNodes
+      }
+      const fe = groupFileEdgeMap.get(fg.id)
+      if (fe?.length) n.edges = fe
+      groupElkNodes.push(n)
+    }
+
+    const flatGraph: ElkNode = {
+      id: 'root',
+      layoutOptions: {
+        ...LAYOUT_OPTIONS[viewMode],
+        'elk.hierarchyHandling': 'INCLUDE_CHILDREN',
+        'elk.spacing.nodeNode': '60',
+        'elk.layered.spacing.nodeNodeBetweenLayers': '80'
+      },
+      children: [...groupElkNodes, ...flatNodes],
+      edges: groupRootEdges
+    }
+
+    const flatLayouted = await elk.layout(flatGraph)
+
+    const flatResultNodes = new Map<string, LayoutNode>()
+    const flatContainers: FileContainer[] = []
+    let flatMaxX = 0,
+      flatMaxY = 0
+
+    for (const child of flatLayouted.children ?? []) {
+      const cx = child.x ?? 0
+      const cy = child.y ?? 0
+      const cw = child.width ?? NODE_WIDTH
+      const ch = child.height ?? NODE_HEIGHT
+
+      if (fileGroupMap.has(child.id)) {
+        const fg = fileGroupMap.get(child.id)!
+        // Pass fg.color through to the container so the canvas can render
+        // a coloured border for contract groups
+        flatContainers.push({ id: child.id, label: fg.label, color: fg.color, x: cx, y: cy, width: cw, height: ch })
+        for (const gc of child.children ?? []) {
+          flatResultNodes.set(gc.id, {
+            id: gc.id,
+            x: cx + (gc.x ?? 0),
+            y: cy + (gc.y ?? 0),
+            width: gc.width ?? NODE_WIDTH,
+            height: gc.height ?? NODE_HEIGHT
+          })
+        }
+      } else {
+        flatResultNodes.set(child.id, { id: child.id, x: cx, y: cy, width: cw, height: ch })
+      }
+      if (cx + cw > flatMaxX) flatMaxX = cx + cw
+      if (cy + ch > flatMaxY) flatMaxY = cy + ch
+    }
+
+    const flatResultEdges: LayoutEdge[] = []
+    extractEdgeSections(flatLayouted, edgeKindMap, flatResultEdges)
+    for (const child of flatLayouted.children ?? []) {
+      if (fileGroupMap.has(child.id) && child.edges?.length) {
+        extractEdgeSections(child, edgeKindMap, flatResultEdges, child.x ?? 0, child.y ?? 0)
+      }
+    }
+
+    return {
+      nodes: flatResultNodes,
+      edges: flatResultEdges,
+      containers: flatContainers,
+      dirContainers: [],
+      width: flatMaxX,
+      height: flatMaxY
+    }
+  }
+
+  // ── 3-tier nested layout (root → dir → file → node) ──────────────────────
+  //
+  // Edges placed at their Lowest Common Ancestor (LCA) container so ELK
+  // routes them correctly at each level:
+  //   same file           → file compound's .edges
+  //   same dir, diff file → dir compound's .edges
+  //   diff dir (or ungrouped) → root's .edges
+  //
+  // elk.hierarchyHandling: INCLUDE_CHILDREN on root and dir compounds lets ELK
+  // route edges whose endpoints live inside nested children.
+
   // Assign stable ELK-safe ids for directory nodes (paths contain slashes)
   let dirIdx = 0
   const dirPathToId = new Map<string, string>()
@@ -242,16 +398,12 @@ async function layoutGrouped(
 
   // ── Classify edges by LCA level ───────────────────────────────────────────
 
-  const validEdges = edges.filter((e) => nodeIds.has(e.source) && nodeIds.has(e.target))
-  const edgeKindMap = new Map<string, string>()
-
   const rootEdges: ElkExtendedEdge[] = []
   const dirEdgeMap = new Map<string, ElkExtendedEdge[]>() // dirElkId → edges
   const fileEdgeMap = new Map<string, ElkExtendedEdge[]>() // fileGroupId → edges
 
   validEdges.forEach((e, i) => {
     const id = `e${i}`
-    edgeKindMap.set(id, e.kind)
     const elk_edge: ElkExtendedEdge = { id, sources: [e.source], targets: [e.target] }
 
     const srcFile = nodeToFile.get(e.source)
@@ -279,13 +431,6 @@ async function layoutGrouped(
   })
 
   // ── Build ELK nested tree ─────────────────────────────────────────────────
-
-  // Alternate layout directions between levels for 2D space coverage:
-  //   root (between dir compounds) → primary direction
-  //   dir  (between file compounds) → perpendicular
-  //   file (between leaf nodes)    → primary direction again
-  const rootDir = LAYOUT_OPTIONS[viewMode]['elk.direction'] ?? 'RIGHT'
-  const perpDir = rootDir === 'RIGHT' || rootDir === 'LEFT' ? 'DOWN' : 'RIGHT'
 
   // File compound ElkNodes
   const fileElkNodes = new Map<string, ElkNode>()
@@ -334,14 +479,6 @@ async function layoutGrouped(
     if (de?.length) dn.edges = de
     dirElkNodes.push(dn)
   }
-
-  // Ungrouped nodes (not inside any file group) live at root level
-  const ungroupedNodes = nodes.filter((n) => !nodeToFile.has(n.id))
-  const flatNodes: ElkNode[] = ungroupedNodes.map((n) => ({
-    id: n.id,
-    width: NODE_WIDTH,
-    height: NODE_HEIGHT
-  }))
 
   const graph: ElkNode = {
     id: 'root',

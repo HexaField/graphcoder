@@ -6,6 +6,7 @@ import {
   clearFocus,
   state,
   toggleEdgeKind,
+  toggleGroupByContract,
   toggleGroupByFile,
   toggleHideDevFiles,
   toggleHideTestFiles,
@@ -67,7 +68,8 @@ export const FilterPanel: Component = () => {
       state.hiddenEdgeKinds.length > 0 ||
       state.hideTestFiles ||
       state.hideDevFiles ||
-      state.groupByFile
+      state.groupByFile ||
+      state.groupByContract
   )
 
   return (
@@ -136,6 +138,13 @@ export const FilterPanel: Component = () => {
               hover:bg-gray-200 dark:hover:bg-gray-800 transition-colors ${state.groupByFile ? "bg-teal-50 dark:bg-teal-900/20 ring-1 ring-teal-400/60 dark:ring-teal-600/60" : ''}`} onClick={toggleGroupByFile} title={state.groupByFile ? 'Disable file grouping' : 'Group nodes by source file'} data-testid="filter-scope-group-files">
             <span class="w-2.5 h-2.5 rounded-sm flex-shrink-0" style={{ background: '#0d9488' }} />
             <span class="text-gray-600 dark:text-gray-300 truncate">group files</span>
+          </button>
+
+          {/* group contracts — highlighted when active (feature is ON) */}
+          <button class={`flex items-center gap-2 w-full px-2 py-1 rounded text-xs font-mono text-left
+              hover:bg-gray-200 dark:hover:bg-gray-800 transition-colors ${state.groupByContract ? "bg-orange-50 dark:bg-orange-900/20 ring-1 ring-orange-400/60 dark:ring-orange-600/60" : ''}`} onClick={toggleGroupByContract} title={state.groupByContract ? 'Disable contract grouping' : 'Group nodes by API surface (REST, WebSocket, GraphQL…)'} data-testid="filter-scope-group-contracts">
+            <span class="w-2.5 h-2.5 rounded-sm flex-shrink-0" style={{ background: '#f97316' }} />
+            <span class="text-gray-600 dark:text-gray-300 truncate">group contracts</span>
           </button>
         </div>
       </div>

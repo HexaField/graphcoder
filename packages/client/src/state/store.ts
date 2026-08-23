@@ -50,6 +50,7 @@ interface AppState {
   hideTestFiles: boolean
   hideDevFiles: boolean
   groupByFile: boolean
+  groupByContract: boolean
   focusedNodeId: string | null
 
   // Diff
@@ -72,6 +73,7 @@ interface PersistedFilters {
   hideTestFiles: boolean
   hideDevFiles: boolean
   groupByFile: boolean
+  groupByContract: boolean
 }
 
 function loadFilters(): Partial<PersistedFilters> {
@@ -85,7 +87,8 @@ function loadFilters(): Partial<PersistedFilters> {
       hiddenEdgeKinds: Array.isArray(p.hiddenEdgeKinds) ? (p.hiddenEdgeKinds as EdgeKind[]) : undefined,
       hideTestFiles: typeof p.hideTestFiles === 'boolean' ? p.hideTestFiles : undefined,
       hideDevFiles: typeof p.hideDevFiles === 'boolean' ? p.hideDevFiles : undefined,
-      groupByFile: typeof p.groupByFile === 'boolean' ? p.groupByFile : undefined
+      groupByFile: typeof p.groupByFile === 'boolean' ? p.groupByFile : undefined,
+      groupByContract: typeof p.groupByContract === 'boolean' ? p.groupByContract : undefined
     }
   } catch {
     return {}
@@ -99,7 +102,8 @@ function persistFilters(): void {
       hiddenEdgeKinds: state.hiddenEdgeKinds,
       hideTestFiles: state.hideTestFiles,
       hideDevFiles: state.hideDevFiles,
-      groupByFile: state.groupByFile
+      groupByFile: state.groupByFile,
+      groupByContract: state.groupByContract
     }
     localStorage.setItem(FILTER_KEY, JSON.stringify(f))
   } catch {
@@ -127,6 +131,7 @@ export const [state, setState] = createStore<AppState>({
   hideTestFiles: _saved.hideTestFiles ?? false,
   hideDevFiles: _saved.hideDevFiles ?? false,
   groupByFile: _saved.groupByFile ?? false,
+  groupByContract: _saved.groupByContract ?? false,
   focusedNodeId: null,
   baseSnapshot: null,
   currentDiff: null,
@@ -170,12 +175,18 @@ export function toggleGroupByFile(): void {
   persistFilters()
 }
 
+export function toggleGroupByContract(): void {
+  setState('groupByContract', (v) => !v)
+  persistFilters()
+}
+
 export function clearFilters(): void {
   setState('hiddenNodeKinds', [])
   setState('hiddenEdgeKinds', [])
   setState('hideTestFiles', false)
   setState('hideDevFiles', false)
   setState('groupByFile', false)
+  setState('groupByContract', false)
   persistFilters()
 }
 
@@ -240,9 +251,9 @@ export function visibleGraph(): { nodes: GraphNode[]; edges: GraphEdge[] } {
     nodeIds = new Set(nodes.map((n) => n.id))
   }
 
-  // 1c. When grouping by file, remove file-kind nodes — they become spatial
-  //     containers drawn in the canvas layer, not graph nodes.
-  if (state.groupByFile) {
+  // 1c. When grouping by file OR by contract kind, remove file-kind nodes —
+  //     they become spatial containers drawn in the canvas layer, not graph nodes.
+  if (state.groupByFile || state.groupByContract) {
     nodes = nodes.filter((n) => n.kind !== 'file')
     nodeIds = new Set(nodes.map((n) => n.id))
   }

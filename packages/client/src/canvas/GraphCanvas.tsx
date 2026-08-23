@@ -1,6 +1,6 @@
 import { type Component, createEffect, createMemo, createSignal, For, onCleanup, onMount, Show } from 'solid-js'
 import { Application, Container, Graphics, Text, TextStyle } from 'pixi.js'
-import type { GraphNode } from '@graphcoder/core'
+import type { GraphNode, NodeKind } from '@graphcoder/core'
 import { nodeSemanticId } from '@graphcoder/core'
 import { edgeKindColor, nodeKindColor } from '../constants.js'
 import {
@@ -72,6 +72,82 @@ const CONTAINER_LABEL_STYLE_LIGHT = new TextStyle({ fontSize: 9, fill: '#94a3b8'
 const DIR_LABEL_STYLE_DARK = new TextStyle({ fontSize: 10, fill: '#374151', fontFamily: 'monospace' })
 const DIR_LABEL_STYLE_LIGHT = new TextStyle({ fontSize: 10, fill: '#64748b', fontFamily: 'monospace' })
 
+// ── Contract group definitions ────────────────────────────────────────────────
+//
+// Each entry defines a semantic API surface layer. Nodes match the FIRST group
+// whose test() returns true (priority order). Groups without filePath are used
+// as contract groups — they produce flat 2-tier ELK compound layout rather than
+// the directory-nested layout used by file grouping.
+
+interface ContractGroupDef {
+  id: string
+  label: string
+  color: string
+  test: (node: GraphNode) => boolean
+}
+
+const ROUTE_KINDS: NodeKind[] = ['route']
+const DATA_KINDS: NodeKind[] = ['class', 'interface', 'struct', 'type_alias']
+const SERVICE_KINDS: NodeKind[] = ['class']
+const UI_KINDS: NodeKind[] = ['function', 'class']
+
+const CONTRACT_GROUPS: ContractGroupDef[] = [
+  {
+    id: '__contract_rest',
+    label: 'REST API',
+    color: '#10b981',
+    test: (n) =>
+      (ROUTE_KINDS as string[]).includes(n.kind) ||
+      /\.(controller|router|route|handler|endpoint)\.[jt]sx?$/i.test(n.filePath ?? '') ||
+      /[\\/](controllers?|routes?|handlers?|endpoints?)[\\/]/i.test(n.filePath ?? '')
+  },
+  {
+    id: '__contract_ws',
+    label: 'WebSocket',
+    color: '#06b6d4',
+    test: (n) =>
+      /\.(gateway|socket|hub|ws)\.[jt]sx?$/i.test(n.filePath ?? '') ||
+      /[\\/](gateways?|sockets?|hubs?)[\\/]/i.test(n.filePath ?? '')
+  },
+  {
+    id: '__contract_graphql',
+    label: 'GraphQL',
+    color: '#e879f9',
+    test: (n) =>
+      /\.(resolver|typedef)\.[jt]sx?$/i.test(n.filePath ?? '') ||
+      /\.(graphql|gql)$/i.test(n.filePath ?? '') ||
+      /[\\/](resolvers?|graphql)[\\/]/i.test(n.filePath ?? '') ||
+      /(Query|Mutation|Subscription|Resolver)$/.test(n.name)
+  },
+  {
+    id: '__contract_data',
+    label: 'Data Models',
+    color: '#f97316',
+    test: (n) =>
+      (DATA_KINDS as string[]).includes(n.kind) &&
+      (/\.(model|entity|schema|dto|repository)\.[jt]sx?$/i.test(n.filePath ?? '') ||
+        /[\\/](models?|entities|schemas?|dtos?|repositories?)[\\/]/i.test(n.filePath ?? ''))
+  },
+  {
+    id: '__contract_service',
+    label: 'Services',
+    color: '#a78bfa',
+    test: (n) =>
+      (SERVICE_KINDS as string[]).includes(n.kind) &&
+      (/\.service\.[jt]sx?$/i.test(n.filePath ?? '') || /[\\/]services?[\\/]/i.test(n.filePath ?? ''))
+  },
+  {
+    id: '__contract_ui',
+    label: 'UI Components',
+    color: '#60a5fa',
+    test: (n) =>
+      n.kind === 'component' ||
+      ((UI_KINDS as string[]).includes(n.kind) &&
+        (/\.(component|view|page|screen|widget)\.[jt]sx?$/i.test(n.filePath ?? '') ||
+          /[\\/](components?|views?|pages?|screens?)[\\/]/i.test(n.filePath ?? '')))
+  }
+]
+
 function makeColors(isDark: boolean): DrawColors {
   return {
     isDark,
@@ -106,27 +182,41 @@ function drawDirContainer(target: Container, container: FileContainer, isDark: b
 }
 
 function drawFileContainer(target: Container, container: FileContainer, isDark: boolean): void {
-  const { x, y, width, height, label } = container
+  const { x, y, width, height, label, color } = container
   const g = new Graphics()
 
-  // Translucent background
-  g.roundRect(0, 0, width, height, 8)
-  g.fill({ color: isDark ? 0x0f172a : 0xe2e8f0, alpha: isDark ? 0.55 : 0.5 })
-
-  // Border
-  g.roundRect(0, 0, width, height, 8)
-  g.stroke({ color: isDark ? 0x334155 : 0x94a3b8, width: 1.5, alpha: isDark ? 0.8 : 0.6 })
+  if (color) {
+    // Contract group container — coloured accent border with tinted background
+    const hex = parseInt(color.slice(1), 16)
+    g.roundRect(0, 0, width, height, 10)
+    g.fill({ color: hex, alpha: 0.07 })
+    g.roundRect(0, 0, width, height, 10)
+    g.stroke({ color: hex, width: 2, alpha: 0.6 })
+  } else {
+    // File container — neutral slate
+    g.roundRect(0, 0, width, height, 8)
+    g.fill({ color: isDark ? 0x0f172a : 0xe2e8f0, alpha: isDark ? 0.55 : 0.5 })
+    g.roundRect(0, 0, width, height, 8)
+    g.stroke({ color: isDark ? 0x334155 : 0x94a3b8, width: 1.5, alpha: isDark ? 0.8 : 0.6 })
+  }
 
   g.position.set(x, y)
   target.addChild(g)
 
-  // File label — top-left, inside the container above the nodes
-  const labelStyle = isDark ? CONTAINER_LABEL_STYLE_DARK : CONTAINER_LABEL_STYLE_LIGHT
-  // Trim long paths to the last 30 chars with a leading ellipsis
-  const short = label.length > 32 ? `…${label.slice(-31)}` : label
-  const text = new Text({ text: short, style: labelStyle })
-  text.position.set(x + 10, y + 10)
-  target.addChild(text)
+  if (color) {
+    // Contract group label — contract color, bold, full name (not truncated)
+    const contractStyle = new TextStyle({ fontSize: 11, fill: color, fontFamily: 'monospace', fontWeight: 'bold' })
+    const text = new Text({ text: label, style: contractStyle })
+    text.position.set(x + 12, y + 10)
+    target.addChild(text)
+  } else {
+    // File label — muted monospace, trimmed to last 31 chars
+    const labelStyle = isDark ? CONTAINER_LABEL_STYLE_DARK : CONTAINER_LABEL_STYLE_LIGHT
+    const short = label.length > 32 ? `…${label.slice(-31)}` : label
+    const text = new Text({ text: short, style: labelStyle })
+    text.position.set(x + 10, y + 10)
+    target.addChild(text)
+  }
 }
 
 function drawEdge(target: Container, edge: LayoutEdge, colors: DrawColors): void {
@@ -292,6 +382,34 @@ export const GraphCanvas: Component = () => {
     return groups.length > 0 ? groups : undefined
   })
 
+  /**
+   * Contract groups for semantic API surface layout. Each visible node matches
+   * the first ContractGroupDef whose test() returns true. Nodes that match no
+   * group stay ungrouped (rendered flat alongside the contract compounds).
+   * Only populated when state.groupByContract is on and state.groupByFile is off.
+   */
+  const contractGroups = createMemo((): FileGroup[] | undefined => {
+    // File grouping takes precedence — contract mode is inactive when file mode is on
+    if (!state.groupByContract || state.groupByFile) return undefined
+
+    const visibleNodes = visible().nodes
+    const assigned = new Set<string>()
+    const groups: FileGroup[] = []
+
+    for (const def of CONTRACT_GROUPS) {
+      const childIds = visibleNodes.filter((n) => !assigned.has(n.id) && def.test(n)).map((n) => n.id)
+      if (childIds.length === 0) continue
+      childIds.forEach((id) => assigned.add(id))
+      // No filePath — triggers flat 2-tier ELK layout instead of dir nesting
+      groups.push({ id: def.id, label: def.label, color: def.color, childIds })
+    }
+
+    return groups.length > 0 ? groups : undefined
+  })
+
+  /** Active groups for ELK layout: file grouping takes precedence over contract grouping. */
+  const activeGroups = createMemo((): FileGroup[] | undefined => fileGroups() ?? contractGroups())
+
   // Overlay positions: camera × ELK layout → CSS pixel rects for each node.
   // Updates on every pan/zoom and every layout change.
   const overlayNodes = createMemo((): OverlayNode[] => {
@@ -316,7 +434,7 @@ export const GraphCanvas: Component = () => {
   createEffect(async () => {
     const { nodes, edges } = visible()
     const viewMode = state.viewMode
-    const groups = fileGroups() // reactive: re-layouts when groupByFile toggles
+    const groups = activeGroups() // reactive: re-layouts when groupByFile or groupByContract toggles
     if (nodes.length === 0) {
       setLayout(null)
       return
