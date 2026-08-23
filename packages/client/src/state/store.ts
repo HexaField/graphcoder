@@ -168,6 +168,27 @@ export function visibleGraph(): { nodes: GraphNode[]; edges: GraphEdge[] } {
     nodeIds = new Set(nodes.map((n) => n.id))
   }
 
+  // 1d. Aggregate duplicate import nodes — collapse all import nodes with the
+  //     same module name (e.g. "react") into one canonical representative.
+  //     Stash the aliasMap so step 3 can remap edges that referred to discarded nodes.
+  const aliasMap = new Map<string, string>() // discarded id → canonical id
+  {
+    const importByName = new Map<string, string>() // name → canonical node id
+    for (const n of nodes) {
+      if (n.kind !== 'import') continue
+      const existing = importByName.get(n.name)
+      if (!existing) {
+        importByName.set(n.name, n.id)
+      } else {
+        aliasMap.set(n.id, existing)
+      }
+    }
+    if (aliasMap.size > 0) {
+      nodes = nodes.filter((n) => !aliasMap.has(n.id))
+      nodeIds = new Set(nodes.map((n) => n.id))
+    }
+  }
+
   // 2. Apply focus: narrow to focused node + its direct neighbours
   const focusId = state.focusedNodeId
   if (focusId && nodeIds.has(focusId)) {
@@ -180,8 +201,23 @@ export function visibleGraph(): { nodes: GraphNode[]; edges: GraphEdge[] } {
     nodeIds = new Set(nodes.map((n) => n.id))
   }
 
-  // 3. Filter edges: kind not hidden + both endpoints visible
-  const edges = state.edges.filter((e) => !hiddenEdgeSet.has(e.kind) && nodeIds.has(e.source) && nodeIds.has(e.target))
+  // 3. Filter edges: kind not hidden, both endpoints visible (after alias
+  //     remapping), deduplicated by (src, tgt, kind) to remove parallel edges
+  //     that arise when multiple aliased imports shared the same target.
+  const resolve = (id: string) => aliasMap.get(id) ?? id
+  const seenEdgeKeys = new Set<string>()
+  const edges: GraphEdge[] = []
+  for (const e of state.edges) {
+    if (hiddenEdgeSet.has(e.kind)) continue
+    const src = resolve(e.source)
+    const tgt = resolve(e.target)
+    if (!nodeIds.has(src) || !nodeIds.has(tgt)) continue
+    if (src === tgt) continue // self-loop produced by import merging — skip
+    const key = `${src}|${tgt}|${e.kind}`
+    if (seenEdgeKeys.has(key)) continue
+    seenEdgeKeys.add(key)
+    edges.push(src === e.source && tgt === e.target ? e : { ...e, source: src, target: tgt })
+  }
 
   return { nodes, edges }
 }
