@@ -373,6 +373,7 @@ async function layoutGrouped(
         layoutOptions: {
           'elk.algorithm': 'layered',
           'elk.direction': innerDir,
+          ...(isLarge ? LARGE_GRAPH_OVERRIDES : {}),
           'elk.padding': '[top=28,left=8,bottom=8,right=8]',
           'elk.spacing.nodeNode': '16',
           'elk.layered.spacing.nodeNodeBetweenLayers': '20'
@@ -389,6 +390,7 @@ async function layoutGrouped(
       layoutOptions: {
         'elk.algorithm': 'layered',
         'elk.direction': innerDir,
+        ...(isLarge ? LARGE_GRAPH_OVERRIDES : {}),
         'elk.padding': '[top=36,left=10,bottom=10,right=10]',
         'elk.spacing.nodeNode': '20',
         'elk.layered.spacing.nodeNodeBetweenLayers': '30'
@@ -498,6 +500,7 @@ async function layoutGrouped(
       id: 'root',
       layoutOptions: {
         ...LAYOUT_OPTIONS[direction],
+        ...(isLarge ? LARGE_GRAPH_OVERRIDES : {}),
         'elk.hierarchyHandling': 'INCLUDE_CHILDREN',
         'elk.spacing.nodeNode': '60',
         'elk.layered.spacing.nodeNodeBetweenLayers': '80'
@@ -632,6 +635,7 @@ async function layoutGrouped(
         layoutOptions: {
           'elk.algorithm': 'layered',
           'elk.direction': perpDir,
+          ...(isLarge ? LARGE_GRAPH_OVERRIDES : {}),
           'elk.hierarchyHandling': 'INCLUDE_CHILDREN',
           'elk.padding': '[top=30,left=12,bottom=12,right=12]',
           'elk.spacing.nodeNode': '30',
@@ -666,6 +670,7 @@ async function layoutGrouped(
         layoutOptions: {
           'elk.algorithm': 'layered',
           'elk.direction': perpDir,
+          ...(isLarge ? LARGE_GRAPH_OVERRIDES : {}),
           'elk.hierarchyHandling': 'INCLUDE_CHILDREN',
           'elk.padding': '[top=44,left=18,bottom=18,right=18]',
           'elk.spacing.nodeNode': '40',
@@ -939,6 +944,7 @@ async function layoutGrouped(
       layoutOptions: {
         'elk.algorithm': 'layered',
         'elk.direction': perpDir,
+        ...(isLarge ? LARGE_GRAPH_OVERRIDES : {}),
         'elk.hierarchyHandling': 'INCLUDE_CHILDREN',
         'elk.padding': '[top=30,left=12,bottom=12,right=12]',
         'elk.spacing.nodeNode': '30',
