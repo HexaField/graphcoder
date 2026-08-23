@@ -25,20 +25,27 @@ interface TreeDir {
   type: 'dir'
   path: string
   label: string
+  /** Files whose parent directory is exactly this dir's path. */
   children: TreeFile[]
+  /** Subdirectories nested inside this directory. */
+  subdirs: TreeDir[]
 }
 
 interface TreePackage {
   type: 'package'
   path: string
   label: string
+  /** Top-level directories directly inside the package root. */
   dirs: TreeDir[]
+  /** Files whose parent directory is exactly the package root path. */
   files: TreeFile[]
 }
 
 interface HierarchyTree {
   packages: TreePackage[]
+  /** Top-level loose directories (not inside any recognised package). */
   dirs: TreeDir[]
+  /** Files whose parent directory is the filesystem root. */
   files: TreeFile[]
 }
 
@@ -55,6 +62,48 @@ const PKG_ROOT_RE = /^(packages|apps|libs|test-fixtures|fixtures|examples|tools|
 function pkgOf(dir: string): string | null {
   const m = PKG_ROOT_RE.exec(dir)
   return m ? m[0] : null
+}
+
+/**
+ * Expand a list of leaf directory paths to include every intermediate ancestor
+ * down to (but not including) `rootPath`.
+ *
+ * Example: given `['a/b/c/d']` and root `'a'`, produces `{'a/b', 'a/b/c', 'a/b/c/d'}`.
+ * This ensures the nested tree has no gaps even when no files sit in intermediate dirs.
+ */
+function expandIntermediateDirs(leafDirs: Iterable<string>, rootPath: string): Set<string> {
+  const result = new Set<string>()
+  const prefix = rootPath === '' ? '' : rootPath + '/'
+  for (const dir of leafDirs) {
+    let d = dir
+    while (d !== rootPath && (rootPath === '' ? d !== '' : d.startsWith(prefix))) {
+      result.add(d)
+      const slash = d.lastIndexOf('/')
+      d = slash >= 0 ? d.slice(0, slash) : ''
+    }
+  }
+  return result
+}
+
+/**
+ * Recursively build a nested TreeDir[] from a flat set of directory paths.
+ * `parentPath` identifies the immediate parent; each call returns only the
+ * direct children of `parentPath` together with their own subtrees.
+ */
+function nestDirs(allDirs: Set<string>, parentPath: string, dirToFiles: Map<string, TreeFile[]>): TreeDir[] {
+  const directChildren = [...allDirs].filter((d) => {
+    const slash = d.lastIndexOf('/')
+    const parent = slash >= 0 ? d.slice(0, slash) : ''
+    return parent === parentPath
+  })
+
+  return directChildren.sort().map((dirPath) => ({
+    type: 'dir' as const,
+    path: dirPath,
+    label: dirPath.split('/').pop()!,
+    children: (dirToFiles.get(dirPath) ?? []).slice(),
+    subdirs: nestDirs(allDirs, dirPath, dirToFiles)
+  }))
 }
 
 function buildTree(nodes: GraphNode[], edges: GraphEdge[]): HierarchyTree {
@@ -83,7 +132,7 @@ function buildTree(nodes: GraphNode[], edges: GraphEdge[]): HierarchyTree {
     return { type: 'file', node: fn, key: fn.filePath ?? fn.id, children }
   }
 
-  // Group files by parent directory
+  // Group files by their immediate parent directory path
   const fileNodes = nodes.filter((n) => n.kind === 'file' || n.kind === 'module')
   const dirToFiles = new Map<string, TreeFile[]>()
   for (const fn of fileNodes) {
@@ -96,60 +145,70 @@ function buildTree(nodes: GraphNode[], edges: GraphEdge[]): HierarchyTree {
   }
   for (const list of dirToFiles.values()) list.sort((a, b) => a.node.name.localeCompare(b.node.name))
 
-  const pkgToDirs = new Map<string, string[]>()
-  const looseDirs: string[] = []
+  // Partition directories by package
+  const pkgToLeafDirs = new Map<string, string[]>()
+  const looseLeafDirs: string[] = []
 
   for (const dir of dirToFiles.keys()) {
     if (dir === '') continue
     const pkg = pkgOf(dir)
     if (pkg) {
-      // Skip the package root itself — its files already go to pkg.files via
-      // dirToFiles.get(pkgPath). Adding it as a child dir too creates duplicates.
-      if (dir === pkg) continue
-      const list = pkgToDirs.get(pkg) ?? []
+      if (dir === pkg) continue // pkg root files go to pkg.files — skip as a child dir
+      const list = pkgToLeafDirs.get(pkg) ?? []
       list.push(dir)
-      pkgToDirs.set(pkg, list)
+      pkgToLeafDirs.set(pkg, list)
     } else {
-      looseDirs.push(dir)
+      looseLeafDirs.push(dir)
     }
   }
 
-  const buildDir = (dirPath: string): TreeDir => {
-    const parts = dirPath.split('/')
-    return {
-      type: 'dir',
-      path: dirPath,
-      label: parts[parts.length - 1],
-      children: (dirToFiles.get(dirPath) ?? []).slice()
-    }
-  }
-
-  const packages: TreePackage[] = [...pkgToDirs.entries()]
+  // Build packages with properly nested dir trees
+  const packages: TreePackage[] = [...pkgToLeafDirs.entries()]
     .sort(([a], [b]) => a.localeCompare(b))
-    .map(([pkgPath, dirPaths]) => ({
-      type: 'package',
-      path: pkgPath,
-      label: pkgPath.split('/').pop() ?? pkgPath,
-      dirs: dirPaths.sort().map(buildDir),
-      files: dirToFiles.get(pkgPath) ?? []
-    }))
+    .map(([pkgPath, leafDirs]) => {
+      // Expand to include any intermediate dirs that contain no files directly
+      const allDirs = expandIntermediateDirs(leafDirs, pkgPath)
+      return {
+        type: 'package' as const,
+        path: pkgPath,
+        label: pkgPath.split('/').pop() ?? pkgPath,
+        dirs: nestDirs(allDirs, pkgPath, dirToFiles),
+        files: dirToFiles.get(pkgPath) ?? []
+      }
+    })
+
+  // Build loose dir trees (dirs not belonging to any package)
+  const allLooseDirs = expandIntermediateDirs(looseLeafDirs, '')
 
   return {
     packages,
-    dirs: looseDirs.sort().map(buildDir),
+    dirs: nestDirs(allLooseDirs, '', dirToFiles),
     files: dirToFiles.get('') ?? []
   }
 }
 
 // ── Bulk operations ───────────────────────────────────────────────────────────
 
-/** Hide every root-level item (cascades to hide everything in the graph). */
+/** Hide every root-level item (cascades via path-prefix to hide everything in the graph). */
 function hideAll(tree: HierarchyTree): void {
   setHiddenPaths([
     ...tree.packages.map((p) => p.path),
     ...tree.dirs.map((d) => d.path),
     ...tree.files.map((f) => f.key)
   ])
+}
+
+/** Collect all dir paths from a nested TreeDir[] recursively. */
+function collectDirPaths(dirs: TreeDir[]): string[] {
+  const result: string[] = []
+  function walk(ds: TreeDir[]) {
+    for (const d of ds) {
+      result.push(d.path)
+      walk(d.subdirs)
+    }
+  }
+  walk(dirs)
+  return result
 }
 
 /**
@@ -165,10 +224,10 @@ function isolatePath(tree: HierarchyTree, targetPath: string): void {
     if (!pkgContainsTarget) {
       toHide.push(pkg.path)
     } else {
-      // Hide sibling dirs/files inside this package
-      for (const dir of pkg.dirs) {
-        if (dir.path !== targetPath && !targetPath.startsWith(dir.path + '/')) {
-          toHide.push(dir.path)
+      // Walk the full nested dir tree — hide dirs that are not ancestors of target
+      for (const dirPath of collectDirPaths(pkg.dirs)) {
+        if (dirPath !== targetPath && !targetPath.startsWith(dirPath + '/')) {
+          toHide.push(dirPath)
         }
       }
       for (const file of pkg.files) {
@@ -179,9 +238,9 @@ function isolatePath(tree: HierarchyTree, targetPath: string): void {
     }
   }
 
-  for (const dir of tree.dirs) {
-    if (dir.path !== targetPath && !targetPath.startsWith(dir.path + '/')) {
-      toHide.push(dir.path)
+  for (const dirPath of collectDirPaths(tree.dirs)) {
+    if (dirPath !== targetPath && !targetPath.startsWith(dirPath + '/')) {
+      toHide.push(dirPath)
     }
   }
 
@@ -396,7 +455,6 @@ interface CtxMenuProps {
 }
 
 const ContextMenu: Component<CtxMenuProps> = (props) => {
-  // Close when clicking anywhere outside
   const handleOutside = (e: MouseEvent) => {
     if (!(e.target as Element).closest('[data-ctx-menu]')) props.onClose()
   }
@@ -451,8 +509,7 @@ const ContextMenu: Component<CtxMenuProps> = (props) => {
 export const HierarchyPanel: Component = () => {
   const tree = createMemo(() => buildTree(state.nodes, state.edges))
 
-  // All package keys expanded by default; rest collapsed.
-  // Sync when project changes to include any newly loaded packages.
+  // Expand all packages by default; sync when project data changes.
   const [expandedSet, setExpandedSet] = createSignal<Set<string>>(new Set())
   createMemo(() => {
     const pkgKeys = tree().packages.map((p) => p.path)
@@ -464,7 +521,6 @@ export const HierarchyPanel: Component = () => {
   })
 
   const hiddenSet = createMemo(() => new Set(state.hiddenPaths))
-
   const [ctxMenu, setCtxMenu] = createSignal<CtxMenuState | null>(null)
 
   function toggleExpanded(key: string): void {
@@ -484,14 +540,13 @@ export const HierarchyPanel: Component = () => {
 
   const hasAnyNodes = () => tree().packages.length > 0 || tree().dirs.length > 0 || tree().files.length > 0
 
-  // ── File rows helper (used inside both package and dir contexts) ──
+  // ── File rows (leaf level) ────────────────────────────────────────────────
 
   function renderFileRows(files: TreeFile[], depth: number, ancestorHiddenFn: () => boolean) {
     return (
       <For each={files}>
         {(file) => {
           const fileHidden = () => hiddenSet().has(file.key)
-          const fileAncestorHidden = ancestorHiddenFn
           const fileExpanded = () => expandedSet().has(file.key)
           const hasSymbols = file.children.length > 0
 
@@ -504,7 +559,7 @@ export const HierarchyPanel: Component = () => {
                 expanded={fileExpanded()}
                 onExpand={() => hasSymbols && toggleExpanded(file.key)}
                 hidden={fileHidden()}
-                ancestorHidden={fileAncestorHidden()}
+                ancestorHidden={ancestorHiddenFn()}
                 onToggleHide={(e) => {
                   e.stopPropagation()
                   toggleHierarchyHidden(file.key)
@@ -518,8 +573,50 @@ export const HierarchyPanel: Component = () => {
                   hiddenSet={hiddenSet()}
                   expandedSet={expandedSet()}
                   onExpand={toggleExpanded}
-                  ancestorHidden={fileAncestorHidden() || fileHidden()}
+                  ancestorHidden={ancestorHiddenFn() || fileHidden()}
                 />
+              </Show>
+            </>
+          )
+        }}
+      </For>
+    )
+  }
+
+  // ── Dir rows — recursive ──────────────────────────────────────────────────
+  //
+  // `depth` is the indentation level of the dir row itself.
+  // Files inside appear at depth+1; subdirs recursively increment further.
+
+  function renderDirRows(dirs: TreeDir[], depth: number, ancestorHiddenFn: () => boolean) {
+    return (
+      <For each={dirs}>
+        {(dir) => {
+          const dirHidden = () => hiddenSet().has(dir.path)
+          const effectivelyHidden = () => ancestorHiddenFn() || dirHidden()
+          const dirExpanded = () => expandedSet().has(dir.path)
+          const hasContent = dir.children.length > 0 || dir.subdirs.length > 0
+
+          return (
+            <>
+              <Row
+                depth={depth}
+                label={dir.label}
+                expandable={hasContent}
+                expanded={dirExpanded()}
+                onExpand={() => hasContent && toggleExpanded(dir.path)}
+                hidden={dirHidden()}
+                ancestorHidden={ancestorHiddenFn()}
+                onToggleHide={(e) => {
+                  e.stopPropagation()
+                  toggleHierarchyHidden(dir.path)
+                }}
+                onContextMenu={(e) => openCtxMenu(e, dir.path, dir.label)}
+              />
+              <Show when={dirExpanded() && hasContent}>
+                {/* Nested subdirectories first, then files in this dir */}
+                {renderDirRows(dir.subdirs, depth + 1, effectivelyHidden)}
+                {renderFileRows(dir.children, depth + 1, effectivelyHidden)}
               </Show>
             </>
           )
@@ -530,7 +627,6 @@ export const HierarchyPanel: Component = () => {
 
   return (
     <>
-      {/* Context menu portal */}
       <Show when={ctxMenu()}>
         {(menu) => <ContextMenu menu={menu()} tree={tree()} onClose={() => setCtxMenu(null)} />}
       </Show>
@@ -579,17 +675,16 @@ export const HierarchyPanel: Component = () => {
               {(pkg) => {
                 const pkgHidden = () => hiddenSet().has(pkg.path)
                 const pkgExpanded = () => expandedSet().has(pkg.path)
-                const hasDirs = pkg.dirs.length > 0
-                const hasFiles = pkg.files.length > 0
+                const hasContent = pkg.dirs.length > 0 || pkg.files.length > 0
 
                 return (
                   <>
                     <Row
                       depth={0}
                       label={pkg.label}
-                      expandable={hasDirs || hasFiles}
+                      expandable={hasContent}
                       expanded={pkgExpanded()}
-                      onExpand={() => toggleExpanded(pkg.path)}
+                      onExpand={() => hasContent && toggleExpanded(pkg.path)}
                       hidden={pkgHidden()}
                       ancestorHidden={false}
                       onToggleHide={(e) => {
@@ -598,42 +693,9 @@ export const HierarchyPanel: Component = () => {
                       }}
                       onContextMenu={(e) => openCtxMenu(e, pkg.path, pkg.label)}
                     />
-
-                    <Show when={pkgExpanded()}>
-                      {/* Files directly in package root */}
+                    <Show when={pkgExpanded() && hasContent}>
+                      {renderDirRows(pkg.dirs, 1, pkgHidden)}
                       {renderFileRows(pkg.files, 1, pkgHidden)}
-
-                      {/* Directories inside package */}
-                      <For each={pkg.dirs}>
-                        {(dir) => {
-                          const dirHidden = () => hiddenSet().has(dir.path)
-                          const dirAncestorHidden = () => pkgHidden()
-                          const dirExpanded = () => expandedSet().has(dir.path)
-
-                          return (
-                            <>
-                              <Row
-                                depth={1}
-                                label={dir.label}
-                                expandable={dir.children.length > 0}
-                                expanded={dirExpanded()}
-                                onExpand={() => toggleExpanded(dir.path)}
-                                hidden={dirHidden()}
-                                ancestorHidden={dirAncestorHidden()}
-                                onToggleHide={(e) => {
-                                  e.stopPropagation()
-                                  toggleHierarchyHidden(dir.path)
-                                }}
-                                onContextMenu={(e) => openCtxMenu(e, dir.path, dir.label)}
-                              />
-
-                              <Show when={dirExpanded()}>
-                                {renderFileRows(dir.children, 2, () => dirAncestorHidden() || dirHidden())}
-                              </Show>
-                            </>
-                          )
-                        }}
-                      </For>
                     </Show>
                   </>
                 )
@@ -641,32 +703,7 @@ export const HierarchyPanel: Component = () => {
             </For>
 
             {/* Loose directories (not inside a recognised package) */}
-            <For each={tree().dirs}>
-              {(dir) => {
-                const dirHidden = () => hiddenSet().has(dir.path)
-                const dirExpanded = () => expandedSet().has(dir.path)
-
-                return (
-                  <>
-                    <Row
-                      depth={0}
-                      label={dir.label}
-                      expandable={dir.children.length > 0}
-                      expanded={dirExpanded()}
-                      onExpand={() => toggleExpanded(dir.path)}
-                      hidden={dirHidden()}
-                      ancestorHidden={false}
-                      onToggleHide={(e) => {
-                        e.stopPropagation()
-                        toggleHierarchyHidden(dir.path)
-                      }}
-                      onContextMenu={(e) => openCtxMenu(e, dir.path, dir.label)}
-                    />
-                    <Show when={dirExpanded()}>{renderFileRows(dir.children, 1, dirHidden)}</Show>
-                  </>
-                )
-              }}
-            </For>
+            {renderDirRows(tree().dirs, 0, () => false)}
 
             {/* Root-level files */}
             {renderFileRows(tree().files, 0, () => false)}
