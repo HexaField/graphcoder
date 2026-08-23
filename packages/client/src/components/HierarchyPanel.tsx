@@ -688,9 +688,7 @@ export const HierarchyPanel: Component = () => {
             onInput={(e) => handlePatternsChange(e.currentTarget.value)}
             title="Comma-separated glob patterns to exclude from graph. Use * as wildcard."
           />
-          <p class="text-[10px] text-gray-400 dark:text-gray-600 mt-0.5 px-0.5 leading-tight">
-            exclude file patterns · * wildcard · comma separated
-          </p>
+          <p class="text-[10px] text-gray-400 dark:text-gray-600 mt-0.5 px-0.5 leading-tight">exclude patterns</p>
         </div>
 
         {/* ── Tree ── */}
