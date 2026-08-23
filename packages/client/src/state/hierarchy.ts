@@ -24,6 +24,11 @@ export function toggleHierarchyHidden(key: string): void {
   setState('hiddenPaths', (prev) => (prev.includes(key) ? prev.filter((k) => k !== key) : [...prev, key]))
 }
 
+/** Replace the entire hidden set atomically (used for bulk operations). */
+export function setHiddenPaths(paths: string[]): void {
+  setState('hiddenPaths', paths)
+}
+
 /** Remove all hierarchy visibility overrides. */
 export function clearHierarchyHidden(): void {
   setState('hiddenPaths', [])

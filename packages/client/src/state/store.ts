@@ -24,7 +24,6 @@ export {
   toggleGroupByContract,
   toggleGroupByFile,
   toggleGroupByPackage,
-  toggleHideDevFiles,
   toggleHideTestFiles,
   toggleNodeKind,
   visibleGraph
@@ -54,7 +53,7 @@ export { setViewMode } from './view.js'
 export type { ViewState } from './view.js'
 
 // Section: Hierarchy
-export { clearHierarchyHidden, toggleHierarchyHidden } from './hierarchy.js'
+export { clearHierarchyHidden, setHiddenPaths, toggleHierarchyHidden } from './hierarchy.js'
 export type { HierarchyState } from './hierarchy.js'
 
 // Utilities

@@ -9,7 +9,6 @@ export interface FiltersState {
   hiddenNodeKinds: NodeKind[]
   hiddenEdgeKinds: EdgeKind[]
   hideTestFiles: boolean
-  hideDevFiles: boolean
   groupByFile: boolean
   groupByContract: boolean
   groupByClass: boolean
@@ -22,7 +21,6 @@ function persist(): void {
     hiddenNodeKinds: state.hiddenNodeKinds,
     hiddenEdgeKinds: state.hiddenEdgeKinds,
     hideTestFiles: state.hideTestFiles,
-    hideDevFiles: state.hideDevFiles,
     groupByFile: state.groupByFile,
     groupByContract: state.groupByContract,
     groupByClass: state.groupByClass,
@@ -54,11 +52,6 @@ export function toggleHideTestFiles(): void {
   persist()
 }
 
-export function toggleHideDevFiles(): void {
-  setState('hideDevFiles', (v) => !v)
-  persist()
-}
-
 export function toggleGroupByFile(): void {
   setState('groupByFile', (v) => !v)
   persist()
@@ -83,7 +76,6 @@ export function clearFilters(): void {
   setState('hiddenNodeKinds', [])
   setState('hiddenEdgeKinds', [])
   setState('hideTestFiles', false)
-  setState('hideDevFiles', false)
   setState('groupByFile', false)
   setState('groupByContract', false)
   setState('groupByClass', false)
@@ -96,7 +88,7 @@ export function clearFilters(): void {
 /**
  * Derive the currently visible nodes and edges by applying:
  *   1. Node kind filter  (hiddenNodeKinds)
- *   2. Test / dev file filter  (hideTestFiles, hideDevFiles)
+ *   2. Test file filter  (hideTestFiles)
  *   3. Grouping mode coercion  (groupByFile / groupByContract / groupByPackage → drop file nodes;
  *      groupByClass → drop class nodes)
  *   4. Import-node elevation  (import nodes → synthetic `imports` edges)
@@ -137,23 +129,6 @@ export function visibleGraph(): { nodes: GraphNode[]; edges: GraphEdge[] } {
   if (state.hideTestFiles) {
     const TEST_RE = /(\.(test|spec)\.[jt]sx?$|__tests__[\\/]|__mocks__[\\/]|\.stories\.[jt]sx?$)/i
     nodes = nodes.filter((n) => !TEST_RE.test(n.filePath ?? ''))
-    nodeIds = new Set(nodes.map((n) => n.id))
-  }
-
-  // 2b. Apply dev-file filter — package manifests, lock files, config files,
-  //     toolchain configs, CI/CD directories, env files, and docs.
-  //     Combined with the test filter, what remains is pure application source.
-  if (state.hideDevFiles) {
-    // Directory segments that are never source: node_modules, .git, .github, etc.
-    const DEV_DIR_RE =
-      /[\\/](node_modules|\.git|\.github|\.circleci|\.gitlab|dist|build|coverage|\.next|\.nuxt|\.output|\.cache)[\\/]/i
-    // Individual files by name/extension at any depth
-    const DEV_FILE_RE =
-      /([\\/]|^)(package(-lock)?\.json|yarn\.lock|pnpm-lock\.yaml|pnpm-workspace\.yaml|bun\.lockb|[^/\\]+\.config\.[cm]?[jt]sx?|tsconfig[^/\\]*\.json|jsconfig[^/\\]*\.json|\.eslintrc[^/\\]*|\.prettierrc[^/\\]*|\.stylelintrc[^/\\]*|\.babelrc[^/\\]*|\.editorconfig|\.browserslistrc|Dockerfile[^/\\]*|docker-compose[^/\\]*|\.dockerignore|\.env(\.[^/\\]*)?|Makefile|Jenkinsfile|\.nvmrc|\.node-version|\.tool-versions|\.gitignore|\.gitattributes|\.npmignore|\.npmrc|README[^/\\]*|LICENSE[^/\\]*|CHANGELOG[^/\\]*|CONTRIBUTING[^/\\]*)$/i
-    nodes = nodes.filter((n) => {
-      const fp = n.filePath ?? ''
-      return !DEV_DIR_RE.test(fp) && !DEV_FILE_RE.test(fp)
-    })
     nodeIds = new Set(nodes.map((n) => n.id))
   }
 

@@ -6,7 +6,6 @@ export interface PersistedFilters {
   hiddenNodeKinds: NodeKind[]
   hiddenEdgeKinds: EdgeKind[]
   hideTestFiles: boolean
-  hideDevFiles: boolean
   groupByFile: boolean
   groupByContract: boolean
   groupByClass: boolean
@@ -24,7 +23,6 @@ export function loadFilters(): Partial<PersistedFilters> {
       hiddenNodeKinds: Array.isArray(p.hiddenNodeKinds) ? (p.hiddenNodeKinds as NodeKind[]) : undefined,
       hiddenEdgeKinds: Array.isArray(p.hiddenEdgeKinds) ? (p.hiddenEdgeKinds as EdgeKind[]) : undefined,
       hideTestFiles: typeof p.hideTestFiles === 'boolean' ? p.hideTestFiles : undefined,
-      hideDevFiles: typeof p.hideDevFiles === 'boolean' ? p.hideDevFiles : undefined,
       groupByFile: typeof p.groupByFile === 'boolean' ? p.groupByFile : undefined,
       groupByContract: typeof p.groupByContract === 'boolean' ? p.groupByContract : undefined,
       groupByClass: typeof p.groupByClass === 'boolean' ? p.groupByClass : undefined,
