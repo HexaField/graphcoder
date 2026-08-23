@@ -75,6 +75,8 @@ export const [state, setState] = createStore<AppState>({
 
   // Hierarchy
   hiddenPaths: _savedHierarchy.hiddenPaths ?? [],
+  // All groups start collapsed by default; user expands them via the eye buttons.
+  expandedGroups: _savedHierarchy.expandedGroups ?? [],
 
   // Temporal (git history bar + commit-range diff)
   ...temporalInitial

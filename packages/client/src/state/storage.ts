@@ -61,6 +61,12 @@ const HIERARCHY_KEY = 'graphcoder-hierarchy'
 
 export interface PersistedHierarchy {
   hiddenPaths: string[]
+  /**
+   * File paths (or dir/package path prefixes) whose graph group containers
+   * show expanded children. Empty = all groups collapsed by default.
+   * Semantics mirror hiddenPaths: a prefix entry expands all files under it.
+   */
+  expandedGroups: string[]
 }
 
 /** Load persisted hierarchy visibility state from localStorage. */
@@ -71,7 +77,8 @@ export function loadHierarchy(): Partial<PersistedHierarchy> {
     const p = JSON.parse(raw)
     if (typeof p !== 'object' || p === null) return {}
     return {
-      hiddenPaths: Array.isArray(p.hiddenPaths) ? (p.hiddenPaths as string[]) : undefined
+      hiddenPaths: Array.isArray(p.hiddenPaths) ? (p.hiddenPaths as string[]) : undefined,
+      expandedGroups: Array.isArray(p.expandedGroups) ? (p.expandedGroups as string[]) : undefined
     }
   } catch {
     return {}

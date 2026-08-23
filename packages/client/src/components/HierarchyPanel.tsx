@@ -7,6 +7,7 @@ import {
   setExcludePatterns,
   setHiddenPaths,
   state,
+  toggleGroupExpanded,
   toggleHierarchyHidden
 } from '../state/store.js'
 import { resolvedTheme } from '../state/theme.js'
@@ -344,12 +345,27 @@ interface RowProps {
    * strikethrough label and a static ⊘ indicator instead of the eye toggle.
    */
   excluded?: boolean
+  /**
+   * When true, the eye button switches to collapse/expand semantics instead of
+   * hide/show. The row never dims — the file still renders as a container in
+   * the graph; only its children are collapsed.
+   */
+  collapseMode?: boolean
   onToggleHide: (e: MouseEvent) => void
   onContextMenu?: (e: MouseEvent) => void
 }
 
 const Row: Component<RowProps> = (props) => {
-  const dimmed = () => (props.hidden || props.ancestorHidden) && !props.excluded
+  // In collapse mode the row never dims — the group container stays visible.
+  const dimmed = () => !props.collapseMode && (props.hidden || props.ancestorHidden) && !props.excluded
+  const eyeTitle = () =>
+    props.collapseMode
+      ? props.hidden
+        ? 'Expand group in graph'
+        : 'Collapse group in graph'
+      : props.hidden
+        ? 'Show in graph'
+        : 'Hide from graph'
   return (
     <div class={`group flex items-center h-6 pr-1 cursor-default select-none
         hover:bg-gray-100 dark:hover:bg-gray-800/60 ${dimmed() ? 'opacity-40' : ''}`} style={{ 'padding-left': `${props.depth * 12 + 4}px` }} onContextMenu={props.onContextMenu}>
@@ -403,7 +419,7 @@ const Row: Component<RowProps> = (props) => {
               : "text-gray-300 dark:text-gray-600 opacity-0 group-hover:opacity-100 [@media(hover:none)]:opacity-100"
           } hover:text-gray-700 dark:hover:text-gray-200 hover:bg-gray-200 dark:hover:bg-gray-700`}
           onClick={props.onToggleHide}
-          title={props.hidden ? 'Show in graph' : 'Hide from graph'}
+          title={eyeTitle()}
         >
           <Show when={props.hidden} fallback={<EyeOpen />}>
             <EyeSlash />
@@ -556,6 +572,10 @@ export const HierarchyPanel: Component = () => {
   })
 
   const hiddenSet = createMemo(() => new Set(state.hiddenPaths))
+  // When any grouping is active, eye buttons on file rows control collapse/expand
+  // of the group container rather than hiding the file from the graph entirely.
+  const anyGroupingOn = () => state.groupByFile || state.groupByClass || state.groupByContract || state.groupByPackage
+  const expandedGroupsSet = createMemo(() => new Set(state.expandedGroups))
 
   // Compile active exclude patterns once per change so file rows can check membership
   const excludeRegexes = createMemo(() =>
@@ -608,6 +628,10 @@ export const HierarchyPanel: Component = () => {
           const fileExpanded = () => expandedSet().has(file.key)
           const hasSymbols = file.children.length > 0
 
+          // In group mode: eye reflects whether the group container is expanded,
+          // not whether the file is hidden from the graph.
+          const groupCollapsed = () => anyGroupingOn() && !expandedGroupsSet().has(file.key)
+
           return (
             <>
               <Row
@@ -616,12 +640,18 @@ export const HierarchyPanel: Component = () => {
                 expandable={hasSymbols}
                 expanded={fileExpanded()}
                 onExpand={() => hasSymbols && toggleExpanded(file.key)}
-                hidden={fileHidden()}
-                ancestorHidden={ancestorHiddenFn()}
+                hidden={anyGroupingOn() ? groupCollapsed() : fileHidden()}
+                // In group mode the row never dims — the container remains visible.
+                ancestorHidden={anyGroupingOn() ? false : ancestorHiddenFn()}
                 excluded={fileExcluded()}
+                collapseMode={anyGroupingOn()}
                 onToggleHide={(e) => {
                   e.stopPropagation()
-                  toggleHierarchyHidden(file.key)
+                  if (anyGroupingOn()) {
+                    toggleGroupExpanded(file.key)
+                  } else {
+                    toggleHierarchyHidden(file.key)
+                  }
                 }}
                 onContextMenu={(e) => openCtxMenu(e, file.key, file.node.name)}
               />

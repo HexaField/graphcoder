@@ -6,6 +6,9 @@ export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), '')
   return {
     plugins: [solid(), tailwindcss()],
+    build: {
+      sourcemap: true
+    },
     server: {
       host: env.HOST || 'localhost',
       port: parseInt(env.PORT || '3000')

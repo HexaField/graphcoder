@@ -55,7 +55,14 @@ export type { GraphDirection } from '@graphcoder/core'
 export { reloadGraph } from './view.js'
 
 // Section: Hierarchy
-export { clearHierarchyHidden, setHiddenPaths, toggleHierarchyHidden } from './hierarchy.js'
+export {
+  clearHierarchyHidden,
+  collapseAllGroups,
+  expandAllGroups,
+  setHiddenPaths,
+  toggleGroupExpanded,
+  toggleHierarchyHidden
+} from './hierarchy.js'
 export type { HierarchyState } from './hierarchy.js'
 
 // Section: Temporal (git history bar + commit-range diff)

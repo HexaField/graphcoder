@@ -99,10 +99,15 @@ export const GraphCanvas: Component = () => {
   })
 
   /**
-   * Unified compound group memo — identical logic to PixiJS version.
-   * Composes file, class, contract, and package grouping simultaneously.
+   * Unified compound group memo — composes file, class, contract, and package
+   * grouping simultaneously.
+   *
+   * Returns `{ groups, collapsedChildIds }` where `collapsedChildIds` is the
+   * set of node IDs that belong inside collapsed group containers and must be
+   * excluded from the flat node list passed to ELK. Returns `undefined` when
+   * no grouping is active.
    */
-  const combinedGroups = createMemo((): FileGroup[] | undefined => {
+  const combinedGroups = createMemo((): { groups: FileGroup[]; collapsedChildIds: Set<string> } | undefined => {
     const gf = state.groupByFile
     const gc = state.groupByClass
     const gct = state.groupByContract
@@ -138,10 +143,25 @@ export const GraphCanvas: Component = () => {
       return name && !name.includes('/') ? name : ((fn.filePath ?? name ?? fn.id).split('/').pop() ?? fn.id)
     }
 
+    /**
+     * Check whether a file group at the given filePath should show its children
+     * expanded. Uses prefix matching: a dir or package path in expandedGroups
+     * expands all files under it.
+     *
+     * Groups without a filePath (contract groups, package-only groups) always
+     * expand — they have no HierarchyPanel eye-button link.
+     */
+    function isGroupExpanded(filePath?: string): boolean {
+      if (!filePath) return true
+      return state.expandedGroups.some((prefix) => filePath === prefix || filePath.startsWith(prefix + '/'))
+    }
+
     const groups: FileGroup[] = []
     const claimedByContract = new Set<string>()
+    // Nodes inside collapsed group containers — excluded from the ELK node list.
+    const collapsedChildIds = new Set<string>()
 
-    // 1. Contract groups
+    // 1. Contract groups (no collapse support — no HierarchyPanel 1-1 link)
     if (gct) {
       const visibleNodes = visible().nodes
       const assigned = new Set<string>()
@@ -164,6 +184,25 @@ export const GraphCanvas: Component = () => {
         collectDescendants(fn.id, allDesc)
         for (const id of claimedByContract) allDesc.delete(id)
 
+        const expanded = isGroupExpanded(fn.filePath)
+
+        if (!expanded) {
+          // Collapsed: exclude all visible descendants from ELK, push empty container.
+          const visibleChildIds = [...allDesc].filter((id) => visibleNodeIds.has(id))
+          if (visibleChildIds.length === 0) continue // nothing to show or collapse
+          for (const id of visibleChildIds) collapsedChildIds.add(id)
+          groups.push({
+            id: fn.id,
+            label: fileLabel(fn),
+            childIds: [],
+            childGroups: undefined,
+            filePath: fn.filePath,
+            packagePath: gp ? extractPackagePath(fn.filePath) : undefined
+          })
+          continue
+        }
+
+        // Expanded: build child lists as normal.
         if (gc) {
           const childGroups: FileGroup[] = []
           const assignedToClass = new Set<string>()
@@ -200,18 +239,24 @@ export const GraphCanvas: Component = () => {
         }
       }
     } else if (gc) {
-      // 2b. Class groups only
+      // 2b. Class groups only (collapse keyed to the class's filePath)
       const classNodes = state.nodes.filter((n) => n.kind === 'class')
       for (const cn of classNodes) {
         const childIds = (containsChildren.get(cn.id) ?? []).filter(
           (id) => visibleNodeIds.has(id) && !claimedByContract.has(id)
         )
         if (childIds.length === 0) continue
-        groups.push({ id: cn.id, label: cn.name, filePath: cn.filePath, color: '#818cf8', childIds })
+        const expanded = isGroupExpanded(cn.filePath)
+        if (!expanded) {
+          for (const id of childIds) collapsedChildIds.add(id)
+          groups.push({ id: cn.id, label: cn.name, filePath: cn.filePath, color: '#818cf8', childIds: [] })
+        } else {
+          groups.push({ id: cn.id, label: cn.name, filePath: cn.filePath, color: '#818cf8', childIds })
+        }
       }
     }
 
-    // 3. Package-only groups (no file grouping)
+    // 3. Package-only groups (no collapse — no filePath link)
     if (gp && !gf) {
       const visibleNodes = visible().nodes
       const pkgMap = new Map<string, string[]>()
@@ -228,7 +273,7 @@ export const GraphCanvas: Component = () => {
       }
     }
 
-    return groups.length > 0 ? groups : undefined
+    return groups.length > 0 ? { groups, collapsedChildIds } : undefined
   })
 
   // ── ELK layout effect ───────────────────────────────────────────────────────
@@ -238,18 +283,26 @@ export const GraphCanvas: Component = () => {
   createEffect(async () => {
     const { nodes, edges } = visible()
     const direction = state.graphDirection
-    const groups = combinedGroups()
+    const grouped = combinedGroups()
+    const groups = grouped?.groups
+    const collapsedChildIds = grouped?.collapsedChildIds
+
     if (nodes.length === 0) {
       setLayout(null)
       setLayoutError(null)
       return
     }
 
+    // Exclude child nodes that belong inside collapsed group containers —
+    // they must not appear as free-floating ELK nodes outside their container.
+    const layoutNodes =
+      collapsedChildIds && collapsedChildIds.size > 0 ? nodes.filter((n) => !collapsedChildIds.has(n.id)) : nodes
+
     setIsLayouting(true)
     setLayoutError(null)
     needsFit = true
     try {
-      const result = await layoutGraph(nodes, edges, direction, groups)
+      const result = await layoutGraph(layoutNodes, edges, direction, groups)
       setLayout(result)
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err)
