@@ -44,7 +44,10 @@ export const FilterPanel: Component = () => {
   const isDark = () => resolvedTheme() === 'dark'
 
   const presentNodeKinds = createMemo<NodeKind[]>(() => {
-    const kinds = new Set(state.nodes.map((n) => n.kind))
+    // Exclude 'import' — import nodes are always elevated to `imports` edges
+    // in visibleGraph() and never appear as visible nodes. They show up in
+    // the Links section under 'imports' instead.
+    const kinds = new Set(state.nodes.filter((n) => n.kind !== 'import').map((n) => n.kind))
     return ([...kinds] as NodeKind[]).sort()
   })
 

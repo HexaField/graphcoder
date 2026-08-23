@@ -168,23 +168,49 @@ export function visibleGraph(): { nodes: GraphNode[]; edges: GraphEdge[] } {
     nodeIds = new Set(nodes.map((n) => n.id))
   }
 
-  // 1d. Aggregate duplicate import nodes — collapse all import nodes with the
-  //     same module name (e.g. "react") into one canonical representative.
-  //     Stash the aliasMap so step 3 can remap edges that referred to discarded nodes.
-  const aliasMap = new Map<string, string>() // discarded id → canonical id
+  // 1d. Elevate import nodes to direct edges — strip all import-kind nodes from
+  //     the visible graph and replace each with synthetic `imports` edges that
+  //     connect the containing file/module directly to the import target.
+  //     "file → contains → import:X → imports → target" becomes
+  //     "file → imports → target", making module dependencies first-class links.
+  const syntheticImportEdges: GraphEdge[] = []
   {
-    const importByName = new Map<string, string>() // name → canonical node id
+    const importIds = new Set<string>()
     for (const n of nodes) {
-      if (n.kind !== 'import') continue
-      const existing = importByName.get(n.name)
-      if (!existing) {
-        importByName.set(n.name, n.id)
-      } else {
-        aliasMap.set(n.id, existing)
-      }
+      if (n.kind === 'import') importIds.add(n.id)
     }
-    if (aliasMap.size > 0) {
-      nodes = nodes.filter((n) => !aliasMap.has(n.id))
+
+    if (importIds.size > 0) {
+      // Gather the file(s) that contain each import node and the target(s) it imports.
+      const importContainers = new Map<string, Set<string>>() // importId → container ids
+      const importTargets = new Map<string, Set<string>>() // importId → target ids
+
+      for (const e of state.edges) {
+        if (e.kind === 'contains' && importIds.has(e.target)) {
+          if (!importContainers.has(e.target)) importContainers.set(e.target, new Set())
+          importContainers.get(e.target)!.add(e.source)
+        }
+        if (e.kind === 'imports' && importIds.has(e.source)) {
+          if (!importTargets.has(e.source)) importTargets.set(e.source, new Set())
+          importTargets.get(e.source)!.add(e.target)
+        }
+      }
+
+      // Synthesise file → imports → target edges
+      for (const [importId, containerIds] of importContainers) {
+        const targetIds = importTargets.get(importId)
+        if (!targetIds) continue
+        for (const cid of containerIds) {
+          for (const tid of targetIds) {
+            if (nodeIds.has(cid) && nodeIds.has(tid) && cid !== tid) {
+              syntheticImportEdges.push({ source: cid, target: tid, kind: 'imports' })
+            }
+          }
+        }
+      }
+
+      // Remove import nodes from the visible set
+      nodes = nodes.filter((n) => !importIds.has(n.id))
       nodeIds = new Set(nodes.map((n) => n.id))
     }
   }
@@ -201,22 +227,30 @@ export function visibleGraph(): { nodes: GraphNode[]; edges: GraphEdge[] } {
     nodeIds = new Set(nodes.map((n) => n.id))
   }
 
-  // 3. Filter edges: kind not hidden, both endpoints visible (after alias
-  //     remapping), deduplicated by (src, tgt, kind) to remove parallel edges
-  //     that arise when multiple aliased imports shared the same target.
-  const resolve = (id: string) => aliasMap.get(id) ?? id
+  // 3. Filter edges: kind not hidden, both endpoints visible, deduplicated by
+  //     (src, tgt, kind). Import nodes were removed in step 1d, so any edge
+  //     that referenced one will fail the nodeIds check and be dropped naturally.
+  //     Synthetic import-elevation edges are merged in after.
   const seenEdgeKeys = new Set<string>()
   const edges: GraphEdge[] = []
+
   for (const e of state.edges) {
     if (hiddenEdgeSet.has(e.kind)) continue
-    const src = resolve(e.source)
-    const tgt = resolve(e.target)
-    if (!nodeIds.has(src) || !nodeIds.has(tgt)) continue
-    if (src === tgt) continue // self-loop produced by import merging — skip
-    const key = `${src}|${tgt}|${e.kind}`
+    if (!nodeIds.has(e.source) || !nodeIds.has(e.target)) continue
+    if (e.source === e.target) continue
+    const key = `${e.source}|${e.target}|${e.kind}`
     if (seenEdgeKeys.has(key)) continue
     seenEdgeKeys.add(key)
-    edges.push(src === e.source && tgt === e.target ? e : { ...e, source: src, target: tgt })
+    edges.push(e)
+  }
+
+  // Merge synthetic import edges (deduplicate against regular edges too)
+  for (const e of syntheticImportEdges) {
+    const key = `${e.source}|${e.target}|${e.kind}`
+    if (!seenEdgeKeys.has(key)) {
+      seenEdgeKeys.add(key)
+      edges.push(e)
+    }
   }
 
   return { nodes, edges }
