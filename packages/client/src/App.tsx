@@ -26,9 +26,13 @@ const DrawerToggle = (props: DrawerToggleProps) => {
   }
   const border = props.side === 'left' ? 'border-r' : 'border-l'
   return (
-    <button class={`w-5 flex-shrink-0 bg-gray-100 dark:bg-gray-900 ${border} border-gray-200 dark:border-gray-700
-        flex items-center justify-center hover:bg-gray-200 dark:hover:bg-gray-800
-        text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 transition-colors`} onClick={props.onToggle} title={props.open ? 'Close panel' : 'Open panel'}>
+    <button
+      class={`hidden sm:flex w-5 flex-shrink-0 bg-gray-100 dark:bg-gray-900 ${border} border-gray-200 dark:border-gray-700
+        items-center justify-center hover:bg-gray-200 dark:hover:bg-gray-800
+        text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 transition-colors`}
+      onClick={props.onToggle}
+      title={props.open ? 'Close panel' : 'Open panel'}
+    >
       <span class="text-xs leading-none">{arrow()}</span>
     </button>
   )
@@ -164,38 +168,36 @@ export default function App() {
         </Show>
       </div>
 
-      {/* Mobile bottom navigation bar */}
-      <Show when={isMobile()}>
-        <div
-          class="flex items-center justify-around px-2 pt-2 pb-safe bg-gray-100 dark:bg-gray-900 border-t border-gray-200 dark:border-gray-700 flex-shrink-0"
-          style={{ 'padding-bottom': 'max(0.5rem, env(safe-area-inset-bottom))' }}
+      {/* Mobile bottom navigation bar — CSS-controlled so it renders even if JS detection lags */}
+      <div
+        class="flex sm:hidden items-center justify-around px-2 pt-2 bg-gray-100 dark:bg-gray-900 border-t border-gray-200 dark:border-gray-700 flex-shrink-0"
+        style={{ 'padding-bottom': 'max(0.5rem, env(safe-area-inset-bottom))' }}
+      >
+        <button
+          class={`flex flex-col items-center gap-0.5 px-5 py-1.5 rounded-xl text-xs font-medium transition-colors ${
+            hierarchyOpen()
+              ? "bg-blue-100 dark:bg-blue-900/40 text-blue-600 dark:text-blue-400"
+              : "text-gray-500 dark:text-gray-400"
+          }`}
+          onClick={() => (hierarchyOpen() ? setHierarchyOpen(false) : openHierarchy())}
+          aria-label="Toggle file explorer"
         >
-          <button
-            class={`flex flex-col items-center gap-0.5 px-5 py-1.5 rounded-xl text-xs font-medium transition-colors ${
-              hierarchyOpen()
-                ? "bg-blue-100 dark:bg-blue-900/40 text-blue-600 dark:text-blue-400"
-                : "text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200"
-            }`}
-            onClick={() => (hierarchyOpen() ? setHierarchyOpen(false) : openHierarchy())}
-            aria-label="Toggle file explorer"
-          >
-            <span class="text-lg leading-none">🗂</span>
-            <span>Explorer</span>
-          </button>
-          <button
-            class={`flex flex-col items-center gap-0.5 px-5 py-1.5 rounded-xl text-xs font-medium transition-colors ${
-              filterOpen()
-                ? "bg-blue-100 dark:bg-blue-900/40 text-blue-600 dark:text-blue-400"
-                : "text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200"
-            }`}
-            onClick={() => (filterOpen() ? setFilterOpen(false) : openFilter())}
-            aria-label="Toggle graph filters"
-          >
-            <span class="text-lg leading-none">⚙</span>
-            <span>Filters</span>
-          </button>
-        </div>
-      </Show>
+          <span class="text-lg leading-none">🗂</span>
+          <span>Explorer</span>
+        </button>
+        <button
+          class={`flex flex-col items-center gap-0.5 px-5 py-1.5 rounded-xl text-xs font-medium transition-colors ${
+            filterOpen()
+              ? "bg-blue-100 dark:bg-blue-900/40 text-blue-600 dark:text-blue-400"
+              : "text-gray-500 dark:text-gray-400"
+          }`}
+          onClick={() => (filterOpen() ? setFilterOpen(false) : openFilter())}
+          aria-label="Toggle graph filters"
+        >
+          <span class="text-lg leading-none">⚙</span>
+          <span>Filters</span>
+        </button>
+      </div>
 
       {/* ── Bottom — diff panel (full width, outside middle row) ── */}
       <DiffPanel />
