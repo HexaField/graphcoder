@@ -1,7 +1,6 @@
 import type { Component } from 'solid-js'
-import { createSignal, For, Show } from 'solid-js'
-import type { ViewMode } from '@graphcoder/core'
-import { captureSnapshot, clearDiff, openProject, setViewMode, state } from '../state/store.js'
+import { createSignal, Show } from 'solid-js'
+import { captureSnapshot, clearDiff, openProject, setGraphDirection, state } from '../state/store.js'
 import { cycleTheme, theme } from '../state/theme.js'
 import { SearchBar } from './SearchBar.js'
 
@@ -60,35 +59,39 @@ const ProjectInput: Component = () => {
   )
 }
 
-// ── View mode switcher ─────────────────────────────────────────────────────
+// ── Direction toggle ───────────────────────────────────────────────────────
 
-const VIEW_MODES: Array<{ mode: ViewMode; label: string }> = [
-  { mode: 'module-dependency', label: 'Module Deps' },
-  { mode: 'call-graph', label: 'Call Graph' },
-  { mode: 'impact-radius', label: 'Impact Radius' }
-]
-
-const ViewModeSwitcher: Component = () => {
-  return (
-    <div class="flex items-center gap-1">
-      <For each={VIEW_MODES}>
-        {({ mode, label }) => (
-          <button
-            class={`px-3 py-1 text-sm rounded ${
-              state.viewMode === mode
-                ? "bg-blue-600 text-white"
-                : "text-gray-500 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white hover:bg-gray-200 dark:hover:bg-gray-700"
-            }`}
-            data-testid={`view-mode-${mode}`}
-            onClick={() => void setViewMode(mode)}
-          >
-            {label}
-          </button>
-        )}
-      </For>
-    </div>
-  )
-}
+const DirectionToggle: Component = () => (
+  <div
+    class="flex items-center gap-0.5 rounded border border-gray-200 dark:border-gray-700 overflow-hidden"
+    title="Layout direction"
+  >
+    <button
+      class={`px-2.5 py-1 text-sm transition-colors ${
+        state.graphDirection === 'TB'
+          ? "bg-blue-600 text-white"
+          : "text-gray-500 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white hover:bg-gray-200 dark:hover:bg-gray-700"
+      }`}
+      data-testid="direction-tb"
+      onClick={() => setGraphDirection('TB')}
+      title="Top-to-bottom layout"
+    >
+      ⇕
+    </button>
+    <button
+      class={`px-2.5 py-1 text-sm transition-colors ${
+        state.graphDirection === 'LR'
+          ? "bg-blue-600 text-white"
+          : "text-gray-500 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white hover:bg-gray-200 dark:hover:bg-gray-700"
+      }`}
+      data-testid="direction-lr"
+      onClick={() => setGraphDirection('LR')}
+      title="Left-to-right layout"
+    >
+      ⇔
+    </button>
+  </div>
+)
 
 // ── Toolbar ────────────────────────────────────────────────────────────────
 
@@ -105,7 +108,7 @@ export const Toolbar: Component = () => {
 
       <div class="h-4 border-l border-gray-300 dark:border-gray-600" />
 
-      <ViewModeSwitcher />
+      <DirectionToggle />
 
       <div class="h-4 border-l border-gray-300 dark:border-gray-600" />
 

@@ -1,8 +1,8 @@
-import type { GraphEdge, GraphNode, ProjectStats, ViewMode } from '@graphcoder/core'
+import type { GraphEdge, GraphNode, ProjectStats } from '@graphcoder/core'
 import * as api from '../api/graph.js'
 import { state, setState } from './core.js'
 import { recomputeDiff } from './diff.js'
-import { syncUrlParams, VIEW_MODES } from './url.js'
+import { syncUrlParams } from './url.js'
 
 // ── Project ───────────────────────────────────────────────────────────────────
 
@@ -45,11 +45,6 @@ export async function openProject(projectRoot: string): Promise<void> {
 export async function initFromUrl(): Promise<void> {
   const params = new URLSearchParams(window.location.search)
   const projectParam = params.get('project')
-  const viewParam = params.get('view') as ViewMode | null
-
-  if (viewParam && VIEW_MODES.includes(viewParam)) {
-    setState('viewMode', viewParam)
-  }
 
   if (projectParam) {
     await openProject(projectParam)

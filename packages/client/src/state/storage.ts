@@ -1,4 +1,4 @@
-import type { EdgeKind, NodeKind } from '@graphcoder/core'
+import type { EdgeKind, GraphDirection, NodeKind } from '@graphcoder/core'
 
 // ── Filters ───────────────────────────────────────────────────────────────────
 
@@ -13,6 +13,8 @@ export interface PersistedFilters {
   groupByContract: boolean
   groupByClass: boolean
   groupByPackage: boolean
+  /** Layout flow direction. LR = left-to-right, TB = top-to-bottom. */
+  graphDirection: GraphDirection
 }
 
 /** Load persisted filter state from localStorage. Returns partial on missing/corrupt data. */
@@ -35,7 +37,9 @@ export function loadFilters(): Partial<PersistedFilters> {
       groupByFile: typeof p.groupByFile === 'boolean' ? p.groupByFile : undefined,
       groupByContract: typeof p.groupByContract === 'boolean' ? p.groupByContract : undefined,
       groupByClass: typeof p.groupByClass === 'boolean' ? p.groupByClass : undefined,
-      groupByPackage: typeof p.groupByPackage === 'boolean' ? p.groupByPackage : undefined
+      groupByPackage: typeof p.groupByPackage === 'boolean' ? p.groupByPackage : undefined,
+      graphDirection:
+        p.graphDirection === 'LR' || p.graphDirection === 'TB' ? (p.graphDirection as GraphDirection) : undefined
     }
   } catch {
     return {}

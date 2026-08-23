@@ -544,7 +544,7 @@ export const GraphCanvas: Component = () => {
 
   createEffect(async () => {
     const { nodes, edges } = visible()
-    const viewMode = state.viewMode
+    const direction = state.graphDirection
     const groups = combinedGroups() // reactive: re-layouts when any grouping mode changes
     if (nodes.length === 0) {
       setLayout(null)
@@ -552,7 +552,7 @@ export const GraphCanvas: Component = () => {
     }
     setIsLayouting(true)
     try {
-      const result = await layoutGraph(nodes, edges, viewMode, groups)
+      const result = await layoutGraph(nodes, edges, direction, groups)
       setLayout(result)
     } finally {
       setIsLayouting(false)

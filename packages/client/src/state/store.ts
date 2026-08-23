@@ -21,6 +21,7 @@ export {
   globToRegex,
   setExcludePatterns,
   setFocus,
+  setGraphDirection,
   toggleEdgeKind,
   toggleGroupByClass,
   toggleGroupByContract,
@@ -48,14 +49,14 @@ export type { SelectionState } from './selection.js'
 
 // Section: Storage  (PersistedFilters lives here — it owns the serialisation schema)
 export type { PersistedFilters } from './storage.js'
+export type { GraphDirection } from '@graphcoder/core'
 
 // Section: View
-export { setViewMode } from './view.js'
-export type { ViewState } from './view.js'
+export { reloadGraph } from './view.js'
 
 // Section: Hierarchy
 export { clearHierarchyHidden, setHiddenPaths, toggleHierarchyHidden } from './hierarchy.js'
 export type { HierarchyState } from './hierarchy.js'
 
 // Utilities
-export { VIEW_MODES } from './url.js'
+export { syncUrlParams } from './url.js'

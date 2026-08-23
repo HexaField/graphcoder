@@ -1,25 +1,21 @@
 import ELK from 'elkjs/lib/elk.bundled.js'
 import type { ElkExtendedEdge, ElkNode } from 'elkjs/lib/elk.bundled.js'
-import type { GraphEdge, GraphNode, ViewMode } from '@graphcoder/core'
+import type { GraphDirection, GraphEdge, GraphNode } from '@graphcoder/core'
 
 const elk = new ELK()
 
-const LAYOUT_OPTIONS: Record<ViewMode, Record<string, string>> = {
-  'module-dependency': {
+const LAYOUT_OPTIONS: Record<GraphDirection, Record<string, string>> = {
+  TB: {
     'elk.algorithm': 'layered',
     'elk.direction': 'DOWN',
     'elk.spacing.nodeNode': '40',
     'elk.layered.spacing.nodeNodeBetweenLayers': '60'
   },
-  'call-graph': {
+  LR: {
     'elk.algorithm': 'layered',
     'elk.direction': 'RIGHT',
     'elk.spacing.nodeNode': '30',
     'elk.layered.spacing.nodeNodeBetweenLayers': '50'
-  },
-  'impact-radius': {
-    'elk.algorithm': 'mrtree',
-    'elk.spacing.nodeNode': '40'
   }
 }
 
@@ -149,7 +145,7 @@ function extractEdgeSections(
 async function layoutFlat(
   nodes: GraphNode[],
   edges: GraphEdge[],
-  viewMode: ViewMode,
+  direction: GraphDirection,
   nodeIds: Set<string>
 ): Promise<LayoutResult> {
   const validEdges = edges.filter((e) => nodeIds.has(e.source) && nodeIds.has(e.target))
@@ -164,7 +160,7 @@ async function layoutFlat(
 
   const graph: ElkNode = {
     id: 'root',
-    layoutOptions: LAYOUT_OPTIONS[viewMode],
+    layoutOptions: LAYOUT_OPTIONS[direction],
     children: elkNodes,
     edges: elkEdges
   }
@@ -232,7 +228,7 @@ function dirLabel(dirPath: string): string {
 async function layoutGrouped(
   nodes: GraphNode[],
   edges: GraphEdge[],
-  viewMode: ViewMode,
+  direction: GraphDirection,
   fileGroups: FileGroup[],
   nodeIds: Set<string>
 ): Promise<LayoutResult> {
@@ -281,7 +277,7 @@ async function layoutGrouped(
   const edgeKindMap = new Map<string, string>()
   validEdges.forEach((e, i) => edgeKindMap.set(`e${i}`, e.kind))
 
-  const rootDir = LAYOUT_OPTIONS[viewMode]['elk.direction'] ?? 'RIGHT'
+  const rootDir = LAYOUT_OPTIONS[direction]['elk.direction'] ?? 'RIGHT'
   const perpDir = rootDir === 'RIGHT' || rootDir === 'LEFT' ? 'DOWN' : 'RIGHT'
 
   // Nodes that don't belong to any group: rendered flat at root level
@@ -484,7 +480,7 @@ async function layoutGrouped(
     const flat2Graph: ElkNode = {
       id: 'root',
       layoutOptions: {
-        ...LAYOUT_OPTIONS[viewMode],
+        ...LAYOUT_OPTIONS[direction],
         'elk.hierarchyHandling': 'INCLUDE_CHILDREN',
         'elk.spacing.nodeNode': '60',
         'elk.layered.spacing.nodeNodeBetweenLayers': '80'
@@ -689,7 +685,7 @@ async function layoutGrouped(
     const pkg4Graph: ElkNode = {
       id: 'root',
       layoutOptions: {
-        ...LAYOUT_OPTIONS[viewMode],
+        ...LAYOUT_OPTIONS[direction],
         'elk.hierarchyHandling': 'INCLUDE_CHILDREN',
         'elk.spacing.nodeNode': '100',
         'elk.layered.spacing.nodeNodeBetweenLayers': '120'
@@ -942,7 +938,7 @@ async function layoutGrouped(
   const graph: ElkNode = {
     id: 'root',
     layoutOptions: {
-      ...LAYOUT_OPTIONS[viewMode],
+      ...LAYOUT_OPTIONS[direction],
       'elk.hierarchyHandling': 'INCLUDE_CHILDREN',
       'elk.spacing.nodeNode': '80',
       'elk.layered.spacing.nodeNodeBetweenLayers': '100'
@@ -1048,21 +1044,18 @@ async function layoutGrouped(
  * Run ELK layout. When fileGroups is provided the layout uses compound nodes
  * so grouped nodes are spatially co-located. All three grouping modes
  * (file, class, contract) compose freely via the FileGroup structure.
- *
- * mrtree (impact-radius) does not support compound nodes — fileGroups is
- * ignored and a flat layout runs instead.
  */
 export async function layoutGraph(
   nodes: GraphNode[],
   edges: GraphEdge[],
-  viewMode: ViewMode,
+  direction: GraphDirection,
   fileGroups?: FileGroup[]
 ): Promise<LayoutResult> {
   const nodeIds = new Set(nodes.map((n) => n.id))
 
-  if (fileGroups && fileGroups.length > 0 && viewMode !== 'impact-radius') {
-    return layoutGrouped(nodes, edges, viewMode, fileGroups, nodeIds)
+  if (fileGroups && fileGroups.length > 0) {
+    return layoutGrouped(nodes, edges, direction, fileGroups, nodeIds)
   }
 
-  return layoutFlat(nodes, edges, viewMode, nodeIds)
+  return layoutFlat(nodes, edges, direction, nodeIds)
 }

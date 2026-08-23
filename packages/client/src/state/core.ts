@@ -9,7 +9,6 @@ import type { HierarchyState } from './hierarchy.js'
 import type { ProjectState } from './project.js'
 import type { SearchState } from './search.js'
 import type { SelectionState } from './selection.js'
-import type { ViewState } from './view.js'
 
 /**
  * Full application state — the intersection of every section's slice type.
@@ -20,7 +19,6 @@ import type { ViewState } from './view.js'
 export type AppState = ProjectState &
   GraphState &
   SelectionState &
-  ViewState &
   FiltersState &
   DiffState &
   SearchState &
@@ -52,9 +50,6 @@ export const [state, setState] = createStore<AppState>({
   selectedNodeDetail: null,
   isLoadingDetail: false,
 
-  // View
-  viewMode: 'module-dependency',
-
   // Filters & focus
   hiddenNodeKinds: _saved.hiddenNodeKinds ?? [],
   hiddenEdgeKinds: _saved.hiddenEdgeKinds ?? [],
@@ -64,6 +59,7 @@ export const [state, setState] = createStore<AppState>({
   groupByClass: _saved.groupByClass ?? false,
   groupByPackage: _saved.groupByPackage ?? false,
   focusedNodeId: null,
+  graphDirection: _saved.graphDirection ?? 'TB',
 
   // Diff
   baseSnapshot: null,

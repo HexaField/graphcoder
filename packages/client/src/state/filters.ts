@@ -1,4 +1,4 @@
-import type { EdgeKind, GraphEdge, GraphNode, NodeKind } from '@graphcoder/core'
+import type { EdgeKind, GraphDirection, GraphEdge, GraphNode, NodeKind } from '@graphcoder/core'
 import { state, setState } from './core.js'
 import { saveFilters } from './storage.js'
 import type { PersistedFilters } from './storage.js'
@@ -15,6 +15,8 @@ export interface FiltersState {
   groupByClass: boolean
   groupByPackage: boolean
   focusedNodeId: string | null
+  /** ELK layout flow direction. LR = left-to-right, TB = top-to-bottom. */
+  graphDirection: GraphDirection
 }
 
 function persist(): void {
@@ -25,7 +27,8 @@ function persist(): void {
     groupByFile: state.groupByFile,
     groupByContract: state.groupByContract,
     groupByClass: state.groupByClass,
-    groupByPackage: state.groupByPackage
+    groupByPackage: state.groupByPackage,
+    graphDirection: state.graphDirection
   }
   saveFilters(f)
 }
@@ -73,6 +76,11 @@ export function toggleGroupByPackage(): void {
   persist()
 }
 
+export function setGraphDirection(dir: GraphDirection): void {
+  setState('graphDirection', dir)
+  persist()
+}
+
 export function clearFilters(): void {
   setState('hiddenNodeKinds', [])
   setState('hiddenEdgeKinds', [])
@@ -81,6 +89,7 @@ export function clearFilters(): void {
   setState('groupByContract', false)
   setState('groupByClass', false)
   setState('groupByPackage', false)
+  // graphDirection intentionally kept — it's a layout preference, not a filter
   persist()
 }
 

@@ -107,8 +107,8 @@ export interface SearchResultItem {
   score: number
 }
 
-// View modes for the canvas
-export type ViewMode = 'module-dependency' | 'call-graph' | 'impact-radius'
+/** Layout flow direction for the canvas. LR = left-to-right, TB = top-to-bottom. */
+export type GraphDirection = 'LR' | 'TB'
 
 export { normalizeSignature, nodeSemanticId, semanticId } from './identity.js'
 export type { ArchDiff, ArchOp, EdgeTuple, LocationHint, NodeProps, NodeSnapshot } from './diff/types.js'
