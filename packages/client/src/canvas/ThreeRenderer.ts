@@ -16,6 +16,7 @@
 import {
   BufferAttribute,
   BufferGeometry,
+  DoubleSide,
   InstancedBufferAttribute,
   InstancedBufferGeometry,
   Mesh,
@@ -314,7 +315,8 @@ export class ThreeRenderer {
       fragmentShader: RECT_FRAG,
       transparent: true,
       depthTest: false,
-      depthWrite: false
+      depthWrite: false,
+      side: DoubleSide
     })
     const contMesh = new Mesh(this.contGeo, contMat)
     contMesh.renderOrder = 0
@@ -329,7 +331,8 @@ export class ThreeRenderer {
       fragmentShader: RECT_FRAG,
       transparent: true,
       depthTest: false,
-      depthWrite: false
+      depthWrite: false,
+      side: DoubleSide
     })
     const nodeMesh = new Mesh(this.nodeGeo, nodeMat)
     nodeMesh.renderOrder = 2
@@ -359,7 +362,8 @@ export class ThreeRenderer {
       fragmentShader: ARROW_FRAG,
       transparent: true,
       depthTest: false,
-      depthWrite: false
+      depthWrite: false,
+      side: DoubleSide
     })
     const arrowMesh = new Mesh(this.arrowGeo, arrowMat)
     arrowMesh.renderOrder = 3
@@ -378,7 +382,8 @@ export class ThreeRenderer {
       uniforms: {
         uAtlas: { value: this.atlas.texture },
         uThreshold: { value: new Vector2(this.atlas.threshold.lo, this.atlas.threshold.hi) }
-      }
+      },
+      side: DoubleSide
     })
     const glyphMesh = new Mesh(this.glyphGeo, glyphMat)
     glyphMesh.renderOrder = 4
@@ -604,9 +609,8 @@ export class ThreeRenderer {
       }
 
       const sel = selectedId === id ? 1 : 0
-      const borderC = isDark
-        ? ([0.2, 0.255, 0.333, 0.0] as [number, number, number, number])
-        : ([0.58, 0.639, 0.722, 0.0] as [number, number, number, number])
+      // Visible border so nodes contrast clearly against container backgrounds
+      const borderC: [number, number, number, number] = isDark ? [0.2, 0.255, 0.333, 0.55] : [0.39, 0.455, 0.557, 0.8]
 
       setRectInstance(
         this.nodeArrays,
@@ -618,7 +622,7 @@ export class ThreeRenderer {
         [fr, fg, fb, 1.0],
         borderC,
         4,
-        1,
+        1.5,
         status,
         sel
       )

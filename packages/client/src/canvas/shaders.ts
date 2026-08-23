@@ -73,8 +73,10 @@ void main() {
   float fillA    = 1.0 - smoothstep(-0.8, 0.8, d);
   if (fillA < 0.005) discard;
 
-  // Border blend: smoothly transition fill → border colour near edge
-  float borderT  = 1.0 - smoothstep(-bw, 0.0, d);
+  // Border blend: smoothly transition fill → border colour near edge.
+  // d < 0 inside shape; smoothstep(-bw,0,d) = 0 deep inside → pure fill,
+  // approaches 1 near edge → blends toward border colour.
+  float borderT  = smoothstep(-bw, 0.0, d);
   vec3  col      = mix(vFill.rgb, vBorder.rgb, borderT * vBorder.a);
   float alpha    = fillA * vFill.a;
 
