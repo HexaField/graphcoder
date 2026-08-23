@@ -69,6 +69,8 @@ const BADGE_STYLE_DARK = new TextStyle({ fontSize: 8, fill: '#9ca3af', fontFamil
 const BADGE_STYLE_LIGHT = new TextStyle({ fontSize: 8, fill: '#475569', fontFamily: 'monospace' })
 const CONTAINER_LABEL_STYLE_DARK = new TextStyle({ fontSize: 9, fill: '#6b7280', fontFamily: 'monospace' })
 const CONTAINER_LABEL_STYLE_LIGHT = new TextStyle({ fontSize: 9, fill: '#94a3b8', fontFamily: 'monospace' })
+const DIR_LABEL_STYLE_DARK = new TextStyle({ fontSize: 10, fill: '#374151', fontFamily: 'monospace' })
+const DIR_LABEL_STYLE_LIGHT = new TextStyle({ fontSize: 10, fill: '#64748b', fontFamily: 'monospace' })
 
 function makeColors(isDark: boolean): DrawColors {
   return {
@@ -79,6 +81,29 @@ function makeColors(isDark: boolean): DrawColors {
 }
 
 // ── Draw functions ────────────────────────────────────────────────────────────
+
+function drawDirContainer(target: Container, container: FileContainer, isDark: boolean): void {
+  const { x, y, width, height, label } = container
+  const g = new Graphics()
+
+  // Lighter, more transparent background than file containers
+  g.roundRect(0, 0, width, height, 14)
+  g.fill({ color: isDark ? 0x060c18 : 0xdde4ef, alpha: isDark ? 0.4 : 0.4 })
+
+  // Subtler border — slightly larger radius, lower alpha
+  g.roundRect(0, 0, width, height, 14)
+  g.stroke({ color: isDark ? 0x1e2d40 : 0x94a3b8, width: 1, alpha: isDark ? 0.45 : 0.35 })
+
+  g.position.set(x, y)
+  target.addChild(g)
+
+  // Directory path label at top-left
+  const labelStyle = isDark ? DIR_LABEL_STYLE_DARK : DIR_LABEL_STYLE_LIGHT
+  const short = label.length > 48 ? `…${label.slice(-47)}` : label
+  const text = new Text({ text: short, style: labelStyle })
+  text.position.set(x + 12, y + 8)
+  target.addChild(text)
+}
 
 function drawFileContainer(target: Container, container: FileContainer, isDark: boolean): void {
   const { x, y, width, height, label } = container
@@ -208,7 +233,8 @@ export const GraphCanvas: Component = () => {
   // We access them in effects already gated by pixiReady().
   let pixiApp: Application | null = null
   let worldContainer: Container | null = null
-  let groupLayer: Container | null = null // file container boxes — drawn below edges
+  let dirGroupLayer: Container | null = null // directory containers — deepest background
+  let groupLayer: Container | null = null // file container boxes — drawn above dir layer
   let edgeLayer: Container | null = null
   let nodeLayer: Container | null = null
 
@@ -260,7 +286,7 @@ export const GraphCanvas: Component = () => {
           ? name
           : ((fileNode.filePath ?? name ?? fileNode.id).split('/').pop() ?? fileNode.id)
 
-      groups.push({ id: fileNode.id, label, childIds })
+      groups.push({ id: fileNode.id, label, childIds, filePath: fileNode.filePath })
     }
 
     return groups.length > 0 ? groups : undefined
@@ -339,19 +365,25 @@ export const GraphCanvas: Component = () => {
   // those without needing a GPU re-upload.
 
   createEffect(() => {
-    if (!pixiReady() || !groupLayer || !edgeLayer || !nodeLayer) return
+    if (!pixiReady() || !dirGroupLayer || !groupLayer || !edgeLayer || !nodeLayer) return
     const l = layout()
     const selectedId = state.selectedNodeId
     const overlay = diffOverlay()
     const byId = nodeById()
     const colors = makeColors(resolvedTheme() === 'dark') // reactive: redraws on theme change
 
+    clearContainer(dirGroupLayer)
     clearContainer(groupLayer)
     clearContainer(edgeLayer)
     clearContainer(nodeLayer)
     if (!l) return
 
-    // Draw file container boxes first (below edges + nodes)
+    // Draw directory containers (deepest background layer)
+    for (const dc of l.dirContainers) {
+      drawDirContainer(dirGroupLayer, dc, colors.isDark)
+    }
+
+    // Draw file container boxes above directory backgrounds
     for (const container of l.containers) {
       drawFileContainer(groupLayer, container, colors.isDark)
     }
@@ -395,16 +427,18 @@ export const GraphCanvas: Component = () => {
       autoDensity: true
     })
 
-    // Build scene graph: world → [group (file containers), edges, nodes]
+    // Build scene graph: world → [dir containers, file containers, edges, nodes]
     const wc = new Container()
+    const dgl = new Container() // dir group layer — directory bounding boxes (deepest)
     const gl = new Container() // group layer — file bounding boxes
     const el = new Container()
     const nl = new Container()
-    wc.addChild(gl, el, nl)
+    wc.addChild(dgl, gl, el, nl)
     app.stage.addChild(wc)
 
     pixiApp = app
     worldContainer = wc
+    dirGroupLayer = dgl
     groupLayer = gl
     edgeLayer = el
     nodeLayer = nl
@@ -434,6 +468,7 @@ export const GraphCanvas: Component = () => {
       window.removeEventListener('mouseup', onWindowMouseUp)
       pixiApp = null
       worldContainer = null
+      dirGroupLayer = null
       groupLayer = null
       edgeLayer = null
       nodeLayer = null

@@ -56,9 +56,14 @@ export interface FileGroup {
   label: string
   /** Ids of child nodes currently visible — these become ELK children. */
   childIds: string[]
+  /**
+   * Full file path — used to compute directory grouping.
+   * When omitted the file is placed in a synthetic "root" directory.
+   */
+  filePath?: string
 }
 
-/** A rendered file container box returned from a grouped layout. */
+/** A rendered container box returned from a grouped layout. */
 export interface FileContainer {
   id: string
   label: string
@@ -71,8 +76,10 @@ export interface FileContainer {
 export interface LayoutResult {
   nodes: Map<string, LayoutNode>
   edges: LayoutEdge[]
-  /** Non-empty only when layoutGraph was called with fileGroups. */
+  /** File-level containers. Non-empty only when layoutGraph was called with fileGroups. */
   containers: FileContainer[]
+  /** Directory-level containers — one per unique parent directory of the file groups. */
+  dirContainers: FileContainer[]
   width: number
   height: number
 }
@@ -153,10 +160,39 @@ async function layoutFlat(
   const resultEdges: LayoutEdge[] = []
   extractEdgeSections(layouted, edgeKindMap, resultEdges)
 
-  return { nodes: resultNodes, edges: resultEdges, containers: [], width: maxX, height: maxY }
+  return { nodes: resultNodes, edges: resultEdges, containers: [], dirContainers: [], width: maxX, height: maxY }
 }
 
-// ── Grouped layout (compound nodes per file) ──────────────────────────────────
+// ── Grouped layout (directory → file → node compound nesting) ─────────────────
+//
+// Three levels of ELK compound nodes:
+//   root  →  dir compounds  →  file compounds  →  leaf nodes
+//
+// Edges are placed at their Lowest Common Ancestor (LCA) container so ELK
+// routes them correctly at each level:
+//   same file      → file compound's .edges
+//   same dir, diff file → dir compound's .edges
+//   diff dir (or ungrouped) → root's .edges
+//
+// elk.hierarchyHandling: INCLUDE_CHILDREN is set on root and on each dir
+// compound so ELK can route edges whose endpoints live inside nested children.
+//
+// Alternating layout directions at each level maximises 2D space usage:
+//   root  → primary direction (matches view mode)
+//   dir   → perpendicular direction  (cross-axis organisation)
+//   file  → primary direction again
+
+function parentDir(filePath: string): string {
+  const i = filePath.lastIndexOf('/')
+  return i > 0 ? filePath.slice(0, i) : '.'
+}
+
+function dirLabel(dirPath: string): string {
+  if (dirPath === '.') return '/'
+  const parts = dirPath.split('/').filter(Boolean)
+  // Show last two components: enough context, no long absolute prefixes
+  return '/' + parts.slice(-2).join('/')
+}
 
 async function layoutGrouped(
   nodes: GraphNode[],
@@ -165,66 +201,142 @@ async function layoutGrouped(
   fileGroups: FileGroup[],
   nodeIds: Set<string>
 ): Promise<LayoutResult> {
-  // Build fast lookups
-  const nodeToGroup = new Map<string, string>()
-  const groupIdSet = new Set<string>()
-  const groupMap = new Map<string, FileGroup>()
+  // ── Build lookup maps ─────────────────────────────────────────────────────
+
+  const fileGroupMap = new Map<string, FileGroup>()
+  const nodeToFile = new Map<string, string>() // nodeId → fileGroupId
 
   for (const fg of fileGroups) {
-    groupIdSet.add(fg.id)
-    groupMap.set(fg.id, fg)
-    for (const childId of fg.childIds) {
-      if (!nodeToGroup.has(childId)) nodeToGroup.set(childId, fg.id)
+    fileGroupMap.set(fg.id, fg)
+    for (const cid of fg.childIds) {
+      if (nodeIds.has(cid)) nodeToFile.set(cid, fg.id)
     }
   }
 
-  // Nodes not inside any group → lay out at root level
-  const ungroupedNodes = nodes.filter((n) => !nodeToGroup.has(n.id))
+  // ── Group files by parent directory ──────────────────────────────────────
 
-  // Classify edges by whether both endpoints sit in the same group
-  const withinEdges = new Map<string, ElkExtendedEdge[]>()
-  const rootEdges: ElkExtendedEdge[] = []
-  const edgeKindMap = new Map<string, string>()
+  const dirPathToFiles = new Map<string, FileGroup[]>()
+  for (const fg of fileGroups) {
+    const dir = fg.filePath ? parentDir(fg.filePath) : '.'
+    if (!dirPathToFiles.has(dir)) dirPathToFiles.set(dir, [])
+    dirPathToFiles.get(dir)!.push(fg)
+  }
+
+  // Assign stable ELK-safe ids for directory nodes (paths contain slashes)
+  let dirIdx = 0
+  const dirPathToId = new Map<string, string>()
+  const dirIdToPath = new Map<string, string>()
+  for (const dp of dirPathToFiles.keys()) {
+    const id = `__dir${dirIdx++}`
+    dirPathToId.set(dp, id)
+    dirIdToPath.set(id, dp)
+  }
+
+  const dirIdSet = new Set(dirIdToPath.keys())
+
+  const fileIdToDirId = new Map<string, string>() // fileGroupId → dirElkId
+  for (const [dp, fgs] of dirPathToFiles) {
+    const dirId = dirPathToId.get(dp)!
+    for (const fg of fgs) fileIdToDirId.set(fg.id, dirId)
+  }
+
+  // ── Classify edges by LCA level ───────────────────────────────────────────
 
   const validEdges = edges.filter((e) => nodeIds.has(e.source) && nodeIds.has(e.target))
+  const edgeKindMap = new Map<string, string>()
+
+  const rootEdges: ElkExtendedEdge[] = []
+  const dirEdgeMap = new Map<string, ElkExtendedEdge[]>() // dirElkId → edges
+  const fileEdgeMap = new Map<string, ElkExtendedEdge[]>() // fileGroupId → edges
+
   validEdges.forEach((e, i) => {
     const id = `e${i}`
     edgeKindMap.set(id, e.kind)
-    const elkEdge: ElkExtendedEdge = { id, sources: [e.source], targets: [e.target] }
-    const srcGroup = nodeToGroup.get(e.source)
-    const tgtGroup = nodeToGroup.get(e.target)
-    if (srcGroup !== undefined && srcGroup === tgtGroup) {
-      if (!withinEdges.has(srcGroup)) withinEdges.set(srcGroup, [])
-      withinEdges.get(srcGroup)!.push(elkEdge)
+    const elk_edge: ElkExtendedEdge = { id, sources: [e.source], targets: [e.target] }
+
+    const srcFile = nodeToFile.get(e.source)
+    const tgtFile = nodeToFile.get(e.target)
+
+    if (srcFile !== undefined && srcFile === tgtFile) {
+      // Same file — within-file compound
+      if (!fileEdgeMap.has(srcFile)) fileEdgeMap.set(srcFile, [])
+      fileEdgeMap.get(srcFile)!.push(elk_edge)
+    } else if (srcFile !== undefined && tgtFile !== undefined) {
+      const srcDir = fileIdToDirId.get(srcFile)
+      const tgtDir = fileIdToDirId.get(tgtFile)
+      if (srcDir !== undefined && srcDir === tgtDir) {
+        // Same dir, different files — within-dir compound
+        if (!dirEdgeMap.has(srcDir)) dirEdgeMap.set(srcDir, [])
+        dirEdgeMap.get(srcDir)!.push(elk_edge)
+      } else {
+        // Cross-dir — root
+        rootEdges.push(elk_edge)
+      }
     } else {
-      rootEdges.push(elkEdge)
+      // One or both endpoints ungrouped — root
+      rootEdges.push(elk_edge)
     }
   })
 
-  // Build ELK compound nodes for each file group
-  const childDirection = LAYOUT_OPTIONS[viewMode]['elk.direction'] ?? 'DOWN'
-  const compoundNodes: ElkNode[] = fileGroups.map((fg) => {
+  // ── Build ELK nested tree ─────────────────────────────────────────────────
+
+  // Alternate layout directions between levels for 2D space coverage:
+  //   root (between dir compounds) → primary direction
+  //   dir  (between file compounds) → perpendicular
+  //   file (between leaf nodes)    → primary direction again
+  const rootDir = LAYOUT_OPTIONS[viewMode]['elk.direction'] ?? 'RIGHT'
+  const perpDir = rootDir === 'RIGHT' || rootDir === 'LEFT' ? 'DOWN' : 'RIGHT'
+
+  // File compound ElkNodes
+  const fileElkNodes = new Map<string, ElkNode>()
+  for (const fg of fileGroups) {
     const childElkNodes = fg.childIds
       .filter((id) => nodeIds.has(id))
       .map((id) => ({ id, width: NODE_WIDTH, height: NODE_HEIGHT }))
+    if (childElkNodes.length === 0) continue
 
-    const node: ElkNode = {
+    const n: ElkNode = {
       id: fg.id,
       layoutOptions: {
         'elk.algorithm': 'layered',
-        'elk.direction': childDirection,
+        'elk.direction': rootDir,
         'elk.padding': '[top=36,left=10,bottom=10,right=10]',
         'elk.spacing.nodeNode': '20',
         'elk.layered.spacing.nodeNodeBetweenLayers': '30'
       },
       children: childElkNodes
     }
-    const we = withinEdges.get(fg.id)
-    if (we && we.length > 0) node.edges = we
-    return node
-  })
+    const fe = fileEdgeMap.get(fg.id)
+    if (fe?.length) n.edges = fe
+    fileElkNodes.set(fg.id, n)
+  }
 
-  // Ungrouped flat nodes alongside the compound nodes
+  // Dir compound ElkNodes — each contains its file ElkNodes
+  const dirElkNodes: ElkNode[] = []
+  for (const [dp, fgs] of dirPathToFiles) {
+    const dirId = dirPathToId.get(dp)!
+    const children = fgs.map((fg) => fileElkNodes.get(fg.id)).filter((n): n is ElkNode => n !== undefined)
+    if (children.length === 0) continue
+
+    const dn: ElkNode = {
+      id: dirId,
+      layoutOptions: {
+        'elk.algorithm': 'layered',
+        'elk.direction': perpDir,
+        'elk.hierarchyHandling': 'INCLUDE_CHILDREN',
+        'elk.padding': '[top=30,left=12,bottom=12,right=12]',
+        'elk.spacing.nodeNode': '30',
+        'elk.layered.spacing.nodeNodeBetweenLayers': '40'
+      },
+      children
+    }
+    const de = dirEdgeMap.get(dirId)
+    if (de?.length) dn.edges = de
+    dirElkNodes.push(dn)
+  }
+
+  // Ungrouped nodes (not inside any file group) live at root level
+  const ungroupedNodes = nodes.filter((n) => !nodeToFile.has(n.id))
   const flatNodes: ElkNode[] = ungroupedNodes.map((n) => ({
     id: n.id,
     width: NODE_WIDTH,
@@ -235,60 +347,103 @@ async function layoutGrouped(
     id: 'root',
     layoutOptions: {
       ...LAYOUT_OPTIONS[viewMode],
-      'elk.spacing.nodeNode': '60',
-      'elk.layered.spacing.nodeNodeBetweenLayers': '80'
+      'elk.hierarchyHandling': 'INCLUDE_CHILDREN',
+      'elk.spacing.nodeNode': '80',
+      'elk.layered.spacing.nodeNodeBetweenLayers': '100'
     },
-    children: [...compoundNodes, ...flatNodes],
+    children: [...dirElkNodes, ...flatNodes],
     edges: rootEdges
   }
 
   const layouted = await elk.layout(graph)
 
+  // ── Extract positions ─────────────────────────────────────────────────────
+
   const resultNodes = new Map<string, LayoutNode>()
   const containers: FileContainer[] = []
+  const dirContainers: FileContainer[] = []
   let maxX = 0,
     maxY = 0
 
-  for (const child of layouted.children ?? []) {
-    const cx = child.x ?? 0
-    const cy = child.y ?? 0
-    const cw = child.width ?? NODE_WIDTH
-    const ch = child.height ?? NODE_HEIGHT
+  for (const dirChild of layouted.children ?? []) {
+    const dx = dirChild.x ?? 0
+    const dy = dirChild.y ?? 0
+    const dw = dirChild.width ?? NODE_WIDTH
+    const dh = dirChild.height ?? NODE_HEIGHT
 
-    if (groupIdSet.has(child.id)) {
-      // Compound node → becomes a visual container
-      const fg = groupMap.get(child.id)!
-      containers.push({ id: child.id, label: fg.label, x: cx, y: cy, width: cw, height: ch })
+    if (dirIdSet.has(dirChild.id)) {
+      // Directory compound → visual dir container
+      const dp = dirIdToPath.get(dirChild.id)!
+      dirContainers.push({ id: dirChild.id, label: dirLabel(dp), x: dx, y: dy, width: dw, height: dh })
 
-      // Children have positions relative to compound node's top-left
-      for (const grandchild of child.children ?? []) {
-        const x = cx + (grandchild.x ?? 0)
-        const y = cy + (grandchild.y ?? 0)
-        const w = grandchild.width ?? NODE_WIDTH
-        const h = grandchild.height ?? NODE_HEIGHT
-        resultNodes.set(grandchild.id, { id: grandchild.id, x, y, width: w, height: h })
+      // File compounds are grandchildren of root (direct children of dir)
+      for (const fileChild of dirChild.children ?? []) {
+        const fx = dx + (fileChild.x ?? 0)
+        const fy = dy + (fileChild.y ?? 0)
+        const fw = fileChild.width ?? NODE_WIDTH
+        const fh = fileChild.height ?? NODE_HEIGHT
+
+        if (fileGroupMap.has(fileChild.id)) {
+          const fg = fileGroupMap.get(fileChild.id)!
+          containers.push({ id: fileChild.id, label: fg.label, x: fx, y: fy, width: fw, height: fh })
+
+          // Leaf nodes are great-grandchildren of root
+          for (const gc of fileChild.children ?? []) {
+            const x = fx + (gc.x ?? 0)
+            const y = fy + (gc.y ?? 0)
+            resultNodes.set(gc.id, {
+              id: gc.id,
+              x,
+              y,
+              width: gc.width ?? NODE_WIDTH,
+              height: gc.height ?? NODE_HEIGHT
+            })
+          }
+        } else {
+          // Unknown child — treat as flat
+          resultNodes.set(fileChild.id, { id: fileChild.id, x: fx, y: fy, width: fw, height: fh })
+        }
       }
     } else {
-      // Ungrouped flat node
-      resultNodes.set(child.id, { id: child.id, x: cx, y: cy, width: cw, height: ch })
+      // Ungrouped flat node at root level
+      resultNodes.set(dirChild.id, { id: dirChild.id, x: dx, y: dy, width: dw, height: dh })
     }
 
-    if (cx + cw > maxX) maxX = cx + cw
-    if (cy + ch > maxY) maxY = cy + ch
+    if (dx + dw > maxX) maxX = dx + dw
+    if (dy + dh > maxY) maxY = dy + dh
   }
 
-  // Root-level edges (absolute coordinates)
+  // ── Extract edge routes ───────────────────────────────────────────────────
+  //
+  // Edge sections are in the local coordinate system of the compound node that
+  // holds the edge. Accumulate the absolute offset at each nesting level.
+
   const resultEdges: LayoutEdge[] = []
+
+  // Root-level cross-dir edges — already in global coords (offset 0,0)
   extractEdgeSections(layouted, edgeKindMap, resultEdges)
 
-  // Within-compound edges (relative coords → add compound node offset)
-  for (const child of layouted.children ?? []) {
-    if (groupIdSet.has(child.id) && child.edges && child.edges.length > 0) {
-      extractEdgeSections(child, edgeKindMap, resultEdges, child.x ?? 0, child.y ?? 0)
+  for (const dirChild of layouted.children ?? []) {
+    if (!dirIdSet.has(dirChild.id)) continue
+    const dx = dirChild.x ?? 0
+    const dy = dirChild.y ?? 0
+
+    // Dir-level same-dir/cross-file edges — offset by dir position
+    if (dirChild.edges?.length) {
+      extractEdgeSections(dirChild, edgeKindMap, resultEdges, dx, dy)
+    }
+
+    // File-level same-file edges — offset by dir + file position
+    for (const fileChild of dirChild.children ?? []) {
+      if (fileChild.edges?.length) {
+        const fx = dx + (fileChild.x ?? 0)
+        const fy = dy + (fileChild.y ?? 0)
+        extractEdgeSections(fileChild, edgeKindMap, resultEdges, fx, fy)
+      }
     }
   }
 
-  return { nodes: resultNodes, edges: resultEdges, containers, width: maxX, height: maxY }
+  return { nodes: resultNodes, edges: resultEdges, containers, dirContainers, width: maxX, height: maxY }
 }
 
 // ── Public entry point ────────────────────────────────────────────────────────
