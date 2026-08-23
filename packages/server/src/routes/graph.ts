@@ -122,8 +122,8 @@ router.get('/nodes/:nodeId', async (req: Request, res: Response) => {
       return
     }
 
-    const incoming = cg.getIncomingEdges(nodeId)
-    const outgoing = cg.getOutgoingEdges(nodeId)
+    const incoming = graphService.getIncomingEdgesAugmented(nodeId)
+    const outgoing = graphService.getOutgoingEdgesAugmented(nodeId)
     const code = await cg.getCode(nodeId)
 
     res.json({ node, incoming, outgoing, code })
@@ -149,7 +149,7 @@ router.get('/nodes/:nodeId/callers', (req: Request, res: Response) => {
       return
     }
 
-    const incoming = cg.getIncomingEdges(nodeId).filter((e) => e.kind === 'calls')
+    const incoming = graphService.getIncomingEdgesAugmented(nodeId).filter((e) => e.kind === 'calls')
     const callerNodes = incoming.map((e) => cg.getNode(e.source)).filter((n): n is Node => n !== null)
 
     res.json({ nodes: callerNodes, edges: incoming })
@@ -175,7 +175,7 @@ router.get('/nodes/:nodeId/callees', (req: Request, res: Response) => {
       return
     }
 
-    const outgoing = cg.getOutgoingEdges(nodeId).filter((e) => e.kind === 'calls')
+    const outgoing = graphService.getOutgoingEdgesAugmented(nodeId).filter((e) => e.kind === 'calls')
     const calleeNodes = outgoing.map((e) => cg.getNode(e.target)).filter((n): n is Node => n !== null)
 
     res.json({ nodes: calleeNodes, edges: outgoing })
@@ -283,6 +283,7 @@ router.post('/sync', async (_req: Request, res: Response) => {
   try {
     const cg = graphService.getCodeGraph()
     await cg.sync()
+    await graphService.refreshHttpBridge()
     broadcastGraphUpdate()
     const stats = cg.getStats()
     res.json({
