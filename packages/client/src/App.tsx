@@ -1,11 +1,12 @@
-import { createEffect, createSignal, onMount, Show } from 'solid-js'
+import { createEffect, createSignal, onCleanup, onMount, Show } from 'solid-js'
 import { GraphCanvas } from './canvas/GraphCanvas.js'
 import { DiffPanel } from './components/DiffPanel.js'
+import { GitBar } from './components/GitBar.js'
 import { GraphParamsPanel } from './components/GraphParamsPanel.js'
 import { HierarchyPanel } from './components/HierarchyPanel.js'
 import { NodeInspector } from './components/NodeInspector.js'
 import { Toolbar } from './components/Toolbar.js'
-import { connectWebSocket, initFromUrl, state } from './state/store.js'
+import { clearDiff, connectWebSocket, initFromUrl, state, toggleGitBar } from './state/store.js'
 // Import theme module to ensure the root-level createRoot runs on startup
 import './state/theme.js'
 
@@ -50,11 +51,36 @@ export default function App() {
   onMount(() => {
     connectWebSocket()
     void initFromUrl()
+
+    // ── Keyboard shortcuts ────────────────────────────────────────────────
+    const handleKey = (e: KeyboardEvent) => {
+      // Skip when focus is in a text input / select / textarea.
+      const tag = (e.target as HTMLElement).tagName
+      if (tag === 'INPUT' || tag === 'SELECT' || tag === 'TEXTAREA') return
+
+      switch (e.key) {
+        case 'H':
+        case 'h':
+          if (state.nodes.length > 0) void toggleGitBar()
+          break
+        case 'Escape':
+          if (state.gitBarOpen) {
+            void toggleGitBar()
+          } else if (state.currentDiff) {
+            clearDiff()
+          }
+          break
+      }
+    }
+
+    document.addEventListener('keydown', handleKey)
+    onCleanup(() => document.removeEventListener('keydown', handleKey))
   })
 
   return (
     <div class="flex flex-col h-screen bg-gray-50 dark:bg-gray-950 text-gray-900 dark:text-white" data-testid="app">
       <Toolbar />
+      <GitBar />
 
       <Show when={state.error}>
         {(err) => (

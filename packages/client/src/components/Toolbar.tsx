@@ -1,6 +1,6 @@
 import type { Component } from 'solid-js'
 import { createSignal, Show } from 'solid-js'
-import { captureSnapshot, clearDiff, openProject, setGraphDirection, state } from '../state/store.js'
+import { captureSnapshot, clearDiff, openProject, setGraphDirection, state, toggleGitBar } from '../state/store.js'
 import { cycleTheme, theme } from '../state/theme.js'
 import { SearchBar } from './SearchBar.js'
 
@@ -143,6 +143,21 @@ export const Toolbar: Component = () => {
       </Show>
 
       <div class="ml-auto flex items-center gap-3">
+        {/* History toggle — opens/closes the git bar */}
+        <Show when={state.nodes.length > 0}>
+          <button
+            class={`flex items-center gap-1 text-xs px-2 py-1 rounded border transition-colors ${
+              state.gitBarOpen
+                ? "bg-blue-600 border-blue-600 text-white"
+                : "border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800 hover:text-gray-900 dark:hover:text-white"
+            }`}
+            onClick={() => void toggleGitBar()}
+            title="Toggle Git history panel (H)"
+            data-testid="git-bar-toggle"
+          >
+            ⏱ History
+          </button>
+        </Show>
         <SearchBar />
         <ThemeToggle />
       </div>

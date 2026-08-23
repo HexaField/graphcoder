@@ -13,12 +13,15 @@ export interface DiffState {
 export function captureSnapshot(): void {
   setState('baseSnapshot', { nodes: [...state.nodes], edges: [...state.edges] })
   setState('currentDiff', null)
+  // Clear any temporal range label — switching to snapshot mode.
+  setState('temporalRange', null)
 }
 
 /** Discard the baseline and clear any computed diff. */
 export function clearDiff(): void {
   setState('baseSnapshot', null)
   setState('currentDiff', null)
+  setState('temporalRange', null)
 }
 
 /**

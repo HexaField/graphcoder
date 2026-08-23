@@ -9,6 +9,8 @@ import type { HierarchyState } from './hierarchy.js'
 import type { ProjectState } from './project.js'
 import type { SearchState } from './search.js'
 import type { SelectionState } from './selection.js'
+import type { TemporalState } from './temporal.js'
+import { temporalInitial } from './temporal.js'
 
 /**
  * Full application state — the intersection of every section's slice type.
@@ -22,7 +24,8 @@ export type AppState = ProjectState &
   FiltersState &
   DiffState &
   SearchState &
-  HierarchyState
+  HierarchyState &
+  TemporalState
 
 const _saved = loadFilters()
 const _savedHierarchy = loadHierarchy()
@@ -71,5 +74,8 @@ export const [state, setState] = createStore<AppState>({
   isSearching: false,
 
   // Hierarchy
-  hiddenPaths: _savedHierarchy.hiddenPaths ?? []
+  hiddenPaths: _savedHierarchy.hiddenPaths ?? [],
+
+  // Temporal (git history bar + commit-range diff)
+  ...temporalInitial
 })

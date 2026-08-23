@@ -58,5 +58,18 @@ export { reloadGraph } from './view.js'
 export { clearHierarchyHidden, setHiddenPaths, toggleHierarchyHidden } from './hierarchy.js'
 export type { HierarchyState } from './hierarchy.js'
 
+// Section: Temporal (git history bar + commit-range diff)
+export {
+  loadCommits,
+  refreshGitStatus,
+  runTemporalDiff,
+  setActiveTab,
+  setBaseRef,
+  setBranchRef,
+  setTargetRef,
+  toggleGitBar
+} from './temporal.js'
+export type { TemporalRange, TemporalState } from './temporal.js'
+
 // Utilities
 export { syncUrlParams } from './url.js'

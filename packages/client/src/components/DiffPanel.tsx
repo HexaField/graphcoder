@@ -86,6 +86,15 @@ export const DiffPanel: Component = () => {
         <div class="flex items-center gap-3 px-3 py-1.5 border-b border-gray-200 dark:border-gray-700 flex-shrink-0">
           <span class="text-xs font-semibold text-gray-600 dark:text-gray-300 mr-1">DIFF</span>
 
+          {/* Temporal range label — shown when diff came from git comparison */}
+          <Show when={state.temporalRange}>
+            {(range) => (
+              <span class="text-xs font-mono text-blue-500 dark:text-blue-400 border border-blue-300 dark:border-blue-700 rounded px-1.5 py-0.5">
+                {range().baseLabel} → {range().targetLabel}
+              </span>
+            )}
+          </Show>
+
           <Show when={summary().added > 0}>
             <span class="text-xs text-green-400">+{summary().added} added</span>
           </Show>

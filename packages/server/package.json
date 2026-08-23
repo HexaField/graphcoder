@@ -12,13 +12,16 @@
   "dependencies": {
     "@colbymchenry/codegraph": "^1.5.0",
     "@graphcoder/core": "workspace:*",
+    "better-sqlite3": "^13.0.3",
     "cors": "^2.8.5",
     "dotenv": "^17.2.3",
     "express": "^5.2.1",
+    "simple-git": "^3.36.0",
     "ws": "^8.21.3",
     "zod": "^4.3.5"
   },
   "devDependencies": {
+    "@types/better-sqlite3": "^9.6.0",
     "@types/cors": "^2.8.19",
     "@types/express": "^5.0.6",
     "@types/ws": "^8.18.1"
