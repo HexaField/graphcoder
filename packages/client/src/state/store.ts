@@ -61,6 +61,52 @@ interface AppState {
   isSearching: boolean
 }
 
+// ── Filter persistence ────────────────────────────────────────────────────────
+
+const FILTER_KEY = 'graphcoder-filters'
+
+interface PersistedFilters {
+  hiddenNodeKinds: NodeKind[]
+  hiddenEdgeKinds: EdgeKind[]
+  hideTestFiles: boolean
+  groupByFile: boolean
+}
+
+function loadFilters(): Partial<PersistedFilters> {
+  try {
+    const raw = localStorage.getItem(FILTER_KEY)
+    if (!raw) return {}
+    const p = JSON.parse(raw)
+    if (typeof p !== 'object' || p === null) return {}
+    return {
+      hiddenNodeKinds: Array.isArray(p.hiddenNodeKinds) ? (p.hiddenNodeKinds as NodeKind[]) : undefined,
+      hiddenEdgeKinds: Array.isArray(p.hiddenEdgeKinds) ? (p.hiddenEdgeKinds as EdgeKind[]) : undefined,
+      hideTestFiles: typeof p.hideTestFiles === 'boolean' ? p.hideTestFiles : undefined,
+      groupByFile: typeof p.groupByFile === 'boolean' ? p.groupByFile : undefined
+    }
+  } catch {
+    return {}
+  }
+}
+
+function persistFilters(): void {
+  try {
+    const f: PersistedFilters = {
+      hiddenNodeKinds: state.hiddenNodeKinds,
+      hiddenEdgeKinds: state.hiddenEdgeKinds,
+      hideTestFiles: state.hideTestFiles,
+      groupByFile: state.groupByFile
+    }
+    localStorage.setItem(FILTER_KEY, JSON.stringify(f))
+  } catch {
+    // localStorage unavailable (quota exceeded, private-browsing restriction, etc.)
+  }
+}
+
+// ── Store ─────────────────────────────────────────────────────────────────────
+
+const _saved = loadFilters()
+
 export const [state, setState] = createStore<AppState>({
   projectRoot: null,
   projectStats: null,
@@ -72,10 +118,10 @@ export const [state, setState] = createStore<AppState>({
   selectedNodeDetail: null,
   isLoadingDetail: false,
   viewMode: 'module-dependency',
-  hiddenNodeKinds: [],
-  hiddenEdgeKinds: [],
-  hideTestFiles: false,
-  groupByFile: false,
+  hiddenNodeKinds: _saved.hiddenNodeKinds ?? [],
+  hiddenEdgeKinds: _saved.hiddenEdgeKinds ?? [],
+  hideTestFiles: _saved.hideTestFiles ?? false,
+  groupByFile: _saved.groupByFile ?? false,
   focusedNodeId: null,
   baseSnapshot: null,
   currentDiff: null,
@@ -88,10 +134,12 @@ export const [state, setState] = createStore<AppState>({
 
 export function toggleNodeKind(kind: NodeKind): void {
   setState('hiddenNodeKinds', (prev) => (prev.includes(kind) ? prev.filter((k) => k !== kind) : [...prev, kind]))
+  persistFilters()
 }
 
 export function toggleEdgeKind(kind: EdgeKind): void {
   setState('hiddenEdgeKinds', (prev) => (prev.includes(kind) ? prev.filter((k) => k !== kind) : [...prev, kind]))
+  persistFilters()
 }
 
 export function setFocus(nodeId: string): void {
@@ -104,10 +152,12 @@ export function clearFocus(): void {
 
 export function toggleHideTestFiles(): void {
   setState('hideTestFiles', (v) => !v)
+  persistFilters()
 }
 
 export function toggleGroupByFile(): void {
   setState('groupByFile', (v) => !v)
+  persistFilters()
 }
 
 export function clearFilters(): void {
@@ -115,6 +165,7 @@ export function clearFilters(): void {
   setState('hiddenEdgeKinds', [])
   setState('hideTestFiles', false)
   setState('groupByFile', false)
+  persistFilters()
 }
 
 // ── Diff ──────────────────────────────────────────────────────────────────────
