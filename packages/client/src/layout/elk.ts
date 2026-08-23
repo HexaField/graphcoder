@@ -1,8 +1,12 @@
-import ELK from 'elkjs/lib/elk.bundled.js'
-import type { ElkExtendedEdge, ElkNode } from 'elkjs/lib/elk.bundled.js'
+import ELK from 'elkjs/lib/elk-api.js'
+import type { ElkExtendedEdge, ElkNode } from 'elkjs/lib/elk-api.js'
+// Vite bundles elk-worker.min.js as a separate chunk; the `?worker` suffix
+// gives us a constructor whose instances are real Web Workers — ELK layout
+// then runs off the main thread entirely.
+import ELKWorker from 'elkjs/lib/elk-worker.min.js?worker'
 import type { GraphDirection, GraphEdge, GraphNode } from '@graphcoder/core'
 
-const elk = new ELK()
+const elk = new ELK({ workerFactory: () => new ELKWorker() })
 
 // Below this node count: full layered layout with crossing minimisation.
 // At or above: disable crossing minimisation + use simple node placement to
