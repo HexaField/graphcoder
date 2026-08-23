@@ -169,20 +169,15 @@ export const GraphCanvas: Component = () => {
   })
 
   // ── Pan / zoom ──────────────────────────────────────────────────────────────
+  //
+  // mousemove/mouseup attach to window during an active pan so fast gestures
+  // that carry the cursor outside the SVG bounds don't kill the drag.
 
-  let isPanning = false
   let panStart = { clientX: 0, clientY: 0 }
   let vbAtPanStart = { x: 0, y: 0, w: 800, h: 600 }
 
-  const handleMouseDown = (e: MouseEvent) => {
-    if (e.button !== 0) return
-    isPanning = true
-    panStart = { clientX: e.clientX, clientY: e.clientY }
-    vbAtPanStart = { ...viewBox() }
-  }
-
-  const handleMouseMove = (e: MouseEvent) => {
-    if (!isPanning || !svgRef) return
+  const onWindowMouseMove = (e: MouseEvent) => {
+    if (!svgRef) return
     const vb = vbAtPanStart
     const rect = svgRef.getBoundingClientRect()
     const dx = (e.clientX - panStart.clientX) * (vb.w / rect.width)
@@ -190,8 +185,17 @@ export const GraphCanvas: Component = () => {
     setViewBox({ x: vb.x - dx, y: vb.y - dy, w: vb.w, h: vb.h })
   }
 
-  const handleMouseUp = () => {
-    isPanning = false
+  const onWindowMouseUp = () => {
+    window.removeEventListener('mousemove', onWindowMouseMove)
+    window.removeEventListener('mouseup', onWindowMouseUp)
+  }
+
+  const handleMouseDown = (e: MouseEvent) => {
+    if (e.button !== 0) return
+    panStart = { clientX: e.clientX, clientY: e.clientY }
+    vbAtPanStart = { ...viewBox() }
+    window.addEventListener('mousemove', onWindowMouseMove)
+    window.addEventListener('mouseup', onWindowMouseUp)
   }
 
   const handleWheel = (e: WheelEvent) => {
@@ -217,7 +221,11 @@ export const GraphCanvas: Component = () => {
   onMount(() => {
     if (!svgRef) return
     svgRef.addEventListener('wheel', handleWheel, { passive: false })
-    onCleanup(() => svgRef?.removeEventListener('wheel', handleWheel))
+    onCleanup(() => {
+      svgRef?.removeEventListener('wheel', handleWheel)
+      window.removeEventListener('mousemove', onWindowMouseMove)
+      window.removeEventListener('mouseup', onWindowMouseUp)
+    })
   })
 
   return (
@@ -238,9 +246,6 @@ export const GraphCanvas: Component = () => {
         viewBox={`${viewBox().x} ${viewBox().y} ${viewBox().w} ${viewBox().h}`}
         data-testid="graph-svg"
         onMouseDown={handleMouseDown}
-        onMouseMove={handleMouseMove}
-        onMouseUp={handleMouseUp}
-        onMouseLeave={handleMouseUp}
       >
         <defs>
           <marker id="arrowhead" markerWidth="8" markerHeight="6" refX="6" refY="3" orient="auto">
