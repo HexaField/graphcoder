@@ -2,6 +2,7 @@ import { createMemo, createSignal, For, onCleanup, Show, type Component } from '
 import type { GraphEdge, GraphNode, NodeKind } from '@graphcoder/core'
 import { nodeKindColor } from '../constants.js'
 import {
+  addGroupExpanded,
   clearHierarchyHidden,
   globToRegex,
   setExcludePatterns,
@@ -512,7 +513,22 @@ const ContextMenu: Component<CtxMenuProps> = (props) => {
     document.removeEventListener('touchstart', handleOutside, { capture: true })
   })
 
+  const anyGroupingOn = state.groupByFile || state.groupByClass || state.groupByContract || state.groupByPackage
+
   const items: Array<{ label: string; action: () => void }> = [
+    // Only shown when a groupBy option is active — expands all file groups
+    // whose path starts with this item's path prefix.
+    ...(anyGroupingOn
+      ? [
+          {
+            label: 'Show all children',
+            action: () => {
+              addGroupExpanded(props.menu.path)
+              props.onClose()
+            }
+          }
+        ]
+      : []),
     {
       label: 'Show just this',
       action: () => {
@@ -575,7 +591,6 @@ export const HierarchyPanel: Component = () => {
   // When any grouping is active, eye buttons on file rows control collapse/expand
   // of the group container rather than hiding the file from the graph entirely.
   const anyGroupingOn = () => state.groupByFile || state.groupByClass || state.groupByContract || state.groupByPackage
-  const expandedGroupsSet = createMemo(() => new Set(state.expandedGroups))
 
   // Compile active exclude patterns once per change so file rows can check membership
   const excludeRegexes = createMemo(() =>
@@ -628,9 +643,14 @@ export const HierarchyPanel: Component = () => {
           const fileExpanded = () => expandedSet().has(file.key)
           const hasSymbols = file.children.length > 0
 
-          // In group mode: eye reflects whether the group container is expanded,
-          // not whether the file is hidden from the graph.
-          const groupCollapsed = () => anyGroupingOn() && !expandedGroupsSet().has(file.key)
+          // In group mode: eye reflects whether the group container is expanded.
+          // Prefix-matches state.expandedGroups (same logic as GraphCanvas.isGroupExpanded)
+          // so "Show all children" on a dir/package reflects correctly in the icons.
+          const groupCollapsed = () => {
+            if (!anyGroupingOn()) return false
+            const groups = state.expandedGroups
+            return !groups.some((prefix) => file.key === prefix || file.key.startsWith(prefix + '/'))
+          }
 
           return (
             <>

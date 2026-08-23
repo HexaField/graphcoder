@@ -56,6 +56,7 @@ export { reloadGraph } from './view.js'
 
 // Section: Hierarchy
 export {
+  addGroupExpanded,
   clearHierarchyHidden,
   collapseAllGroups,
   expandAllGroups,

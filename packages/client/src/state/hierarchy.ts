@@ -63,6 +63,15 @@ export function toggleGroupExpanded(key: string): void {
   persist()
 }
 
+/**
+ * Ensure a path (or prefix) is in expandedGroups without toggling it off.
+ * Adds the key if absent; no-ops if already present.
+ */
+export function addGroupExpanded(key: string): void {
+  setState('expandedGroups', (prev) => (prev.includes(key) ? prev : [...prev, key]))
+  persist()
+}
+
 /** Collapse all group containers (clear the expanded set). */
 export function collapseAllGroups(): void {
   setState('expandedGroups', [])
