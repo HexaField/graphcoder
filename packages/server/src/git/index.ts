@@ -118,3 +118,85 @@ export async function resolveRef(projectRoot: string, ref: string): Promise<stri
     return hash.trim()
   }
 }
+
+// ── Git graph ────────────────────────────────────────────────────────────────
+
+export interface GraphCommit {
+  hash: string
+  shortHash: string
+  parents: string[]
+  message: string
+  author: string
+  date: string // ISO-8601
+}
+
+export interface BranchRef {
+  name: string
+  hash: string
+  current: boolean
+}
+
+export interface GitGraph {
+  commits: GraphCommit[]
+  branches: BranchRef[]
+}
+
+/**
+ * Return the full commit DAG across all branches.
+ *
+ * Uses `git log --all --topo-order` to get every reachable commit with parent
+ * hashes, then overlays branch tip pointers. Limit caps total commits to keep
+ * the payload bounded for large repos.
+ */
+export async function getGitGraph(projectRoot: string, limit = 200): Promise<GitGraph> {
+  const git = simpleGit(projectRoot)
+
+  // --all: all refs. --topo-order: children before parents (good for DAG layout).
+  // %H = full hash, %P = parent hashes (space-separated), %s = subject,
+  // %an = author name, %aI = author date ISO.
+  const raw = await git.raw([
+    'log',
+    '--all',
+    '--topo-order',
+    `--max-count=${limit}`,
+    '--format=%H%x00%P%x00%s%x00%an%x00%aI'
+  ])
+
+  const commits: GraphCommit[] = []
+  for (const line of raw.trim().split('\n')) {
+    if (!line) continue
+    const [hash, parentStr, message, author, date] = line.split('\x00')
+    if (!hash) continue
+    commits.push({
+      hash,
+      shortHash: hash.slice(0, 8),
+      parents: parentStr ? parentStr.split(' ').filter(Boolean) : [],
+      message: message ?? '',
+      author: author ?? '',
+      date: date ?? ''
+    })
+  }
+
+  // Collect branch refs (local + remote, deduplicated).
+  const branchSummary = await git.branch(['-a'])
+  const branches: BranchRef[] = []
+  const seen = new Set<string>()
+
+  for (const rawName of branchSummary.all) {
+    if (rawName.includes('/HEAD')) continue
+    const name = rawName.replace(/^remotes\/origin\//, '')
+    if (seen.has(name)) continue
+    seen.add(name)
+
+    // Resolve to commit hash.
+    try {
+      const ref = await resolveBranchRef(git, name)
+      const hash = (await git.revparse([ref])).trim()
+      branches.push({ name, hash, current: name === branchSummary.current })
+    } catch {
+      // Skip unresolvable refs.
+    }
+  }
+
+  return { commits, branches }
+}

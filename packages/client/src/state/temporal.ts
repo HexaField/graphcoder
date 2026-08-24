@@ -1,107 +1,79 @@
 /**
- * Temporal state — Git history bar and commit-range diff.
+ * Temporal state — Git graph DAG and commit-pair diff.
  *
- * The git bar allows selecting two commits on a branch and computing an
- * ArchDiff between them. The result feeds into the same `currentDiff` field
- * used by the snapshot workflow, but also populates `temporalRange` so the
- * DiffPanel can display the commit range label.
- *
- * Tabs:
- *   range  — pick two commits on the same branch; diff = base → target
- *   branch — pick a branch; diff = branch tip → HEAD (cross-branch)
+ * The git graph panel shows all branches and commits as a visual DAG.
+ * Users click two commits (or branch tips) to select base and target,
+ * then compare to compute an ArchDiff between them.
  */
 import { computeArchDiff } from '@graphcoder/core'
-import type { CommitInfo, GitStatus } from '../api/git.js'
-import { computeDiff, fetchBranches, fetchCommits, fetchGitStatus } from '../api/git.js'
+import type { BranchRef, GitGraph, GitStatus, GraphCommit } from '../api/git.js'
+import { computeDiff, fetchGitGraph, fetchGitStatus } from '../api/git.js'
 import { setState } from './core.js'
 
 // ── State shape ───────────────────────────────────────────────────────────────
 
 export interface TemporalRange {
-  /** Short display label for the base commit (e.g. "abc1234" or branch name). */
   baseLabel: string
-  /** Short display label for the target commit. */
   targetLabel: string
 }
 
 export interface TemporalState {
-  /** Whether the git history bar is visible. */
+  /** Whether the git graph panel is visible. */
   gitBarOpen: boolean
   /** Populated after the first status check; null means unknown. */
   isGitRepo: boolean | null
   currentBranch: string | null
-  branches: string[]
-  commits: CommitInfo[]
-  /** Branch currently selected in the branch picker. */
-  selectedBranch: string | null
-  /** Active tab in the git bar. */
-  activeTab: 'range' | 'branch'
-  /** Base ref for Range mode (commit hash or 'HEAD'). */
+  /** Full DAG data from /api/git/graph. */
+  gitGraph: GitGraph | null
+  /** Branch names the user has expanded to show commits. */
+  expandedBranches: string[]
+  /** Selected base commit hash (first click). */
   baseRef: string | null
-  /** Target ref for Range mode (commit hash or 'HEAD'). */
+  /** Selected target commit hash (second click). */
   targetRef: string | null
-  /** Branch ref for Branch mode. */
-  branchRef: string | null
   /** True while the server computes snapshots / diff. */
   isComputing: boolean
   /** Latest progress message from the server SSE stream. */
   computeProgress: string | null
   /** Set when the last diff computation came from the temporal mapper. */
   temporalRange: TemporalRange | null
-  /** Latched true after the first successful Branch diff (unlocks the tab). */
-  branchTabUsed: boolean
   /** Error from the last computation attempt. */
   diffError: string | null
 }
 
 // ── Initialise ────────────────────────────────────────────────────────────────
 
-/**
- * Initialise temporal state fields in the shared store. Called from `core.ts`
- * initial state — these values get merged into `AppState`.
- */
 export const temporalInitial: TemporalState = {
   gitBarOpen: false,
   isGitRepo: null,
   currentBranch: null,
-  branches: [],
-  commits: [],
-  selectedBranch: null,
-  activeTab: 'range',
+  gitGraph: null,
+  expandedBranches: [],
   baseRef: null,
   targetRef: null,
-  branchRef: null,
   isComputing: false,
   computeProgress: null,
   temporalRange: null,
-  branchTabUsed: false,
   diffError: null
 }
 
 // ── Actions ───────────────────────────────────────────────────────────────────
 
-/** Toggle the git history bar open/closed. Loads git status and commits on first open. */
+/** Toggle the git graph panel open/closed. Loads graph data on first open. */
 export async function toggleGitBar(): Promise<void> {
+  const { state } = await import('./core.js')
+  const wasOpen = state.gitBarOpen
+
   setState('gitBarOpen', (v: boolean) => !v)
   await refreshGitStatus()
 
-  // Auto-load commits when the bar was just opened and has no commits yet.
-  //
-  // This is done imperatively rather than via a createEffect in GitBar.tsx.
-  // The reactive approach caused an infinite loop: loadCommits() resets
-  // commits synchronously with setState('commits', []), which re-fires any
-  // createEffect that reads commits.length, which calls loadCommits again,
-  // producing thousands of concurrent GET /api/git/commits requests.
-  //
-  // Dynamic import of `state` avoids the circular dep (core → temporal → core).
-  // After setState('gitBarOpen', toggle), state.gitBarOpen is the new value.
-  const { state } = await import('./core.js')
-  if (state.gitBarOpen && state.isGitRepo && state.commits.length === 0) {
-    await loadCommits(null)
+  // Load graph data when opening for the first time.
+  if (!wasOpen && state.isGitRepo && !state.gitGraph) {
+    await loadGitGraph()
   }
 }
 
-/** Fetch git status and branch list for the current project. */
+/** Fetch git status for the current project. */
 export async function refreshGitStatus(): Promise<void> {
   let status: GitStatus
   try {
@@ -112,110 +84,104 @@ export async function refreshGitStatus(): Promise<void> {
 
   setState('isGitRepo', status.isGitRepo)
   setState('currentBranch', status.currentBranch)
+}
 
-  if (!status.isGitRepo) return
-
+/** Load the full git DAG from the server. */
+export async function loadGitGraph(): Promise<void> {
   try {
-    const { branches } = await fetchBranches()
-    setState('branches', branches)
+    const graph = await fetchGitGraph(200)
+    setState('gitGraph', graph)
   } catch {
-    // Non-fatal — continue with empty branch list.
+    // Non-fatal — graph stays null.
   }
 }
 
-/** Load commits for the given branch (or HEAD if null). */
-export async function loadCommits(branch: string | null): Promise<void> {
-  setState('selectedBranch', branch)
-  setState('commits', [])
-  try {
-    const commits = await fetchCommits(branch ?? undefined, 50)
-    setState('commits', commits)
-    // Auto-select the two most recent commits as base/target defaults.
-    if (commits.length >= 2) {
-      setState('targetRef', commits[0]!.hash)
-      setState('baseRef', commits[1]!.hash)
-    } else if (commits.length === 1) {
-      setState('targetRef', commits[0]!.hash)
-      setState('baseRef', null)
-    }
-  } catch {
-    // Non-fatal — commits list stays empty.
-  }
-}
-
-/** Switch the active tab. */
-export function setActiveTab(tab: 'range' | 'branch'): void {
-  setState('activeTab', tab)
-}
-
-/** Set the base ref (commit hash) for Range mode. */
-export function setBaseRef(ref: string | null): void {
-  setState('baseRef', ref)
-}
-
-/** Set the target ref (commit hash) for Range mode. */
-export function setTargetRef(ref: string | null): void {
-  setState('targetRef', ref)
-}
-
-/** Set the branch ref for Branch mode. */
-export function setBranchRef(ref: string | null): void {
-  setState('branchRef', ref)
+/** Toggle a branch's expanded state (show/hide its commits). */
+export function toggleBranchExpanded(branchName: string): void {
+  setState('expandedBranches', (prev: string[]) =>
+    prev.includes(branchName) ? prev.filter((b) => b !== branchName) : [...prev, branchName]
+  )
 }
 
 /**
- * Run the temporal diff. Sends base and target refs to the server, streams
- * progress via SSE, and stores the resulting diff in the shared store.
- *
- * The live `currentDiff` field (used by DiffPanel) gets populated on success.
- * `temporalRange` records labels for the DiffPanel header.
+ * Handle a commit click. First click sets base, second click sets target.
+ * Clicking a selected commit deselects it.
  */
-export async function runTemporalDiff(_projectRoot: string | null): Promise<void> {
-  // Determine refs based on active tab.
-  // Import state here to avoid circular dep at module load time.
+export async function selectCommit(hash: string): Promise<void> {
   const { state } = await import('./core.js')
 
-  let base: string | null
-  let target: string | null
-  let baseLabel: string
-  let targetLabel: string
-
-  if (state.activeTab === 'range') {
-    base = state.baseRef
-    target = state.targetRef
-    const findLabel = (hash: string | null) =>
-      hash ? (state.commits.find((c: CommitInfo) => c.hash === hash)?.shortHash ?? hash.slice(0, 8)) : null
-    baseLabel = findLabel(base) ?? '?'
-    targetLabel = findLabel(target) ?? '?'
-  } else {
-    // Branch mode: diff branch tip → HEAD
-    base = state.branchRef
-    target = 'HEAD'
-    baseLabel = state.branchRef ?? '?'
-    targetLabel = 'HEAD'
+  if (state.baseRef === hash) {
+    setState('baseRef', null)
+    return
+  }
+  if (state.targetRef === hash) {
+    setState('targetRef', null)
+    return
   }
 
+  if (!state.baseRef) {
+    setState('baseRef', hash)
+  } else if (!state.targetRef) {
+    setState('targetRef', hash)
+  } else {
+    // Both set — replace target.
+    setState('targetRef', hash)
+  }
+}
+
+/** Swap base and target. */
+export function swapRefs(): void {
+  // Read current values before mutating.
+  // Dynamic import avoids circular dep.
+  void import('./core.js').then(({ state }) => {
+    const b = state.baseRef
+    const t = state.targetRef
+    setState('baseRef', t)
+    setState('targetRef', b)
+  })
+}
+
+/** Clear base and target selection. */
+export function clearSelection(): void {
+  setState('baseRef', null)
+  setState('targetRef', null)
+}
+
+/**
+ * Run the temporal diff between baseRef and targetRef.
+ */
+export async function runTemporalDiff(): Promise<void> {
+  const { state } = await import('./core.js')
+
+  const base = state.baseRef
+  const target = state.targetRef
+
   if (!base || !target) {
-    setState('diffError', 'Select both base and target commits first.')
+    setState('diffError', 'Select two commits to compare.')
     return
+  }
+
+  // Build labels from the graph data.
+  const graph = state.gitGraph
+  const labelFor = (hash: string): string => {
+    // Check if a branch tip points here.
+    const branch = graph?.branches.find((b: BranchRef) => b.hash === hash)
+    if (branch) return branch.name
+    // Otherwise use short hash.
+    const commit = graph?.commits.find((c: GraphCommit) => c.hash === hash)
+    return commit?.shortHash ?? hash.slice(0, 8)
   }
 
   setState('isComputing', true)
   setState('computeProgress', 'Starting…')
   setState('diffError', null)
-  // Clear previous snapshot-based diff so the new temporal diff takes over.
   setState('baseSnapshot', null)
   setState('currentDiff', null)
 
   try {
     const diff = await computeDiff(base, target, (msg) => setState('computeProgress', msg))
-
     setState('currentDiff', diff)
-    setState('temporalRange', { baseLabel, targetLabel })
-
-    if (state.activeTab === 'branch') {
-      setState('branchTabUsed', true)
-    }
+    setState('temporalRange', { baseLabel: labelFor(base), targetLabel: labelFor(target) })
   } catch (err) {
     setState('diffError', err instanceof Error ? err.message : 'Computation failed')
   } finally {
@@ -224,8 +190,4 @@ export async function runTemporalDiff(_projectRoot: string | null): Promise<void
   }
 }
 
-/**
- * Re-export `computeArchDiff` under a local alias for use in range step mode.
- * Not referenced currently but available for keyboard ← → navigation.
- */
 export { computeArchDiff }

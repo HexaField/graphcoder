@@ -13,7 +13,7 @@ import { Router } from 'express'
 import type { Request, Response } from 'express'
 import { computeArchDiff } from '@graphcoder/core'
 import { graphService } from '../codegraph/service.js'
-import { getGitStatus, listBranches, listCommits, resolveRef } from '../git/index.js'
+import { getGitGraph, getGitStatus, listBranches, listCommits, resolveRef } from '../git/index.js'
 import { getCachedDiff, setCachedDiff } from '../temporal/cache.js'
 import { snapshotAtCommit } from '../temporal/mapper.js'
 
@@ -63,6 +63,24 @@ router.get('/git/commits', async (req: Request, res: Response) => {
     res.json({ commits })
   } catch (err) {
     res.status(500).json({ error: err instanceof Error ? err.message : 'Failed to list commits' })
+  }
+})
+
+// ── GET /git/graph ───────────────────────────────────────────────────────────
+
+router.get('/git/graph', async (req: Request, res: Response) => {
+  if (!graphService.isOpen()) {
+    res.status(503).json({ error: 'No project open' })
+    return
+  }
+  try {
+    const projectRoot = graphService.getProjectRoot()
+    const rawLimit = typeof req.query['limit'] === 'string' ? parseInt(req.query['limit'], 10) : NaN
+    const limit = isNaN(rawLimit) || rawLimit < 1 ? 200 : Math.min(rawLimit, 1000)
+    const graph = await getGitGraph(projectRoot, limit)
+    res.json(graph)
+  } catch (err) {
+    res.status(500).json({ error: err instanceof Error ? err.message : 'Failed to build git graph' })
   }
 })
 

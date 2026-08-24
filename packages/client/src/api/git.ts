@@ -44,6 +44,36 @@ export async function fetchCommits(branch?: string, limit = 50): Promise<CommitI
   return body.commits
 }
 
+// ── Git graph ────────────────────────────────────────────────────────────────
+
+export interface GraphCommit {
+  hash: string
+  shortHash: string
+  parents: string[]
+  message: string
+  author: string
+  date: string
+}
+
+export interface BranchRef {
+  name: string
+  hash: string
+  current: boolean
+}
+
+export interface GitGraph {
+  commits: GraphCommit[]
+  branches: BranchRef[]
+}
+
+export async function fetchGitGraph(limit = 200): Promise<GitGraph> {
+  const params = new URLSearchParams()
+  params.set('limit', String(limit))
+  const res = await fetch(`${API}/api/git/graph?${params}`)
+  if (!res.ok) throw new Error(`GET /git/graph ${res.status}`)
+  return res.json() as Promise<GitGraph>
+}
+
 /**
  * Stream a diff computation from the server via SSE.
  *

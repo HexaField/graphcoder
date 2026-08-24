@@ -62,15 +62,15 @@ export {
 } from './hierarchy.js'
 export type { HierarchyState } from './hierarchy.js'
 
-// Section: Temporal (git history bar + commit-range diff)
+// Section: Temporal (git graph DAG + commit-pair diff)
 export {
-  loadCommits,
+  clearSelection as clearGraphSelection,
+  loadGitGraph,
   refreshGitStatus,
   runTemporalDiff,
-  setActiveTab,
-  setBaseRef,
-  setBranchRef,
-  setTargetRef,
+  selectCommit,
+  swapRefs,
+  toggleBranchExpanded,
   toggleGitBar
 } from './temporal.js'
 export type { TemporalRange, TemporalState } from './temporal.js'

@@ -1,7 +1,7 @@
 import { createEffect, createSignal, onCleanup, onMount, Show } from 'solid-js'
 import { GraphCanvas } from './canvas/GraphCanvas.js'
 import { DiffPanel } from './components/DiffPanel.js'
-import { GitBar } from './components/GitBar.js'
+import { GitGraph } from './components/GitGraph.js'
 import { GraphParamsPanel } from './components/GraphParamsPanel.js'
 import { HierarchyPanel } from './components/HierarchyPanel.js'
 import { NodeInspector } from './components/NodeInspector.js'
@@ -130,7 +130,7 @@ export default function App() {
   return (
     <div class="flex flex-col h-screen bg-gray-50 dark:bg-gray-950 text-gray-900 dark:text-white" data-testid="app">
       <Toolbar />
-      <GitBar />
+      <GitGraph />
 
       <Show when={state.error}>
         {(err) => (
