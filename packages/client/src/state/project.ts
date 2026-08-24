@@ -167,19 +167,39 @@ export function connectWebSocket(): void {
         }
 
         if (data.type === 'view_snapshot') {
-          // Batch all four state updates so reactive effects see a consistent
-          // snapshot — no intermediate renders with mismatched nodes/edges/groups.
-          batch(() => {
-            if (data.nodes !== undefined) setState('viewNodes', data.nodes)
-            if (data.edges !== undefined) setState('viewEdges', data.edges)
-            if (data.groups !== undefined) setState('viewGroups', data.groups)
-            if (data.fileNodes !== undefined) setState('fileNodes', data.fileNodes)
-          })
-          recomputeDiff(data.nodes ?? state.viewNodes, data.edges ?? state.viewEdges)
+          if (state.savedView) {
+            // A temporal diff occupies the display. Route the live view data
+            // into savedView so it restores correctly when the diff clears.
+            // Do NOT overwrite the diff view on screen.
+            batch(() => {
+              setState('savedView', {
+                nodes: data.nodes ?? state.savedView!.nodes,
+                edges: data.edges ?? state.savedView!.edges,
+                groups: data.groups ?? state.savedView!.groups,
+                fileNodes: data.fileNodes ?? state.savedView!.fileNodes
+              })
+            })
+          } else {
+            // No diff active — update the live display directly.
+            batch(() => {
+              if (data.nodes !== undefined) setState('viewNodes', data.nodes)
+              if (data.edges !== undefined) setState('viewEdges', data.edges)
+              if (data.groups !== undefined) setState('viewGroups', data.groups)
+              if (data.fileNodes !== undefined) setState('fileNodes', data.fileNodes)
+            })
+            recomputeDiff(data.nodes ?? state.viewNodes, data.edges ?? state.viewEdges)
+          }
         }
 
         if (data.type === 'hierarchy_snapshot') {
-          if (data.fileNodes !== undefined) setState('fileNodes', data.fileNodes)
+          if (state.savedView) {
+            // Temporal diff active — stash the live file nodes for restore.
+            if (data.fileNodes !== undefined) {
+              setState('savedView', { ...state.savedView, fileNodes: data.fileNodes })
+            }
+          } else {
+            if (data.fileNodes !== undefined) setState('fileNodes', data.fileNodes)
+          }
         }
       } catch {
         // Ignore malformed messages.
