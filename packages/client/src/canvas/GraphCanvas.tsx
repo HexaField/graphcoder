@@ -230,7 +230,7 @@ export const GraphCanvas: Component = () => {
   // a very large view. Normal usage stays well below this threshold because
   // collapsed groups are represented as placeholder nodes (O(files) not
   // O(files × symbols)).
-  const MAX_LAYOUT_NODES = 1000
+  const MAX_LAYOUT_NODES = 5000
 
   let layoutVersion = 0
 

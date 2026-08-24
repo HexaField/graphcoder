@@ -23,6 +23,33 @@ export type NodeKind =
   | 'component'
   | 'union'
 
+/** Runtime array of every NodeKind value — kept in sync with the type union above. */
+export const ALL_NODE_KINDS: readonly NodeKind[] = [
+  'file',
+  'module',
+  'class',
+  'struct',
+  'interface',
+  'trait',
+  'protocol',
+  'function',
+  'method',
+  'property',
+  'field',
+  'variable',
+  'constant',
+  'enum',
+  'enum_member',
+  'type_alias',
+  'namespace',
+  'parameter',
+  'import',
+  'export',
+  'route',
+  'component',
+  'union'
+] as const
+
 export type EdgeKind =
   | 'contains'
   | 'calls'
@@ -36,6 +63,22 @@ export type EdgeKind =
   | 'instantiates'
   | 'overrides'
   | 'decorates'
+
+/** Runtime array of every EdgeKind value — kept in sync with the type union above. */
+export const ALL_EDGE_KINDS: readonly EdgeKind[] = [
+  'contains',
+  'calls',
+  'imports',
+  'exports',
+  'extends',
+  'implements',
+  'references',
+  'type_of',
+  'returns',
+  'instantiates',
+  'overrides',
+  'decorates'
+] as const
 
 export interface GraphNode {
   id: string

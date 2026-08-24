@@ -1,5 +1,5 @@
 import { createMemo, For, Show, type Component } from 'solid-js'
-import type { EdgeKind, NodeKind } from '@graphcoder/core'
+import { ALL_EDGE_KINDS, ALL_NODE_KINDS } from '@graphcoder/core'
 import { edgeKindColor, nodeKindColor } from '../constants.js'
 import {
   clearFilters,
@@ -86,17 +86,6 @@ export const GraphParamsPanel: Component = () => {
   const isDark = () => resolvedTheme() === 'dark'
 
   // ── Derived ──────────────────────────────────────────────────────────────────
-
-  const presentNodeKinds = createMemo<NodeKind[]>(() => {
-    // Derive from the current view — the server excluded import nodes already.
-    const kinds = new Set(state.viewNodes.map((n) => n.kind))
-    return ([...kinds] as NodeKind[]).sort()
-  })
-
-  const presentEdgeKinds = createMemo<EdgeKind[]>(() => {
-    const kinds = new Set(state.viewEdges.map((e) => e.kind))
-    return ([...kinds] as EdgeKind[]).sort()
-  })
 
   const focusedNode = createMemo(() =>
     state.focusedNodeId ? state.viewNodes.find((n) => n.id === state.focusedNodeId) : null
@@ -202,43 +191,39 @@ export const GraphParamsPanel: Component = () => {
       </div>
 
       {/* ── Node types ── */}
-      <Show when={presentNodeKinds().length > 0}>
-        <div class="border-b border-gray-200 dark:border-gray-700 pb-2">
-          <SectionHead label="Nodes" />
-          <div class="px-1 flex flex-col gap-0.5">
-            <For each={presentNodeKinds()}>
-              {(kind) => (
-                <KindChip
-                  label={kind}
-                  color={nodeKindColor(kind, isDark())}
-                  hidden={state.hiddenNodeKinds.includes(kind)}
-                  onToggle={() => toggleNodeKind(kind)}
-                />
-              )}
-            </For>
-          </div>
+      <div class="border-b border-gray-200 dark:border-gray-700 pb-2">
+        <SectionHead label="Nodes" />
+        <div class="px-1 flex flex-col gap-0.5">
+          <For each={ALL_NODE_KINDS}>
+            {(kind) => (
+              <KindChip
+                label={kind}
+                color={nodeKindColor(kind, isDark())}
+                hidden={state.hiddenNodeKinds.includes(kind)}
+                onToggle={() => toggleNodeKind(kind)}
+              />
+            )}
+          </For>
         </div>
-      </Show>
+      </div>
 
       {/* ── Edge types ── */}
-      <Show when={presentEdgeKinds().length > 0}>
-        <div class="pb-3">
-          <SectionHead label="Links" />
-          <div class="px-1 flex flex-col gap-0.5">
-            <For each={presentEdgeKinds()}>
-              {(kind) => (
-                <KindChip
-                  label={kind}
-                  color={edgeKindColor(kind, isDark())}
-                  isEdge
-                  hidden={state.hiddenEdgeKinds.includes(kind)}
-                  onToggle={() => toggleEdgeKind(kind)}
-                />
-              )}
-            </For>
-          </div>
+      <div class="pb-3">
+        <SectionHead label="Links" />
+        <div class="px-1 flex flex-col gap-0.5">
+          <For each={ALL_EDGE_KINDS}>
+            {(kind) => (
+              <KindChip
+                label={kind}
+                color={edgeKindColor(kind, isDark())}
+                isEdge
+                hidden={state.hiddenEdgeKinds.includes(kind)}
+                onToggle={() => toggleEdgeKind(kind)}
+              />
+            )}
+          </For>
         </div>
-      </Show>
+      </div>
     </div>
   )
 }
