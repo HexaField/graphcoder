@@ -9,7 +9,7 @@
  *   diffs      — serialized ArchDiff per (base_hash, target_hash) pair
  */
 import Database from 'better-sqlite3'
-import { mkdirSync } from 'node:fs'
+import { existsSync, mkdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import type { ArchDiff } from '@graphcoder/core'
 import type { GraphSnapshot } from '@graphcoder/core'
@@ -29,7 +29,24 @@ function getDb(projectRoot: string): Database.Database {
   const existing = dbCache.get(projectRoot)
   if (existing) return existing
 
-  mkdirSync(graphcoderDir(projectRoot), { recursive: true })
+  const dir = graphcoderDir(projectRoot)
+  mkdirSync(dir, { recursive: true })
+
+  // Ensure a .gitignore exists — same pattern as .codegraph/.gitignore.
+  const gi = join(dir, '.gitignore')
+  if (!existsSync(gi)) {
+    writeFileSync(
+      gi,
+      [
+        '# GraphCoder data files — local to each machine, not for committing.',
+        '# Ignore everything in .graphcoder/ except this file itself.',
+        '*',
+        '!.gitignore',
+        ''
+      ].join('\n')
+    )
+  }
+
   const db = new Database(dbPath(projectRoot))
   db.pragma('journal_mode = WAL')
   db.pragma('synchronous = NORMAL')
