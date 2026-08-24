@@ -11,7 +11,9 @@ const elk = new ELK({ workerFactory: () => new ELKWorker() })
 // Below this node count: full layered layout with crossing minimisation.
 // At or above: disable crossing minimisation + use simple node placement to
 // avoid the O(n²) internal array allocation that throws Invalid array length.
-const LARGE_GRAPH_THRESHOLD = 2_000
+// Lowered from 2000: dense codebases OOM in the worker before the algorithm
+// even completes one crossing-minimisation pass.
+const LARGE_GRAPH_THRESHOLD = 200
 
 const LAYOUT_OPTIONS: Record<GraphDirection, Record<string, string>> = {
   TB: {
@@ -97,6 +99,12 @@ export interface FileGroup {
    * Omit for flat groups (contract groups, package-only groups).
    */
   packagePath?: string
+  /**
+   * True when this group is collapsed in the hierarchy view.
+   * `childIds` will be empty; ELK renders the container as a fixed-size placeholder
+   * so that edges can still connect to and from it.
+   */
+  collapsed?: boolean
 }
 
 /** A rendered container box returned from a grouped layout. */
@@ -294,7 +302,16 @@ async function layoutGrouped(
 
   // ── Shared setup ──────────────────────────────────────────────────────────
 
-  const validEdges = edges.filter((e) => nodeIds.has(e.source) && nodeIds.has(e.target))
+  // Valid edge endpoints: layout nodes + group container IDs.
+  // Collapsed group containers are leaf-sized ELK nodes (no children) but still
+  // appear in the ELK graph, so promoted edges connecting them must pass this filter.
+  const groupContainerIds = new Set<string>()
+  for (const fg of fileGroups) {
+    groupContainerIds.add(fg.id)
+    for (const sg of fg.childGroups ?? []) groupContainerIds.add(sg.id)
+  }
+  const isValidEndpoint = (id: string) => nodeIds.has(id) || groupContainerIds.has(id)
+  const validEdges = edges.filter((e) => isValidEndpoint(e.source) && isValidEndpoint(e.target))
   const edgeKindMap = new Map<string, string>()
   validEdges.forEach((e, i) => edgeKindMap.set(`e${i}`, e.kind))
 
@@ -387,7 +404,16 @@ async function layoutGrouped(
     }
 
     const allChildren = [...leafChildren, ...subGroupElkNodes]
-    if (allChildren.length === 0) return null
+    if (allChildren.length === 0) {
+      if (fg.collapsed) {
+        // Collapsed container: no children, but the node must still appear in ELK
+        // so that promoted edges (child → container) can be routed to it.
+        // A plain leaf node of fixed size achieves this — the renderer still
+        // displays it as a container box (it's in topGroupMap).
+        return { id: fg.id, width: NODE_WIDTH * 2, height: NODE_HEIGHT }
+      }
+      return null // Genuinely empty expanded group — skip
+    }
 
     return {
       id: fg.id,
