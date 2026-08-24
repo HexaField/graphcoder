@@ -76,7 +76,7 @@ router.get('/git/graph', async (req: Request, res: Response) => {
   try {
     const projectRoot = graphService.getProjectRoot()
     const rawLimit = typeof req.query['limit'] === 'string' ? parseInt(req.query['limit'], 10) : NaN
-    const limit = isNaN(rawLimit) || rawLimit < 1 ? 200 : Math.min(rawLimit, 1000)
+    const limit = isNaN(rawLimit) || rawLimit < 1 ? 200 : Math.min(rawLimit, 2000)
     const graph = await getGitGraph(projectRoot, limit)
     res.json(graph)
   } catch (err) {
