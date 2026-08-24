@@ -313,6 +313,8 @@ const EyeSlash: Component = () => (
 // ── Row ───────────────────────────────────────────────────────────────────────
 
 interface RowProps {
+  /** Stable key used for test selection. Exposed as data-nodeid on the row div. */
+  nodeId?: string
   depth: number
   label: string
   badge?: string
@@ -351,7 +353,7 @@ const Row: Component<RowProps> = (props) => {
         : 'Hide from graph'
   return (
     <div class={`group flex items-center h-6 pr-1 cursor-default select-none
-        hover:bg-gray-100 dark:hover:bg-gray-800/60 ${dimmed() ? 'opacity-40' : ''}`} style={{ 'padding-left': `${props.depth * 12 + 4}px` }} onContextMenu={props.onContextMenu}>
+        hover:bg-gray-100 dark:hover:bg-gray-800/60 ${dimmed() ? 'opacity-40' : ''}`} style={{ 'padding-left': `${props.depth * 12 + 4}px` }} data-nodeid={props.nodeId} onContextMenu={props.onContextMenu}>
       <button
         class={`w-4 h-4 flex items-center justify-center flex-shrink-0 text-gray-400 dark:text-gray-500 ${props.expandable ? "hover:text-gray-700 dark:hover:text-gray-200" : 'pointer-events-none'}`}
         onClick={(e) => {
@@ -637,6 +639,7 @@ export const HierarchyPanel: Component = () => {
           return (
             <>
               <Row
+                nodeId={file.key}
                 depth={depth}
                 label={file.node.name}
                 expandable={hasSymbols}
@@ -691,6 +694,7 @@ export const HierarchyPanel: Component = () => {
           return (
             <>
               <Row
+                nodeId={dir.path}
                 depth={depth}
                 label={dir.label}
                 expandable={hasContent}
@@ -786,6 +790,7 @@ export const HierarchyPanel: Component = () => {
                 return (
                   <>
                     <Row
+                      nodeId={pkg.path}
                       depth={0}
                       label={pkg.label}
                       expandable={hasContent}

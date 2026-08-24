@@ -271,12 +271,13 @@ export const GraphCanvas: Component = () => {
     <div
       ref={wrapperRef}
       class="relative flex-1 overflow-hidden bg-slate-100 dark:bg-gray-950 select-none"
+      data-testid="graph-canvas"
       onWheel={onWheel}
       onMouseDown={onMouseDown}
       onMouseMove={onMouseMove}
       onMouseUp={onMouseUp}
     >
-      <canvas ref={canvasRef} class="w-full h-full block" />
+      <canvas ref={canvasRef} class="w-full h-full block" data-testid="graph-webgl-canvas" />
 
       {/* Layout loading spinner */}
       <Show when={isLayouting()}>
