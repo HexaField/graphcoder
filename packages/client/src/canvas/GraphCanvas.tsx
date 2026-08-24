@@ -22,6 +22,7 @@ import {
   createSignal,
   onCleanup,
   onMount,
+  untrack,
   Show,
   Switch,
   Match
@@ -71,6 +72,20 @@ export const GraphCanvas: Component = () => {
   // first layout after nodes go from empty → non-empty triggers a fit.
   let needsFit = false
   let hadLayout = false
+
+  // pendingAnchor: set when the user clicks expand/collapse on a container.
+  // The scene update effect reads this after ELK resolves and adjusts the
+  // camera so the container's top-left stays at the same screen position —
+  // preventing the whole graph from jumping relative to the focused item.
+  interface ContainerAnchor {
+    /** FileContainer.id (= FileGroup.id = fn.id) to find in the new layout. */
+    containerId: string
+    /** Screen X of the container's top-left at click time. */
+    screenX: number
+    /** Screen Y of the container's top-left at click time. */
+    screenY: number
+  }
+  let pendingAnchor: ContainerAnchor | null = null
 
   // ── Reactive memos ──────────────────────────────────────────────────────────
 
@@ -179,7 +194,27 @@ export const GraphCanvas: Component = () => {
 
     if (!snap) return
 
-    if (needsFit) {
+    if (pendingAnchor) {
+      // Anchor: keep the container's top-left at the same screen position
+      // so expand/collapse doesn't shuffle the graph around.
+      const anchor = pendingAnchor
+      pendingAnchor = null
+      const allContainers = [
+        ...snap.result.containers,
+        ...snap.result.classContainers,
+        ...snap.result.dirContainers,
+        ...snap.result.packageContainers
+      ]
+      const cont = allContainers.find((c) => c.id === anchor.containerId)
+      if (cont) {
+        // untrack: read cam without making this effect reactive to camera changes
+        const { zoom } = untrack(cam)
+        const newPanX = anchor.screenX - cont.x * zoom
+        const newPanY = anchor.screenY - cont.y * zoom
+        setCam({ panX: newPanX, panY: newPanY, zoom })
+        r3.applyCamera(newPanX, newPanY, zoom)
+      }
+    } else if (needsFit) {
       needsFit = false
       const fit = r3.fitLayout(snap.result.width, snap.result.height)
       setCam({ panX: fit.panX, panY: fit.panY, zoom: fit.zoom })
@@ -446,6 +481,13 @@ export const GraphCanvas: Component = () => {
               onMouseUp={(e) => e.stopPropagation()}
               onClick={(e) => {
                 e.stopPropagation()
+                // Record the container's current screen-space top-left so the
+                // scene effect can re-anchor the camera after ELK resolves.
+                pendingAnchor = {
+                  containerId: sr().id,
+                  screenX: sr().x,
+                  screenY: sr().y
+                }
                 toggleGroupExpanded(sr().filePath ?? sr().id)
               }}
             >
