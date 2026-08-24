@@ -44,7 +44,7 @@ interface LayoutSnap {
 // ── Tooltip data types ────────────────────────────────────────────────────────
 
 type NodeTooltip = { kind: 'node'; id: string; name: string; nodeKind?: string }
-type ContainerTooltip = { kind: 'container'; id: string; label: string; collapsed: boolean }
+type ContainerTooltip = { kind: 'container'; id: string; label: string; collapsed: boolean; filePath?: string }
 type EdgeTooltip = { kind: 'edge'; id: string; edgeKind?: string; source: string; target: string }
 type TooltipData = NodeTooltip | ContainerTooltip | EdgeTooltip
 
@@ -66,9 +66,11 @@ export const GraphCanvas: Component = () => {
   let wrapperRef: HTMLDivElement | undefined
   let r3: ThreeRenderer | null = null
 
-  // Track whether the current layout has been camera-fitted already.
-  // Reset to false on each layout change so we only auto-fit once.
+  // needsFit triggers a fit-to-view on the next scene render.
+  // hadLayout prevents re-fitting on expand/collapse reruns — only the
+  // first layout after nodes go from empty → non-empty triggers a fit.
   let needsFit = false
+  let hadLayout = false
 
   // ── Reactive memos ──────────────────────────────────────────────────────────
 
@@ -117,6 +119,7 @@ export const GraphCanvas: Component = () => {
       if (ver === layoutVersion) {
         setLayoutSnap(null)
         setLayoutError(null)
+        hadLayout = false
       }
       return
     }
@@ -132,7 +135,10 @@ export const GraphCanvas: Component = () => {
     if (ver === layoutVersion) {
       setIsLayouting(true)
       setLayoutError(null)
-      needsFit = true
+      if (!hadLayout) {
+        needsFit = true
+        hadLayout = true
+      }
     }
 
     try {
@@ -216,7 +222,8 @@ export const GraphCanvas: Component = () => {
       h: fc.height * zoom,
       collapsed: fc.collapsed ?? false,
       id: td.id,
-      label: td.label
+      label: td.label,
+      filePath: (td as ContainerTooltip).filePath
     }
   })
 
@@ -328,7 +335,13 @@ export const GraphCanvas: Component = () => {
     } else if (hit?.kind === 'container') {
       r3.setHovered(null, hit.id, -1)
       setCursor(hit.collapsed ? 'pointer' : 'default')
-      setTooltipData({ kind: 'container', id: hit.id, label: hit.label, collapsed: hit.collapsed })
+      setTooltipData({
+        kind: 'container',
+        id: hit.id,
+        label: hit.label,
+        collapsed: hit.collapsed,
+        filePath: hit.filePath
+      })
     } else if (edgeIdx >= 0) {
       r3.setHovered(null, null, edgeIdx)
       setCursor('default')
@@ -372,8 +385,8 @@ export const GraphCanvas: Component = () => {
     if (hit?.kind === 'node') {
       void selectNode(hit.id)
     } else if (hit?.kind === 'container' && hit.collapsed) {
-      // Clicking a collapsed chip expands it
-      toggleGroupExpanded(hit.id)
+      // Clicking a collapsed chip expands it — key must be filePath, not id
+      toggleGroupExpanded(hit.filePath ?? hit.id)
     } else {
       clearFocus()
     }
@@ -431,7 +444,7 @@ export const GraphCanvas: Component = () => {
               style={{ left: `${btnX() - 76}px`, top: `${btnY()}px` }}
               onClick={(e) => {
                 e.stopPropagation()
-                toggleGroupExpanded(sr().id)
+                toggleGroupExpanded(sr().filePath ?? sr().id)
               }}
             >
               {sr().collapsed ? '+ Expand' : '- Collapse'}

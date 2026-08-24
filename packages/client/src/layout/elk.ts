@@ -78,6 +78,13 @@ export interface FileContainer {
   color?: string
   /** True for collapsed groups rendered as fixed-size chip placeholders. */
   collapsed?: boolean
+  /**
+   * File path for groups that have one (file-level and class-level groups).
+   * Used as the key for toggleGroupExpanded — must match what the server
+   * checks in isGroupExpanded (fn.filePath, not fn.id).
+   * Absent for contract groups and dir/package compounds.
+   */
+  filePath?: string
 }
 
 export interface LayoutResult {
@@ -537,7 +544,8 @@ async function layoutGrouped(
           y: cy,
           width: cw,
           height: ch,
-          collapsed: fg.collapsed
+          collapsed: fg.collapsed,
+          filePath: fg.filePath
         })
         extractFileGroupPositions(child, cx, cy, flat2Nodes, flat2ClassContainers)
       } else {
@@ -780,7 +788,8 @@ async function layoutGrouped(
                   y: fy,
                   width: fw,
                   height: fh,
-                  collapsed: fg.collapsed
+                  collapsed: fg.collapsed,
+                  filePath: fg.filePath
                 })
                 extractFileGroupPositions(fileChild, fx, fy, pkg4Nodes, pkg4ClassContainers)
               } else {
@@ -807,7 +816,8 @@ async function layoutGrouped(
               y: fy,
               width: fw,
               height: fh,
-              collapsed: fg.collapsed
+              collapsed: fg.collapsed,
+              filePath: fg.filePath
             })
             extractFileGroupPositions(fileChild, fx, fy, pkg4Nodes, pkg4ClassContainers)
           } else {
@@ -825,7 +835,8 @@ async function layoutGrouped(
           y: ry,
           width: rw,
           height: rh,
-          collapsed: fg.collapsed
+          collapsed: fg.collapsed,
+          filePath: fg.filePath
         })
         extractFileGroupPositions(rootChild, rx, ry, pkg4Nodes, pkg4ClassContainers)
       } else {
@@ -1047,7 +1058,8 @@ async function layoutGrouped(
             y: fy,
             width: fw,
             height: fh,
-            collapsed: fg.collapsed
+            collapsed: fg.collapsed,
+            filePath: fg.filePath
           })
           extractFileGroupPositions(fileChild, fx, fy, resultNodes, classContainers)
         } else {
@@ -1066,7 +1078,8 @@ async function layoutGrouped(
         y: ry,
         width: rw,
         height: rh,
-        collapsed: fg.collapsed
+        collapsed: fg.collapsed,
+        filePath: fg.filePath
       })
       extractFileGroupPositions(rootChild, rx, ry, resultNodes, classContainers)
     } else {

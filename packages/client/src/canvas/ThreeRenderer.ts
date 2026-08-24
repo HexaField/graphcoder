@@ -97,13 +97,15 @@ interface HitItem {
   collapsed: boolean
   label: string
   nodeKind?: string
+  /** File path key for toggleGroupExpanded — matches fn.filePath used by the server. */
+  filePath?: string
 }
 
 // ── Hit result (public) ───────────────────────────────────────────────────────
 
 export type HitResult =
   | { kind: 'node'; id: string; label: string; nodeKind?: string }
-  | { kind: 'container'; id: string; label: string; collapsed: boolean }
+  | { kind: 'container'; id: string; label: string; collapsed: boolean; filePath?: string }
 
 // ── Edge hit data ─────────────────────────────────────────────────────────────
 
@@ -529,7 +531,7 @@ export class ThreeRenderer {
     if (h.kind === 'node') {
       return { kind: 'node', id: h.id, label: h.label, nodeKind: h.nodeKind }
     }
-    return { kind: 'container', id: h.id, label: h.label, collapsed: h.collapsed }
+    return { kind: 'container', id: h.id, label: h.label, collapsed: h.collapsed, filePath: h.filePath }
   }
 
   // ── Edge CPU hit test ─────────────────────────────────────────────────────
@@ -752,7 +754,8 @@ export class ThreeRenderer {
         id: pc.id,
         kind: 'container',
         collapsed: false,
-        label: pc.label
+        label: pc.label,
+        filePath: pc.filePath
       })
     }
 
@@ -774,7 +777,8 @@ export class ThreeRenderer {
         id: dc.id,
         kind: 'container',
         collapsed: false,
-        label: dc.label
+        label: dc.label,
+        filePath: dc.filePath
       })
     }
 
@@ -822,7 +826,8 @@ export class ThreeRenderer {
         id: fc.id,
         kind: 'container',
         collapsed: fc.collapsed ?? false,
-        label: fc.label
+        label: fc.label,
+        filePath: fc.filePath
       })
     }
 
@@ -839,7 +844,8 @@ export class ThreeRenderer {
         id: cc.id,
         kind: 'container',
         collapsed: false,
-        label: cc.label
+        label: cc.label,
+        filePath: cc.filePath
       })
     }
 
