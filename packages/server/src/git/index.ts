@@ -39,13 +39,23 @@ export async function getGitStatus(projectRoot: string): Promise<GitStatus> {
   }
 }
 
-/** List all local branches. Returns them sorted alphabetically with HEAD first. */
+/** List all branches (local + remote). Returns them sorted alphabetically with current first. */
 export async function listBranches(projectRoot: string): Promise<{ branches: string[]; current: string | null }> {
   const git = simpleGit(projectRoot)
-  const summary = await git.branchLocal()
-  const others = summary.all.filter((b) => b !== summary.current).sort()
-  const branches = summary.current ? [summary.current, ...others] : others
-  return { branches, current: summary.current || null }
+  const summary = await git.branch(['-a'])
+  // Collect all branch names. Remote branches appear as "remotes/origin/foo" —
+  // strip the prefix and deduplicate against local branches.
+  const seen = new Set<string>()
+  for (const name of summary.all) {
+    if (name.includes('/HEAD')) continue // skip remotes/origin/HEAD
+    const clean = name.replace(/^remotes\/origin\//, '')
+    seen.add(clean)
+  }
+  const current = summary.current || null
+  seen.delete(current ?? '')
+  const others = [...seen].sort()
+  const branches = current ? [current, ...others] : others
+  return { branches, current }
 }
 
 /**
