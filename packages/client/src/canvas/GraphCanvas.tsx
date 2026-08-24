@@ -21,6 +21,14 @@ import { resolvedTheme } from '../state/theme.js'
 import type { DiffOverlay } from './ThreeRenderer.js'
 import { ThreeRenderer } from './ThreeRenderer.js'
 
+/** Layout result paired with the node lookup used to produce it.
+ *  Keeping them together prevents rendering with a mismatched (layout, nodeById)
+ *  pair during the async window between a viewNodes update and ELK resolving. */
+interface LayoutSnap {
+  result: LayoutResult
+  nodeById: Map<string, GraphNode>
+}
+
 // ── GraphCanvas ───────────────────────────────────────────────────────────────
 
 export const GraphCanvas: Component = () => {
@@ -40,8 +48,6 @@ export const GraphCanvas: Component = () => {
 
   // ── Reactive memos ──────────────────────────────────────────────────────────
 
-  const nodeById = createMemo(() => new Map(state.viewNodes.map((n) => [n.id, n])))
-
   const diffOverlay = createMemo((): DiffOverlay => {
     const diff = state.currentDiff
     if (!diff) return { added: new Set<string>(), modified: new Set<string>(), moved: new Set<string>() }
@@ -60,8 +66,12 @@ export const GraphCanvas: Component = () => {
   // Fires when the server sends a new view_snapshot or the direction changes.
   // All filtering, group building, collapse logic, and edge promotion ran
   // server-side — this effect just calls ELK with what it receives.
+  //
+  // Multiple view_snapshots can arrive rapidly (WS connect → openProject
+  // broadcast → persisted-params view_request). The version counter discards
+  // stale results so the last-STARTED layout always wins — not last-resolved.
 
-  const [layout, setLayout] = createSignal<LayoutResult | null>(null)
+  const [layoutSnap, setLayoutSnap] = createSignal<LayoutSnap | null>(null)
 
   // Safety cap: prevent the ELK worker from OOMing if the server somehow sends
   // a very large view. Normal usage stays well below this threshold because
@@ -69,61 +79,82 @@ export const GraphCanvas: Component = () => {
   // O(files × symbols)).
   const MAX_LAYOUT_NODES = 1000
 
+  let layoutVersion = 0
+
   createEffect(async () => {
     const nodes = state.viewNodes
     const edges = state.viewEdges
     const groups = state.viewGroups.length > 0 ? state.viewGroups : undefined
     const direction = state.graphDirection
 
+    const ver = ++layoutVersion
+
     if (nodes.length === 0) {
-      setLayout(null)
-      setLayoutError(null)
+      if (ver === layoutVersion) {
+        setLayoutSnap(null)
+        setLayoutError(null)
+      }
       return
     }
 
     if (nodes.length > MAX_LAYOUT_NODES) {
-      setLayoutError(`Too many nodes to lay out (${nodes.length}, limit ${MAX_LAYOUT_NODES}). Collapse some groups.`)
-      setIsLayouting(false)
+      if (ver === layoutVersion) {
+        setLayoutError(`Too many nodes to lay out (${nodes.length}, limit ${MAX_LAYOUT_NODES}). Collapse some groups.`)
+        setIsLayouting(false)
+      }
       return
     }
 
-    setIsLayouting(true)
-    setLayoutError(null)
-    needsFit = true
+    if (ver === layoutVersion) {
+      setIsLayouting(true)
+      setLayoutError(null)
+      needsFit = true
+    }
+
     try {
       const result = await layoutGraph(nodes, edges, direction, groups)
-      setLayout(result)
+      if (ver === layoutVersion) {
+        // Pair the result with the exact nodeById that produced it — prevents the
+        // scene from rendering a mismatched (layout, nodeById) pair during the
+        // async gap between a viewNodes update and ELK resolving.
+        setLayoutSnap({ result, nodeById: new Map(nodes.map((n) => [n.id, n])) })
+      }
     } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err)
-      console.error('[GraphCanvas] Layout failed:', err)
-      setLayoutError(msg)
+      if (ver === layoutVersion) {
+        const msg = err instanceof Error ? err.message : String(err)
+        console.error('[GraphCanvas] Layout failed:', err)
+        setLayoutError(msg)
+      }
     } finally {
-      setIsLayouting(false)
+      if (ver === layoutVersion) {
+        setIsLayouting(false)
+      }
     }
   })
 
   // ── Scene update effect ─────────────────────────────────────────────────────
+  // layoutSnap holds the layout result and nodeById from the same computation,
+  // so the scene always renders a consistent (positions, node-data) pair.
 
   createEffect(() => {
     if (!rendererReady() || !r3) return
-    const l = layout()
+    const snap = layoutSnap()
     const selectedId = state.selectedNodeId
     const overlay = diffOverlay()
-    const byId = nodeById()
     const isDark = resolvedTheme() === 'dark'
 
     r3.setBackground(isDark ? 0x030712 : 0xf1f5f9)
 
-    if (!l) return
+    if (!snap) return
 
     if (needsFit) {
       needsFit = false
-      const fit = r3.fitLayout(l.width, l.height)
+      const fit = r3.fitLayout(snap.result.width, snap.result.height)
       setCam({ panX: fit.panX, panY: fit.panY, zoom: fit.zoom })
       r3.applyCamera(fit.panX, fit.panY, fit.zoom)
     }
 
-    r3.updateScene(l, byId, selectedId, overlay, isDark)
+    r3.updateScene(snap.result, snap.nodeById, selectedId, overlay, isDark)
   })
 
   // ── Camera sync effect ──────────────────────────────────────────────────────
@@ -220,9 +251,8 @@ export const GraphCanvas: Component = () => {
     didPan = false
     if (wasPanning || !r3) return
 
-    // Click — hit-test against the layout
-    const l = layout()
-    if (!l) return
+    // Click — hit-test against the last rendered layout (rbush is populated by updateScene).
+    if (!layoutSnap()) return
     const rect = (e.currentTarget as HTMLElement).getBoundingClientRect()
     const mx = e.clientX - rect.left
     const my = e.clientY - rect.top

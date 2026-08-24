@@ -1,4 +1,5 @@
 import type { FileGroup, GraphEdge, GraphNode, ProjectStats, ViewParams } from '@graphcoder/core'
+import { batch } from 'solid-js'
 import * as api from '../api/graph.js'
 import { state, setState } from './core.js'
 import { recomputeDiff } from './diff.js'
@@ -104,9 +105,27 @@ export function connectWebSocket(): void {
     activeWs = ws
 
     ws.addEventListener('open', () => {
-      // The server sends view_snapshot + hierarchy_snapshot on connect using the
-      // DEFAULT_VIEW_PARAMS. The view-params effect in App.tsx then fires with
-      // the actual persisted params and sends a view_request to refine it.
+      // The createEffect in App.tsx fires on mount BEFORE the WS is open, so
+      // that initial sendViewRequest is a no-op.  Send the client's persisted
+      // params now so the server uses the correct config on the very first
+      // layout — no wasted DEFAULT_VIEW_PARAMS computation.
+      ws.send(
+        JSON.stringify({
+          type: 'view_request',
+          params: {
+            hiddenNodeKinds: state.hiddenNodeKinds,
+            hiddenEdgeKinds: state.hiddenEdgeKinds,
+            hiddenPaths: state.hiddenPaths,
+            excludePatterns: state.excludePatterns,
+            groupByFile: state.groupByFile,
+            groupByClass: state.groupByClass,
+            groupByContract: state.groupByContract,
+            groupByPackage: state.groupByPackage,
+            expandedGroups: state.expandedGroups,
+            focusedNodeId: state.focusedNodeId
+          } satisfies ViewParams
+        })
+      )
     })
 
     ws.addEventListener('message', (event: MessageEvent<string>) => {
@@ -120,10 +139,14 @@ export function connectWebSocket(): void {
         }
 
         if (data.type === 'view_snapshot') {
-          if (data.nodes !== undefined) setState('viewNodes', data.nodes)
-          if (data.edges !== undefined) setState('viewEdges', data.edges)
-          if (data.groups !== undefined) setState('viewGroups', data.groups)
-          if (data.fileNodes !== undefined) setState('fileNodes', data.fileNodes)
+          // Batch all four state updates so reactive effects see a consistent
+          // snapshot — no intermediate renders with mismatched nodes/edges/groups.
+          batch(() => {
+            if (data.nodes !== undefined) setState('viewNodes', data.nodes)
+            if (data.edges !== undefined) setState('viewEdges', data.edges)
+            if (data.groups !== undefined) setState('viewGroups', data.groups)
+            if (data.fileNodes !== undefined) setState('fileNodes', data.fileNodes)
+          })
           recomputeDiff(data.nodes ?? state.viewNodes, data.edges ?? state.viewEdges)
         }
 

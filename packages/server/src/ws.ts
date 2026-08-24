@@ -44,9 +44,11 @@ export function setupWebSocket(server: Server): void {
     const params = { ...DEFAULT_VIEW_PARAMS }
     clientParams.set(ws, params)
 
-    // Send the initial data immediately on connect.
+    // Send the file-tree snapshot immediately so the sidebar renders without
+    // waiting for a view_request round-trip.  Do NOT send a view_snapshot here
+    // — wait for the client to send view_request with its persisted params so
+    // the first layout uses the correct config (not DEFAULT_VIEW_PARAMS).
     sendHierarchySnapshot(ws)
-    sendViewSnapshot(ws, params)
 
     ws.on('message', (raw: Buffer | string) => {
       try {
