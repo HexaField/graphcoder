@@ -10,8 +10,9 @@ export default defineConfig(({ mode }) => {
       sourcemap: true
     },
     server: {
-      host: env.HOST || 'localhost',
-      port: parseInt(env.PORT || '3000')
+      host: env.HOST || '0.0.0.0',
+      port: parseInt(env.PORT || '3000'),
+      allowedHosts: true
     },
     preview: {
       host: '0.0.0.0',
