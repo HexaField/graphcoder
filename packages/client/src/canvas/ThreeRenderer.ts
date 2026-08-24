@@ -298,7 +298,16 @@ function markArrowGeoNeedsUpdate(geo: InstancedBufferGeometry): void {
 
 // ── ThreeRenderer ─────────────────────────────────────────────────────────────
 
-export type DiffOverlay = { added: Set<string>; modified: Set<string>; moved: Set<string> }
+export type DiffOverlay = {
+  added: Set<string>
+  removed: Set<string>
+  modified: Set<string>
+  moved: Set<string>
+  edgeAdded: Set<string>
+  edgeRemoved: Set<string>
+  /** Aggregated container status: container-id → status. Only set for collapsed containers. */
+  containerStatus: Map<string, 'added' | 'removed' | 'modified' | 'mixed'>
+}
 
 export class ThreeRenderer {
   private renderer: WebGLRenderer
@@ -794,13 +803,24 @@ export class ThreeRenderer {
       let labelColor: [number, number, number]
       let cornerR: number, borderW: number
 
+      // Container diff tint — VS Code style: collapsed containers inherit
+      // aggregate diff status from their children (leaf-only colouring).
+      const contStatus = fc.collapsed ? diff.containerStatus.get(fc.id) : undefined
+      const diffBorder = contStatus
+        ? contStatus === 'added'
+          ? ([0.133, 0.773, 0.369, 0.9] as [number, number, number, number]) // green
+          : contStatus === 'removed'
+            ? ([0.961, 0.282, 0.282, 0.9] as [number, number, number, number]) // red
+            : ([0.961, 0.843, 0.043, 0.9] as [number, number, number, number]) // yellow (modified/mixed)
+        : undefined
+
       if (fc.collapsed) {
         // Collapsed file chip — solid, clearly distinct from the empty space inside dir containers.
         fill = isDark ? [0.098, 0.122, 0.196, 0.85] : [0.835, 0.859, 0.91, 0.9]
-        border = isDark ? [0.302, 0.369, 0.506, 0.9] : [0.376, 0.447, 0.565, 0.85]
+        border = diffBorder ?? (isDark ? [0.302, 0.369, 0.506, 0.9] : [0.376, 0.447, 0.565, 0.85])
         labelColor = isDark ? [0.682, 0.737, 0.812] : [0.196, 0.247, 0.341]
         cornerR = 6
-        borderW = 1.5
+        borderW = contStatus ? 2.5 : 1.5
       } else if (fc.color) {
         const [r, g, b] = parseHex(fc.color)
         fill = [r, g, b, 0.07]
@@ -865,13 +885,14 @@ export class ThreeRenderer {
       const fillHex = nodeKindColor(kind, isDark)
       const [fr, fg, fb] = parseHex(fillHex)
 
-      // Diff status
+      // Diff status: 1=added(green), 2=modified(yellow), 3=moved(yellow), 4=removed(red)
       let status = 0
       if (gn) {
         const semId = nodeSemanticId(gn)
-        if (diff.added.has(semId)) status = 1
-        else if (diff.modified.has(semId)) status = 2
-        else if (diff.moved.has(semId)) status = 3
+        if (diff.added.has(semId) || diff.added.has(id)) status = 1
+        else if (diff.modified.has(semId) || diff.modified.has(id)) status = 2
+        else if (diff.moved.has(semId) || diff.moved.has(id)) status = 3
+        else if (diff.removed.has(semId) || diff.removed.has(id)) status = 4
       }
 
       const sel = selectedId === id ? 1 : 0
@@ -938,7 +959,14 @@ export class ThreeRenderer {
 
     // ── Edges + arrows ────────────────────────────────────────────────────────
     for (const edge of layout.edges) {
-      const colorHex = edgeKindColor(edge.kind, isDark)
+      // Diff-aware edge colouring: check semantic edge key against overlay.
+      const edgeKey = `${edge.source}|${edge.target}|${edge.kind ?? ''}`
+      let colorHex: string
+      if (diff.edgeAdded.has(edgeKey))
+        colorHex = '#22c55e' // green
+      else if (diff.edgeRemoved.has(edgeKey))
+        colorHex = '#ef4444' // red
+      else colorHex = edgeKindColor(edge.kind, isDark)
       const [er, eg, eb] = parseHex(colorHex)
 
       // Extract all polyline points for this edge

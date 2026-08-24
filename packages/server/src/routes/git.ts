@@ -124,16 +124,7 @@ router.post('/git/diff', async (req: Request, res: Response) => {
     sendEvent('progress', { message: `Resolving refs…` })
     const [baseHash, targetHash] = await Promise.all([resolveRef(projectRoot, base), resolveRef(projectRoot, target)])
 
-    // ── Cache check ──────────────────────────────────────────────────────
-    const cached = getCachedDiff(projectRoot, baseHash, targetHash)
-    if (cached) {
-      sendEvent('progress', { message: 'Cache hit — returning stored diff' })
-      sendEvent('result', cached)
-      res.end()
-      return
-    }
-
-    // ── Extract snapshots ────────────────────────────────────────────────
+    // ── Extract snapshots (always — client needs them for the diff view) ─
     sendEvent('progress', { message: `Extracting snapshot 1/2 (${base})…` })
     const baseSnap = await snapshotAtCommit(projectRoot, baseHash, (msg) =>
       sendEvent('progress', { message: `[base] ${msg}` })
@@ -144,13 +135,20 @@ router.post('/git/diff', async (req: Request, res: Response) => {
       sendEvent('progress', { message: `[target] ${msg}` })
     )
 
-    // ── Compute diff ─────────────────────────────────────────────────────
-    sendEvent('progress', { message: 'Computing diff…' })
-    const diff = computeArchDiff(baseSnap, targetSnap)
+    // ── Diff (cached or fresh) ──────────────────────────────────────────
+    const cached = getCachedDiff(projectRoot, baseHash, targetHash)
+    let diff: ReturnType<typeof computeArchDiff>
+    if (cached) {
+      sendEvent('progress', { message: 'Diff cache hit' })
+      diff = cached
+    } else {
+      sendEvent('progress', { message: 'Computing diff…' })
+      diff = computeArchDiff(baseSnap, targetSnap)
+      setCachedDiff(projectRoot, baseHash, targetHash, diff)
+    }
 
-    // Cache and return.
-    setCachedDiff(projectRoot, baseHash, targetHash, diff)
-    sendEvent('result', diff)
+    // Return diff + both snapshots so the client can build a diff view.
+    sendEvent('result', { diff, baseSnapshot: baseSnap, targetSnapshot: targetSnap })
     res.end()
   } catch (err) {
     sendEvent('error', { error: err instanceof Error ? err.message : 'Internal error' })

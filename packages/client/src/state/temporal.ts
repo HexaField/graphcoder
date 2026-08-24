@@ -5,7 +5,9 @@
  * Users click two commits (or branch tips) to select base and target,
  * then compare to compute an ArchDiff between them.
  */
-import { computeArchDiff } from '@graphcoder/core'
+import { computeArchDiff, nodeSemanticId } from '@graphcoder/core'
+import type { FileGroup, GraphEdge, GraphNode, GraphSnapshot } from '@graphcoder/core'
+import type { NodeSnapshot } from '@graphcoder/core'
 import type { BranchRef, GitGraph, GitStatus, GraphCommit } from '../api/git.js'
 import { computeDiff, fetchGitGraph, fetchGitStatus } from '../api/git.js'
 import { setState } from './core.js'
@@ -39,6 +41,12 @@ export interface TemporalState {
   temporalRange: TemporalRange | null
   /** Error from the last computation attempt. */
   diffError: string | null
+  /** Diff status per semantic ID — drives canvas overlay when a temporal diff is active. */
+  diffStatusMap: Map<string, 'added' | 'removed' | 'modified' | 'moved'> | null
+  /** Diff status per edge key ("srcSem|tgtSem|kind") — drives edge colouring. */
+  edgeStatusMap: Map<string, 'added' | 'removed'> | null
+  /** Snapshot of the live view before the diff replaced it — restored on clear. */
+  savedView: { nodes: GraphNode[]; edges: GraphEdge[]; groups: FileGroup[] } | null
 }
 
 // ── Initialise ────────────────────────────────────────────────────────────────
@@ -54,7 +62,10 @@ export const temporalInitial: TemporalState = {
   isComputing: false,
   computeProgress: null,
   temporalRange: null,
-  diffError: null
+  diffError: null,
+  diffStatusMap: null,
+  edgeStatusMap: null,
+  savedView: null
 }
 
 // ── Actions ───────────────────────────────────────────────────────────────────
@@ -147,8 +158,147 @@ export function clearSelection(): void {
   setState('targetRef', null)
 }
 
+// ── Diff view helpers ────────────────────────────────────────────────────────
+
+/** Convert a NodeSnapshot (from ArchOp) to a GraphNode for the canvas. */
+function snapshotToGraphNode(snap: NodeSnapshot): GraphNode {
+  return {
+    id: snap.id,
+    kind: snap.kind,
+    name: snap.name,
+    qualifiedName: snap.qualifiedName,
+    filePath: snap.filePath,
+    language: snap.language,
+    startLine: 0,
+    endLine: 0,
+    startColumn: 0,
+    endColumn: 0,
+    signature: snap.signature,
+    visibility: snap.visibility,
+    isExported: snap.isExported,
+    isAsync: snap.isAsync,
+    isStatic: snap.isStatic,
+    isAbstract: snap.isAbstract,
+    decorators: snap.decorators,
+    typeParameters: snap.typeParameters,
+    returnType: snap.returnType,
+    updatedAt: 0
+  }
+}
+
+/** Build file-level groups from a flat node list (simple grouping by filePath). */
+function buildDiffFileGroups(nodes: GraphNode[]): FileGroup[] {
+  const byFile = new Map<string, GraphNode[]>()
+  for (const n of nodes) {
+    const list = byFile.get(n.filePath) ?? []
+    list.push(n)
+    byFile.set(n.filePath, list)
+  }
+  return [...byFile.entries()].map(([path, children]) => ({
+    id: `diff-file:${path}`,
+    label: path,
+    childIds: children.map((c) => c.id),
+    filePath: path
+  }))
+}
+
+/**
+ * Build the merged diff view: target snapshot + removed nodes from the diff.
+ *
+ * Returns the merged node/edge lists, file groups, and status maps for the
+ * canvas overlay.
+ */
+function buildDiffView(
+  baseSnapshot: GraphSnapshot,
+  targetSnapshot: GraphSnapshot,
+  diff: import('@graphcoder/core').ArchDiff
+): {
+  nodes: GraphNode[]
+  edges: GraphEdge[]
+  groups: FileGroup[]
+  nodeStatus: Map<string, 'added' | 'removed' | 'modified' | 'moved'>
+  edgeStatus: Map<string, 'added' | 'removed'>
+} {
+  // Start with all target nodes (the "after" state).
+  const mergedNodes = [...targetSnapshot.nodes]
+  const mergedNodeIds = new Set(mergedNodes.map((n) => n.id))
+
+  // Build node + edge status maps from diff operations.
+  const nodeStatus = new Map<string, 'added' | 'removed' | 'modified' | 'moved'>()
+  const edgeStatus = new Map<string, 'added' | 'removed'>()
+
+  // We need CodeGraph-ID → semantic-ID maps for both snapshots to resolve edges.
+  const baseCgToSem = new Map<string, string>()
+  const targetCgToSem = new Map<string, string>()
+  for (const n of baseSnapshot.nodes) baseCgToSem.set(n.id, nodeSemanticId(n))
+  for (const n of targetSnapshot.nodes) targetCgToSem.set(n.id, nodeSemanticId(n))
+
+  for (const op of diff.operations) {
+    switch (op.op) {
+      case 'add_node':
+        nodeStatus.set(op.node.id, 'added')
+        break
+      case 'remove_node': {
+        nodeStatus.set(op.id, 'removed')
+        // Inject removed node into the merged view so it appears on the canvas.
+        if (!mergedNodeIds.has(op.id)) {
+          mergedNodes.push(snapshotToGraphNode(op.node))
+          mergedNodeIds.add(op.id)
+        }
+        break
+      }
+      case 'modify_node':
+        nodeStatus.set(op.id, 'modified')
+        break
+      case 'move_node':
+        nodeStatus.set(op.id, 'moved')
+        break
+      case 'add_edge':
+        edgeStatus.set(`${op.edge.source}|${op.edge.target}|${op.edge.kind}`, 'added')
+        break
+      case 'remove_edge':
+        edgeStatus.set(`${op.edge.source}|${op.edge.target}|${op.edge.kind}`, 'removed')
+        break
+    }
+  }
+
+  // Merge edges: target edges + removed edges whose endpoints both exist.
+  // Target edges use CodeGraph IDs — remap to semantic IDs for the status map.
+  const mergedEdges: GraphEdge[] = targetSnapshot.edges.map((e) => ({
+    ...e,
+    source: targetCgToSem.get(e.source) ?? e.source,
+    target: targetCgToSem.get(e.target) ?? e.target
+  }))
+  const edgeKeySet = new Set(mergedEdges.map((e) => `${e.source}|${e.target}|${e.kind}`))
+
+  // Add removed edges that don't already exist in the merged set.
+  for (const op of diff.operations) {
+    if (op.op !== 'remove_edge') continue
+    const key = `${op.edge.source}|${op.edge.target}|${op.edge.kind}`
+    if (edgeKeySet.has(key)) continue
+    // Only include if both endpoints exist in the merged node set.
+    if (mergedNodeIds.has(op.edge.source) && mergedNodeIds.has(op.edge.target)) {
+      mergedEdges.push({ source: op.edge.source, target: op.edge.target, kind: op.edge.kind })
+      edgeKeySet.add(key)
+    }
+  }
+
+  // Remap target node IDs from CodeGraph IDs to semantic IDs so the diff
+  // overlay can match them. Keep the semantic ID as the node's `id`.
+  for (const n of mergedNodes) {
+    const sem = targetCgToSem.get(n.id) ?? baseCgToSem.get(n.id)
+    if (sem && sem !== n.id) n.id = sem
+  }
+
+  const groups = buildDiffFileGroups(mergedNodes)
+  return { nodes: mergedNodes, edges: mergedEdges, groups, nodeStatus, edgeStatus }
+}
+
 /**
  * Run the temporal diff between baseRef and targetRef.
+ *
+ * Fetches both snapshots from the server, computes (or retrieves cached) the
+ * diff, builds a merged diff view, and pushes it into the canvas state.
  */
 export async function runTemporalDiff(): Promise<void> {
   const { state } = await import('./core.js')
@@ -164,10 +314,8 @@ export async function runTemporalDiff(): Promise<void> {
   // Build labels from the graph data.
   const graph = state.gitGraph
   const labelFor = (hash: string): string => {
-    // Check if a branch tip points here.
     const branch = graph?.branches.find((b: BranchRef) => b.hash === hash)
     if (branch) return branch.name
-    // Otherwise use short hash.
     const commit = graph?.commits.find((c: GraphCommit) => c.hash === hash)
     return commit?.shortHash ?? hash.slice(0, 8)
   }
@@ -179,8 +327,25 @@ export async function runTemporalDiff(): Promise<void> {
   setState('currentDiff', null)
 
   try {
-    const diff = await computeDiff(base, target, (msg) => setState('computeProgress', msg))
-    setState('currentDiff', diff)
+    const result = await computeDiff(base, target, (msg) => setState('computeProgress', msg))
+
+    // Save the live view so we can restore it when the diff clears.
+    if (!state.savedView) {
+      setState('savedView', {
+        nodes: [...state.viewNodes],
+        edges: [...state.viewEdges],
+        groups: [...state.viewGroups]
+      })
+    }
+
+    // Build the merged diff view and push it into the canvas.
+    const dv = buildDiffView(result.baseSnapshot, result.targetSnapshot, result.diff)
+    setState('viewNodes', dv.nodes)
+    setState('viewEdges', dv.edges)
+    setState('viewGroups', dv.groups)
+    setState('diffStatusMap', dv.nodeStatus)
+    setState('edgeStatusMap', dv.edgeStatus)
+    setState('currentDiff', result.diff)
     setState('temporalRange', { baseLabel: labelFor(base), targetLabel: labelFor(target) })
   } catch (err) {
     setState('diffError', err instanceof Error ? err.message : 'Computation failed')

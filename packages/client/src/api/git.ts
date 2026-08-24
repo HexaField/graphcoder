@@ -4,7 +4,7 @@
  * `computeDiff` uses SSE (fetch + ReadableStream) so the caller can receive
  * granular progress messages while snapshot indexing runs on the server.
  */
-import type { ArchDiff } from '@graphcoder/core'
+import type { ArchDiff, GraphSnapshot } from '@graphcoder/core'
 
 const API: string = import.meta.env.VITE_API_URL ?? `http://${window.location.hostname}:3001`
 
@@ -74,19 +74,26 @@ export async function fetchGitGraph(limit = 200): Promise<GitGraph> {
   return res.json() as Promise<GitGraph>
 }
 
+/** Result from the diff SSE stream — includes both snapshots for the diff view. */
+export interface DiffResult {
+  diff: ArchDiff
+  baseSnapshot: GraphSnapshot
+  targetSnapshot: GraphSnapshot
+}
+
 /**
  * Stream a diff computation from the server via SSE.
  *
  * Calls `onProgress` for each `progress` event, and resolves with the final
- * `ArchDiff` when the `result` event arrives. Rejects on `error` events or
+ * `DiffResult` when the `result` event arrives. Rejects on `error` events or
  * network failures.
  */
 export async function computeDiff(
   base: string,
   target: string,
   onProgress?: (message: string) => void
-): Promise<ArchDiff> {
-  return new Promise<ArchDiff>((resolve, reject) => {
+): Promise<DiffResult> {
+  return new Promise<DiffResult>((resolve, reject) => {
     fetch(`${API}/api/git/diff`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Accept: 'text/event-stream' },
@@ -124,7 +131,7 @@ export async function computeDiff(
               if (eventName === 'progress') {
                 onProgress?.((data as { message: string }).message)
               } else if (eventName === 'result') {
-                resolve(data as ArchDiff)
+                resolve(data as DiffResult)
               } else if (eventName === 'error') {
                 reject(new Error((data as { error: string }).error))
               }

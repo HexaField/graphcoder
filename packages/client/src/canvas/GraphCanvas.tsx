@@ -27,7 +27,8 @@ import {
   Switch,
   Match
 } from 'solid-js'
-import type { GraphNode } from '@graphcoder/core'
+import type { FileGroup, GraphNode } from '@graphcoder/core'
+import { nodeSemanticId } from '@graphcoder/core'
 import { layoutGraph, type LayoutResult } from '../layout/elk.js'
 import { clearFocus, selectNode, state, toggleGroupExpanded } from '../state/store.js'
 import { resolvedTheme } from '../state/theme.js'
@@ -90,17 +91,128 @@ export const GraphCanvas: Component = () => {
   // ── Reactive memos ──────────────────────────────────────────────────────────
 
   const diffOverlay = createMemo((): DiffOverlay => {
-    const diff = state.currentDiff
-    if (!diff) return { added: new Set<string>(), modified: new Set<string>(), moved: new Set<string>() }
-    const added = new Set<string>()
-    const modified = new Set<string>()
-    const moved = new Set<string>()
-    for (const op of diff.operations) {
-      if (op.op === 'add_node') added.add(op.node.id)
-      else if (op.op === 'modify_node') modified.add(op.id)
-      else if (op.op === 'move_node') moved.add(op.id)
+    const emptyCS = new Map<string, 'added' | 'removed' | 'modified' | 'mixed'>()
+    const empty: DiffOverlay = {
+      added: new Set<string>(),
+      removed: new Set<string>(),
+      modified: new Set<string>(),
+      moved: new Set<string>(),
+      edgeAdded: new Set<string>(),
+      edgeRemoved: new Set<string>(),
+      containerStatus: emptyCS
     }
-    return { added, modified, moved }
+
+    // Build node status sets from whichever source provides them.
+    let added: Set<string>
+    let removed: Set<string>
+    let modified: Set<string>
+    let moved: Set<string>
+    let edgeAdded: Set<string>
+    let edgeRemoved: Set<string>
+
+    const statusMap = state.diffStatusMap
+    const edgeMap = state.edgeStatusMap
+    if (statusMap) {
+      added = new Set<string>()
+      removed = new Set<string>()
+      modified = new Set<string>()
+      moved = new Set<string>()
+      for (const [id, s] of statusMap) {
+        if (s === 'added') added.add(id)
+        else if (s === 'removed') removed.add(id)
+        else if (s === 'modified') modified.add(id)
+        else if (s === 'moved') moved.add(id)
+      }
+      edgeAdded = new Set<string>()
+      edgeRemoved = new Set<string>()
+      if (edgeMap) {
+        for (const [k, s] of edgeMap) {
+          if (s === 'added') edgeAdded.add(k)
+          else if (s === 'removed') edgeRemoved.add(k)
+        }
+      }
+    } else {
+      // Fallback: snapshot-based diff (non-temporal).
+      const diff = state.currentDiff
+      if (!diff) return empty
+      added = new Set<string>()
+      removed = new Set<string>()
+      modified = new Set<string>()
+      moved = new Set<string>()
+      for (const op of diff.operations) {
+        if (op.op === 'add_node') added.add(op.node.id)
+        else if (op.op === 'remove_node') removed.add(op.id)
+        else if (op.op === 'modify_node') modified.add(op.id)
+        else if (op.op === 'move_node') moved.add(op.id)
+      }
+      edgeAdded = new Set<string>()
+      edgeRemoved = new Set<string>()
+    }
+
+    // Build a lookup of all node-level statuses (by node ID, not just semantic ID).
+    const allNodeStatuses = new Set([...added, ...removed, ...modified, ...moved])
+
+    // VS Code-style container propagation: collapsed containers inherit
+    // aggregate diff status from their children. Expanded containers show
+    // nothing — their children carry their own status.
+    const containerStatus = new Map<string, 'added' | 'removed' | 'modified' | 'mixed'>()
+
+    // Build node-ID → semantic-ID map for current viewNodes so we can match
+    // container childIds (which use CodeGraph IDs) against the diff status sets.
+    const nodeById = new Map<string, GraphNode>()
+    for (const n of state.viewNodes) nodeById.set(n.id, n)
+
+    const nodeIdStatus = (id: string): string | null => {
+      // Try direct lookup (diff view uses semantic IDs as node IDs).
+      if (added.has(id)) return 'added'
+      if (removed.has(id)) return 'removed'
+      if (modified.has(id)) return 'modified'
+      if (moved.has(id)) return 'moved'
+      // Try semantic ID lookup.
+      const n = nodeById.get(id)
+      if (!n) return null
+      const sem = nodeSemanticId(n)
+      if (added.has(sem)) return 'added'
+      if (removed.has(sem)) return 'removed'
+      if (modified.has(sem)) return 'modified'
+      if (moved.has(sem)) return 'moved'
+      return null
+    }
+
+    // Walk groups: for collapsed containers, aggregate child statuses.
+    const expandedGroups = new Set(state.expandedGroups)
+    const walkGroup = (g: FileGroup) => {
+      // A group counts as collapsed if NOT in expandedGroups.
+      const collapsed = !expandedGroups.has(g.filePath ?? g.id)
+      if (!collapsed) return // expanded → children show their own status
+
+      const statuses = new Set<string>()
+      for (const cid of g.childIds) {
+        const s = nodeIdStatus(cid)
+        if (s) statuses.add(s)
+      }
+      // Also check child groups (class sub-groups).
+      for (const sg of g.childGroups ?? []) {
+        for (const cid of sg.childIds) {
+          const s = nodeIdStatus(cid)
+          if (s) statuses.add(s)
+        }
+      }
+
+      if (statuses.size === 0) return
+      if (statuses.size === 1) {
+        const only = [...statuses][0] as 'added' | 'removed' | 'modified'
+        containerStatus.set(g.id, only === 'moved' ? 'modified' : only)
+      } else {
+        containerStatus.set(g.id, 'mixed')
+      }
+    }
+
+    if (allNodeStatuses.size > 0) {
+      for (const g of state.viewGroups) walkGroup(g)
+    }
+
+    return { added, removed, modified, moved, edgeAdded, edgeRemoved, containerStatus }
   })
 
   // ── ELK layout effect ───────────────────────────────────────────────────────

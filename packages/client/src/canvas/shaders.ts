@@ -104,11 +104,13 @@ void main() {
   }
 
   // Diff status ring (outside node, behind selection)
+  // 1=added(green), 2=modified(yellow), 3=moved(yellow), 4=removed(red)
   if (vStatus > 0.5) {
     vec3  sc;
-    if      (vStatus < 1.5) sc = vec3(0.133, 0.773, 0.369); // added
-    else if (vStatus < 2.5) sc = vec3(0.961, 0.620, 0.043); // modified
-    else                    sc = vec3(0.024, 0.714, 0.831); // moved
+    if      (vStatus < 1.5) sc = vec3(0.133, 0.773, 0.369); // added — bright green
+    else if (vStatus < 2.5) sc = vec3(0.961, 0.843, 0.043); // modified — bright yellow
+    else if (vStatus < 3.5) sc = vec3(0.961, 0.843, 0.043); // moved — bright yellow
+    else                    sc = vec3(0.961, 0.282, 0.282); // removed — bright red
     float sring  = abs(d + bw + 3.5) - 2.0;
     float sringA = 1.0 - smoothstep(-0.8, 0.8, sring);
     col          = mix(col, sc, sringA * 0.85);

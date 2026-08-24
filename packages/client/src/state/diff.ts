@@ -21,11 +21,20 @@ export function captureSnapshot(): void {
   setState('temporalRange', null)
 }
 
-/** Discard the baseline and clear any computed diff. */
+/** Discard the baseline and clear any computed diff. Restores the live view if a temporal diff replaced it. */
 export function clearDiff(): void {
+  // Restore the live project view if a temporal diff replaced it.
+  if (state.savedView) {
+    setState('viewNodes', state.savedView.nodes)
+    setState('viewEdges', state.savedView.edges)
+    setState('viewGroups', state.savedView.groups)
+    setState('savedView', null)
+  }
   setState('baseSnapshot', null)
   setState('currentDiff', null)
   setState('temporalRange', null)
+  setState('diffStatusMap', null)
+  setState('edgeStatusMap', null)
 }
 
 /**
