@@ -704,9 +704,8 @@ export class ThreeRenderer {
       colorRgb: [number, number, number],
       maxChars = 48
     ): void => {
-      const { glyphs, cellH, advance } = this.atlas
+      const { glyphs, advance, refGlyphTop } = this.atlas
       const scale = fontSize / 24
-      const displayH = cellH * scale
       const displayAdv = advance * scale
       const str = text.length > maxChars ? `…${text.slice(-(maxChars - 1))}` : text
       let cx = x
@@ -719,10 +718,16 @@ export class ThreeRenderer {
         }
         const b2 = gi * 2,
           b3 = gi * 3
+        // Offset each glyph's Y so all characters share the same baseline.
+        // refGlyphTop = cap-height from 'M'. Characters with smaller glyphTop
+        // (e.g. '.', ',', 'x') shift down so their baseline aligns with 'M'.
+        const quadY = y + (refGlyphTop - g.glyphTop) * scale
         this.glyphArrays.pos[b2] = cx
-        this.glyphArrays.pos[b2 + 1] = y
+        this.glyphArrays.pos[b2 + 1] = quadY
+        // Use actual glyph bitmap dimensions — prevents small characters from
+        // being stretched to fill the larger M-cell quad.
         this.glyphArrays.size[b2] = g.cellW * scale
-        this.glyphArrays.size[b2 + 1] = displayH
+        this.glyphArrays.size[b2 + 1] = g.cellH * scale
         this.glyphArrays.uv0[b2] = g.u0
         this.glyphArrays.uv0[b2 + 1] = g.v0
         this.glyphArrays.uv1[b2] = g.u1

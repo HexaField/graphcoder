@@ -29,22 +29,37 @@ export interface GlyphInfo {
   v1: number
   /** Pixel advance width (same for all chars in a monospace font). */
   glyphAdvance: number
-  /** Cell dimensions in the atlas (glyph bitmap + SDF buffer). */
+  /**
+   * Actual glyph bitmap dimensions (ink bounding box + 2×buffer on each side).
+   * These differ per character — '.' is much smaller than 'M'.
+   * The quad in the renderer must match these exactly so the SDF is not stretched.
+   */
   cellW: number
   cellH: number
-  /** Distance from cell top to the glyph top edge (baseline + ascender). */
+  /**
+   * Pixels from baseline to glyph top (= Math.ceil(actualBoundingBoxAscent)).
+   * Used to baseline-align glyphs: smaller glyphTop chars shift down relative
+   * to the reference character so all share the same baseline position.
+   */
   glyphTop: number
 }
 
 export interface SdfAtlas {
   texture: DataTexture
   glyphs: Map<string, GlyphInfo>
+  /** Reference cell dimensions — from 'M', the tallest glyph. Used for layout math. */
   cellW: number
   cellH: number
   /** Pixel advance width (monospace — same for every char). */
   advance: number
   /** SDF rendering threshold for solid fill (shader: smoothstep(lo, hi, sdf)). */
   threshold: { lo: number; hi: number }
+  /**
+   * glyphTop of the reference character ('M').
+   * Used in pushLabel: each character's quad Y is offset by
+   * (refGlyphTop - g.glyphTop) * scale so all glyphs share the same baseline.
+   */
+  refGlyphTop: number
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -117,6 +132,9 @@ export function buildSdfAtlas(): SdfAtlas {
     // V coordinates: inverted because flipY=true flips the atlas on GPU upload.
     // With flipY=true: data row 0 → UV.v=1, data row r → UV.v = 1 - r/atlasH.
     // v0 = glyph top UV (larger), v1 = glyph bottom UV (smaller).
+    //
+    // cellW/cellH store the ACTUAL glyph bitmap dimensions (not the reference M
+    // dimensions). The renderer quad must match these so the SDF is not stretched.
     glyphs.set(char, {
       u0: startX / atlasW,
       v0: 1 - startY / atlasH,
@@ -124,8 +142,8 @@ export function buildSdfAtlas(): SdfAtlas {
       v1: 1 - (startY + g.height) / atlasH,
       glyphAdvance: g.glyphAdvance,
       glyphTop: g.glyphTop,
-      cellW,
-      cellH
+      cellW: g.width,
+      cellH: g.height
     })
   }
 
@@ -144,6 +162,10 @@ export function buildSdfAtlas(): SdfAtlas {
     cellW,
     cellH,
     advance,
-    threshold: { lo: edgeVal - 0.05, hi: edgeVal + 0.05 }
+    threshold: { lo: edgeVal - 0.05, hi: edgeVal + 0.05 },
+    // glyphTop of 'M': Math.ceil(actualBoundingBoxAscent) = cap height in pixels.
+    // Other glyphs offset their quad by (refGlyphTop - g.glyphTop) * scale so
+    // all characters share the same baseline position.
+    refGlyphTop: sampleM.glyphTop
   }
 }
