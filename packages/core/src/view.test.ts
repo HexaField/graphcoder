@@ -409,6 +409,11 @@ describe('DEFAULT_VIEW_PARAMS', () => {
     expect(DEFAULT_VIEW_PARAMS.expandedGroups).toHaveLength(0)
   })
 
+  it('hides contains and exports edges by default', () => {
+    expect(DEFAULT_VIEW_PARAMS.hiddenEdgeKinds).toContain('contains')
+    expect(DEFAULT_VIEW_PARAMS.hiddenEdgeKinds).toContain('exports')
+  })
+
   it('produces valid output on an empty graph', () => {
     const result = computeView([], [], DEFAULT_VIEW_PARAMS)
     expect(result.nodes).toHaveLength(0)

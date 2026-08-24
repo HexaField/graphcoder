@@ -87,7 +87,10 @@ export interface ViewParams {
 /** Default params sent to the server before the client has loaded any local prefs. */
 export const DEFAULT_VIEW_PARAMS: ViewParams = {
   hiddenNodeKinds: [],
-  hiddenEdgeKinds: [],
+  // `contains` edges are structural hierarchy already shown by spatial containers —
+  // rendering them as lines creates noisy bands especially in dense graphs.
+  // `exports` mirrors imports and adds identical routing clutter.
+  hiddenEdgeKinds: ['contains', 'exports'],
   hiddenPaths: [],
   excludePatterns: '',
   groupByFile: true,

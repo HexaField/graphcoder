@@ -76,6 +76,8 @@ export interface FileContainer {
   width: number
   height: number
   color?: string
+  /** True for collapsed groups rendered as fixed-size chip placeholders. */
+  collapsed?: boolean
 }
 
 export interface LayoutResult {
@@ -515,7 +517,16 @@ async function layoutGrouped(
 
       if (topGroupMap.has(child.id)) {
         const fg = topGroupMap.get(child.id)!
-        flat2Containers.push({ id: child.id, label: fg.label, color: fg.color, x: cx, y: cy, width: cw, height: ch })
+        flat2Containers.push({
+          id: child.id,
+          label: fg.label,
+          color: fg.color,
+          x: cx,
+          y: cy,
+          width: cw,
+          height: ch,
+          collapsed: fg.collapsed
+        })
         extractFileGroupPositions(child, cx, cy, flat2Nodes, flat2ClassContainers)
       } else {
         flat2Nodes.set(child.id, { id: child.id, x: cx, y: cy, width: cw, height: ch })
@@ -750,7 +761,15 @@ async function layoutGrouped(
 
               if (topGroupMap.has(fileChild.id)) {
                 const fg = topGroupMap.get(fileChild.id)!
-                pkg4Containers.push({ id: fileChild.id, label: fg.label, x: fx, y: fy, width: fw, height: fh })
+                pkg4Containers.push({
+                  id: fileChild.id,
+                  label: fg.label,
+                  x: fx,
+                  y: fy,
+                  width: fw,
+                  height: fh,
+                  collapsed: fg.collapsed
+                })
                 extractFileGroupPositions(fileChild, fx, fy, pkg4Nodes, pkg4ClassContainers)
               } else {
                 pkg4Nodes.set(fileChild.id, { id: fileChild.id, x: fx, y: fy, width: fw, height: fh })
@@ -769,7 +788,15 @@ async function layoutGrouped(
           const fh = fileChild.height ?? NODE_HEIGHT
           if (topGroupMap.has(fileChild.id)) {
             const fg = topGroupMap.get(fileChild.id)!
-            pkg4Containers.push({ id: fileChild.id, label: fg.label, x: fx, y: fy, width: fw, height: fh })
+            pkg4Containers.push({
+              id: fileChild.id,
+              label: fg.label,
+              x: fx,
+              y: fy,
+              width: fw,
+              height: fh,
+              collapsed: fg.collapsed
+            })
             extractFileGroupPositions(fileChild, fx, fy, pkg4Nodes, pkg4ClassContainers)
           } else {
             pkg4Nodes.set(fileChild.id, { id: fileChild.id, x: fx, y: fy, width: fw, height: fh })
@@ -778,7 +805,16 @@ async function layoutGrouped(
       } else if (topGroupMap.has(rootChild.id)) {
         // Flat contract group at root
         const fg = topGroupMap.get(rootChild.id)!
-        pkg4Containers.push({ id: rootChild.id, label: fg.label, color: fg.color, x: rx, y: ry, width: rw, height: rh })
+        pkg4Containers.push({
+          id: rootChild.id,
+          label: fg.label,
+          color: fg.color,
+          x: rx,
+          y: ry,
+          width: rw,
+          height: rh,
+          collapsed: fg.collapsed
+        })
         extractFileGroupPositions(rootChild, rx, ry, pkg4Nodes, pkg4ClassContainers)
       } else {
         // Ungrouped flat node
@@ -992,7 +1028,15 @@ async function layoutGrouped(
 
         if (topGroupMap.has(fileChild.id)) {
           const fg = topGroupMap.get(fileChild.id)!
-          containers.push({ id: fileChild.id, label: fg.label, x: fx, y: fy, width: fw, height: fh })
+          containers.push({
+            id: fileChild.id,
+            label: fg.label,
+            x: fx,
+            y: fy,
+            width: fw,
+            height: fh,
+            collapsed: fg.collapsed
+          })
           extractFileGroupPositions(fileChild, fx, fy, resultNodes, classContainers)
         } else {
           // Ungrouped node inside dir (shouldn't happen but handle gracefully)
@@ -1002,7 +1046,16 @@ async function layoutGrouped(
     } else if (topGroupMap.has(rootChild.id)) {
       // Flat group compound at root level (contract group)
       const fg = topGroupMap.get(rootChild.id)!
-      containers.push({ id: rootChild.id, label: fg.label, color: fg.color, x: rx, y: ry, width: rw, height: rh })
+      containers.push({
+        id: rootChild.id,
+        label: fg.label,
+        color: fg.color,
+        x: rx,
+        y: ry,
+        width: rw,
+        height: rh,
+        collapsed: fg.collapsed
+      })
       extractFileGroupPositions(rootChild, rx, ry, resultNodes, classContainers)
     } else {
       // Ungrouped flat node

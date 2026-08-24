@@ -429,6 +429,12 @@ export class ThreeRenderer {
   applyCamera(panX: number, panY: number, zoom: number): void {
     this.world.position.set(panX, panY, 0)
     this.world.scale.set(zoom, zoom, 1)
+    // Scale edge line width and opacity with zoom so co-routed edges don't form
+    // thick opaque bands at overview zoom levels.
+    // linewidth is in CSS pixels (screen-space); clamp to [0.5, 2].
+    this.lineMat.linewidth = Math.max(0.5, Math.min(2, zoom * 6))
+    // opacity: reduce at low zoom so overlapping lines stay legible
+    this.lineMat.opacity = Math.max(0.2, Math.min(0.65, 0.2 + zoom * 1.5))
   }
 
   // ── Hit test (returns node id or null) ────────────────────────────────────
@@ -562,7 +568,14 @@ export class ThreeRenderer {
       let labelColor: [number, number, number]
       let cornerR: number, borderW: number
 
-      if (fc.color) {
+      if (fc.collapsed) {
+        // Collapsed file chip — solid, clearly distinct from the empty space inside dir containers.
+        fill = isDark ? [0.098, 0.122, 0.196, 0.85] : [0.835, 0.859, 0.91, 0.9]
+        border = isDark ? [0.302, 0.369, 0.506, 0.9] : [0.376, 0.447, 0.565, 0.85]
+        labelColor = isDark ? [0.682, 0.737, 0.812] : [0.196, 0.247, 0.341]
+        cornerR = 6
+        borderW = 1.5
+      } else if (fc.color) {
         const [r, g, b] = parseHex(fc.color)
         fill = [r, g, b, 0.07]
         border = [r, g, b, 0.6]
@@ -578,7 +591,7 @@ export class ThreeRenderer {
       }
       pushContainer(fc, fill, border, cornerR, borderW)
       const short = fc.label.length > 32 ? `…${fc.label.slice(-31)}` : fc.label
-      pushLabel(short, fc.x + (fc.color ? 12 : 10), fc.y + 10, 11, labelColor)
+      pushLabel(short, fc.x + (fc.color ? 12 : 10), fc.y + (fc.collapsed ? 14 : 10), 11, labelColor)
     }
 
     // ── Class sub-containers ─────────────────────────────────────────────────
