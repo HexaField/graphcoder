@@ -1,8 +1,19 @@
 import type { EdgeKind, GraphDirection, NodeKind } from '@graphcoder/core'
 
-// ── Filters ───────────────────────────────────────────────────────────────────
+// ── Key helpers ──────────────────────────────────────────────────────────────
 
-const FILTER_KEY = 'graphcoder-filters'
+const FILTER_BASE = 'graphcoder-filters'
+const HIERARCHY_BASE = 'graphcoder-hierarchy'
+
+/**
+ * Build a localStorage key scoped to a project path.
+ * Falls back to the bare base key when no project path is available.
+ */
+function storageKey(base: string, projectPath: string | null): string {
+  return projectPath ? `${base}:${projectPath}` : base
+}
+
+// ── Filters ───────────────────────────────────────────────────────────────────
 
 export interface PersistedFilters {
   hiddenNodeKinds: NodeKind[]
@@ -17,10 +28,16 @@ export interface PersistedFilters {
   graphDirection: GraphDirection
 }
 
-/** Load persisted filter state from localStorage. Returns partial on missing/corrupt data. */
-export function loadFilters(): Partial<PersistedFilters> {
+/**
+ * Load persisted filter state from localStorage. Returns partial on missing/corrupt data.
+ *
+ * Tries the project-scoped key first; falls back to the global key so existing
+ * settings migrate seamlessly on first open under the new keying scheme.
+ */
+export function loadFilters(projectPath: string | null = null): Partial<PersistedFilters> {
   try {
-    const raw = localStorage.getItem(FILTER_KEY)
+    let raw = projectPath ? localStorage.getItem(storageKey(FILTER_BASE, projectPath)) : null
+    if (!raw) raw = localStorage.getItem(FILTER_BASE)
     if (!raw) return {}
     const p = JSON.parse(raw)
     if (typeof p !== 'object' || p === null) return {}
@@ -46,18 +63,16 @@ export function loadFilters(): Partial<PersistedFilters> {
   }
 }
 
-/** Persist filter state to localStorage. Silently swallows quota/permission errors. */
-export function saveFilters(f: PersistedFilters): void {
+/** Persist filter state to localStorage, scoped to the current project. */
+export function saveFilters(f: PersistedFilters, projectPath: string | null = null): void {
   try {
-    localStorage.setItem(FILTER_KEY, JSON.stringify(f))
+    localStorage.setItem(storageKey(FILTER_BASE, projectPath), JSON.stringify(f))
   } catch {
     // localStorage unavailable (quota exceeded, private-browsing restriction, etc.)
   }
 }
 
 // ── Hierarchy ─────────────────────────────────────────────────────────────────
-
-const HIERARCHY_KEY = 'graphcoder-hierarchy'
 
 export interface PersistedHierarchy {
   hiddenPaths: string[]
@@ -69,10 +84,15 @@ export interface PersistedHierarchy {
   expandedGroups: string[]
 }
 
-/** Load persisted hierarchy visibility state from localStorage. */
-export function loadHierarchy(): Partial<PersistedHierarchy> {
+/**
+ * Load persisted hierarchy visibility state from localStorage.
+ *
+ * Tries the project-scoped key first; falls back to the global key for migration.
+ */
+export function loadHierarchy(projectPath: string | null = null): Partial<PersistedHierarchy> {
   try {
-    const raw = localStorage.getItem(HIERARCHY_KEY)
+    let raw = projectPath ? localStorage.getItem(storageKey(HIERARCHY_BASE, projectPath)) : null
+    if (!raw) raw = localStorage.getItem(HIERARCHY_BASE)
     if (!raw) return {}
     const p = JSON.parse(raw)
     if (typeof p !== 'object' || p === null) return {}
@@ -85,10 +105,10 @@ export function loadHierarchy(): Partial<PersistedHierarchy> {
   }
 }
 
-/** Persist hierarchy visibility state to localStorage. */
-export function saveHierarchy(h: PersistedHierarchy): void {
+/** Persist hierarchy visibility state to localStorage, scoped to the current project. */
+export function saveHierarchy(h: PersistedHierarchy, projectPath: string | null = null): void {
   try {
-    localStorage.setItem(HIERARCHY_KEY, JSON.stringify(h))
+    localStorage.setItem(storageKey(HIERARCHY_BASE, projectPath), JSON.stringify(h))
   } catch {
     // localStorage unavailable
   }

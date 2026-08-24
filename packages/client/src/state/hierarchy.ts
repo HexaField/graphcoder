@@ -2,7 +2,7 @@ import { state, setState } from './core.js'
 import { saveHierarchy } from './storage.js'
 
 function persist(): void {
-  saveHierarchy({ hiddenPaths: state.hiddenPaths, expandedGroups: state.expandedGroups })
+  saveHierarchy({ hiddenPaths: state.hiddenPaths, expandedGroups: state.expandedGroups }, state.projectRoot)
 }
 
 // ── Hierarchy ─────────────────────────────────────────────────────────────────

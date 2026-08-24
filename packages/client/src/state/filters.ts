@@ -35,7 +35,7 @@ function persist(): void {
     groupByPackage: state.groupByPackage,
     graphDirection: state.graphDirection
   }
-  saveFilters(f)
+  saveFilters(f, state.projectRoot)
 }
 
 export function toggleNodeKind(kind: NodeKind): void {

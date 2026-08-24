@@ -3,6 +3,7 @@ import { batch } from 'solid-js'
 import * as api from '../api/graph.js'
 import { state, setState } from './core.js'
 import { recomputeDiff } from './diff.js'
+import { loadFilters, loadHierarchy } from './storage.js'
 import { syncUrlParams } from './url.js'
 
 // ── Project ───────────────────────────────────────────────────────────────────
@@ -12,6 +13,31 @@ export interface ProjectState {
   projectStats: ProjectStats | null
   isLoading: boolean
   error: string | null
+}
+
+/**
+ * Reload persisted filter and hierarchy state for the current project.
+ *
+ * Called after setting `projectRoot` so localStorage reads use the
+ * project-scoped key. The reactive effect in App.tsx picks up the
+ * state changes and sends an updated view_request to the server.
+ */
+function reloadPersistedState(): void {
+  const path = state.projectRoot
+  const filters = loadFilters(path)
+  const hierarchy = loadHierarchy(path)
+  batch(() => {
+    if (filters.hiddenNodeKinds !== undefined) setState('hiddenNodeKinds', filters.hiddenNodeKinds)
+    if (filters.hiddenEdgeKinds !== undefined) setState('hiddenEdgeKinds', filters.hiddenEdgeKinds)
+    if (filters.excludePatterns !== undefined) setState('excludePatterns', filters.excludePatterns)
+    if (filters.groupByFile !== undefined) setState('groupByFile', filters.groupByFile)
+    if (filters.groupByContract !== undefined) setState('groupByContract', filters.groupByContract)
+    if (filters.groupByClass !== undefined) setState('groupByClass', filters.groupByClass)
+    if (filters.groupByPackage !== undefined) setState('groupByPackage', filters.groupByPackage)
+    if (filters.graphDirection !== undefined) setState('graphDirection', filters.graphDirection)
+    if (hierarchy.hiddenPaths !== undefined) setState('hiddenPaths', hierarchy.hiddenPaths)
+    if (hierarchy.expandedGroups !== undefined) setState('expandedGroups', hierarchy.expandedGroups)
+  })
 }
 
 /**
@@ -31,6 +57,7 @@ export async function openProject(projectRoot: string): Promise<void> {
     const result = await api.openProject(projectRoot)
     setState('projectRoot', result.projectRoot)
     setState('projectStats', result.stats)
+    reloadPersistedState()
     syncUrlParams()
     // The server broadcasts view_snapshot + hierarchy_snapshot to all connected
     // clients after opening the project, so no explicit fetch is needed here.
@@ -59,6 +86,7 @@ export async function initFromUrl(): Promise<void> {
       if (result.open && result.projectRoot) {
         setState('projectRoot', result.projectRoot)
         if (result.stats) setState('projectStats', result.stats)
+        reloadPersistedState()
         syncUrlParams()
         // sendViewRequest() is called by the view-params effect in App.tsx as
         // soon as the WebSocket is open, so no explicit call is needed here.
