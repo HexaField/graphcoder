@@ -9,7 +9,7 @@
  * It is also hidden when the project is not a Git repository.
  */
 import type { Component } from 'solid-js'
-import { createEffect, For, Show } from 'solid-js'
+import { createEffect, For, Show, untrack } from 'solid-js'
 import type { CommitInfo } from '../api/git.js'
 import {
   loadCommits,
@@ -122,9 +122,18 @@ const BranchTab: Component = () => {
 // ── GitBar ────────────────────────────────────────────────────────────────────
 
 export const GitBar: Component = () => {
-  // Auto-load commits when the bar opens and a branch is selected.
+  // Auto-load commits when the bar opens for the first time.
+  //
+  // IMPORTANT: commits.length is read via untrack so the effect does NOT
+  // subscribe to commits changes. Without untrack, loadCommits() clears
+  // commits with setState('commits', []) before the fetch resolves, which
+  // fires the effect again — causing an infinite chain of concurrent fetches
+  // (thousands of GET /api/git/commits requests that crash the page).
+  //
+  // The effect only needs to react to gitBarOpen and isGitRepo flipping.
+  // Commits are loaded explicitly on branch-change via the onChange handler.
   createEffect(() => {
-    if (state.gitBarOpen && state.isGitRepo && state.commits.length === 0) {
+    if (state.gitBarOpen && state.isGitRepo && untrack(() => state.commits.length) === 0) {
       void loadCommits(null)
     }
   })

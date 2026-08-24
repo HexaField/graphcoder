@@ -269,10 +269,52 @@ test.describe('with open project', () => {
   })
 
   // -------------------------------------------------------------------------
-  // Test 6c: Direction toggle — switch between TB and LR layout
+  // Test 6c: GitBar does not hammer the server on open (infinite-fetch regression)
+  //
+  // Regression: GitBar's createEffect read `state.commits.length` as a reactive
+  // dependency. loadCommits() called setState('commits', []) before its fetch
+  // resolved, which re-fired the effect, which called loadCommits again — an
+  // infinite chain of concurrent GET /api/git/commits requests crashing the page.
+  //
+  // Fix: untrack(commits.length) so the effect only reacts to gitBarOpen/isGitRepo.
+  //
+  // The test: intercept /api/git/commits requests, open the git bar, wait 2 s,
+  // assert the count stayed at 0–2 (at most one initial load + optional branch load).
+  // If the project is not a git repo, the guard condition (isGitRepo) prevents any
+  // fetch at all — count stays 0. Either way, "thousands" is impossible.
+  // -------------------------------------------------------------------------
+
+  test('git bar does not fire repeated commits fetches on open', async ({ page }) => {
+    let commitsFetchCount = 0
+    await page.route('**/api/git/commits*', async (route) => {
+      commitsFetchCount++
+      await route.continue()
+    })
+
+    // Find the git/history toolbar button — it toggles the git bar
+    const gitBtn = page.getByTestId('git-bar-toggle')
+    if (!(await gitBtn.isVisible({ timeout: 2000 }).catch(() => false))) {
+      // Button may not exist in all builds — skip gracefully
+      return
+    }
+
+    await gitBtn.click()
+    // Allow time for any runaway effects to fire multiple requests
+    await page.waitForTimeout(2000)
+
+    // At most one commit fetch should have been issued (zero if not a git repo)
+    expect(commitsFetchCount).toBeLessThanOrEqual(2)
+
+    // Page must still be alive — stats visible, no crash
+    await expect(page.getByTestId('project-stats')).toBeVisible()
+  })
+
+  // -------------------------------------------------------------------------
+  // Test 6d: Direction toggle — switch between TB and LR layout
   // -------------------------------------------------------------------------
 
   test('direction toggle changes layout direction', async ({ page }) => {
+    // test 6d
     const lrBtn = page.getByTestId('direction-lr')
     const tbBtn = page.getByTestId('direction-tb')
 
