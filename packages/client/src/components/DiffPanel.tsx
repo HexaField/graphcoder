@@ -3,6 +3,9 @@ import { createMemo, createSignal, For, Show } from 'solid-js'
 import type { ArchOp } from '@graphcoder/core'
 import { clearDiff, state } from '../state/store.js'
 
+/** Maximum operations rendered before "show more" pagination kicks in. */
+const PAGE_SIZE = 100
+
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 function opLabel(op: ArchOp): string {
@@ -52,11 +55,14 @@ interface DiffSummary {
 
 export const DiffPanel: Component = () => {
   const [expanded, setExpanded] = createSignal(true)
+  const [visibleCount, setVisibleCount] = createSignal(PAGE_SIZE)
 
   const diff = () => state.currentDiff
 
   const summary = createMemo((): DiffSummary => {
     const d = diff()
+    // Reset pagination when a new diff arrives.
+    setVisibleCount(PAGE_SIZE)
     if (!d) return { added: 0, removed: 0, modified: 0, moved: 0, edgesAdded: 0, edgesRemoved: 0 }
     let added = 0,
       removed = 0,
@@ -132,12 +138,20 @@ export const DiffPanel: Component = () => {
           </div>
         </div>
 
-        {/* Operations list */}
+        {/* Operations list — paginated to avoid choking the DOM on large diffs */}
         <Show when={expanded()}>
           <div class="overflow-y-auto flex-1 px-3 py-1" data-testid="diff-op-list">
-            <For each={diff()?.operations ?? []}>
+            <For each={(diff()?.operations ?? []).slice(0, visibleCount())}>
               {(op) => <div class={`text-xs font-mono py-0.5 ${opColor(op)}`}>{opLabel(op)}</div>}
             </For>
+            <Show when={(diff()?.operations.length ?? 0) > visibleCount()}>
+              <button
+                class="text-xs text-blue-500 dark:text-blue-400 hover:text-blue-700 dark:hover:text-blue-300 py-1 px-2 mt-1 rounded hover:bg-gray-200 dark:hover:bg-gray-800"
+                onClick={() => setVisibleCount((n) => n + PAGE_SIZE)}
+              >
+                Show more ({(diff()?.operations.length ?? 0) - visibleCount()} remaining)
+              </button>
+            </Show>
           </div>
         </Show>
       </div>
