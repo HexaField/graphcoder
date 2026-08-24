@@ -473,6 +473,88 @@ describe('Phase 7b — class sub-group building', () => {
   })
 })
 
+// ── Expand/collapse key contract ──────────────────────────────────────────────
+//
+// The server uses fn.filePath as the expand key — NOT fn.id.
+// The client must pass filePath (not id) to toggleGroupExpanded.
+// These tests lock that contract so a key-mismatch regression is caught.
+
+describe('expand/collapse key contract — filePath, not id', () => {
+  // f1.id  = 'f1'
+  // f1.filePath = 'src/a.ts'  ← the key the server actually checks
+  const twoFiles = [
+    node('f1', 'file', { filePath: 'src/a.ts' }),
+    node('fn1', 'function', { filePath: 'src/a.ts' }),
+    node('f2', 'file', { filePath: 'src/b.ts' }),
+    node('fn2', 'function', { filePath: 'src/b.ts' })
+  ]
+  const edges = [contains('f1', 'fn1'), contains('f2', 'fn2')]
+  const params = { ...DEFAULT_VIEW_PARAMS, groupByFile: true }
+
+  it('expandedGroups uses filePath (e.g. "src/a.ts"), not node id (e.g. "f1")', () => {
+    // Correct key: filePath → group expands, child visible
+    const { nodes: out, groups } = computeView(twoFiles, edges, {
+      ...params,
+      expandedGroups: ['src/a.ts']
+    })
+    const outIds = out.map((n) => n.id)
+    expect(outIds).toContain('fn1') // child visible — group expanded
+    const g = groups.find((g) => g.id === 'f1')
+    expect(g?.collapsed).toBeUndefined() // not collapsed
+    expect(g?.filePath).toBe('src/a.ts')
+  })
+
+  it('wrong key (node id instead of filePath) does NOT expand the group', () => {
+    // Incorrect key: using node id 'f1' instead of filePath 'src/a.ts'
+    const { nodes: out, groups } = computeView(twoFiles, edges, {
+      ...params,
+      expandedGroups: ['f1'] // ← wrong key
+    })
+    const outIds = out.map((n) => n.id)
+    expect(outIds).not.toContain('fn1') // child hidden — group still collapsed
+    const g = groups.find((g) => g.id === 'f1')
+    expect(g?.collapsed).toBe(true)
+  })
+
+  it('collapsed group carries filePath matching its file node filePath', () => {
+    const { groups } = computeView(twoFiles, edges, {
+      ...params,
+      expandedGroups: [] // all collapsed
+    })
+    for (const g of groups) {
+      // Each collapsed group's filePath must match its source file node's filePath
+      const fileNode = twoFiles.find((n) => n.id === g.id)
+      expect(g.filePath).toBe(fileNode?.filePath)
+    }
+  })
+
+  it('prefix match: expandedGroups entry covers all files under a directory', () => {
+    const { nodes: out } = computeView(twoFiles, edges, {
+      ...params,
+      expandedGroups: ['src'] // prefix — expands both src/a.ts and src/b.ts
+    })
+    const outIds = out.map((n) => n.id)
+    expect(outIds).toContain('fn1')
+    expect(outIds).toContain('fn2')
+  })
+
+  it('toggling a group twice with correct filePath restores collapsed state', () => {
+    // First toggle: add 'src/a.ts' → expanded
+    const { nodes: expanded } = computeView(twoFiles, edges, {
+      ...params,
+      expandedGroups: ['src/a.ts']
+    })
+    expect(expanded.map((n) => n.id)).toContain('fn1')
+
+    // Second toggle: remove 'src/a.ts' → collapsed again
+    const { nodes: collapsed } = computeView(twoFiles, edges, {
+      ...params,
+      expandedGroups: []
+    })
+    expect(collapsed.map((n) => n.id)).not.toContain('fn1')
+  })
+})
+
 // ── globToRegex ───────────────────────────────────────────────────────────────
 
 describe('globToRegex', () => {

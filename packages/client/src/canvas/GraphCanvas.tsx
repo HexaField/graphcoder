@@ -384,10 +384,9 @@ export const GraphCanvas: Component = () => {
 
     if (hit?.kind === 'node') {
       void selectNode(hit.id)
-    } else if (hit?.kind === 'container' && hit.collapsed) {
-      // Clicking a collapsed chip expands it — key must be filePath, not id
-      toggleGroupExpanded(hit.filePath ?? hit.id)
     } else {
+      // Containers: expand/collapse is handled exclusively by the HTML button
+      // overlay (below). Clicking the body just clears selection.
       clearFocus()
     }
   }
@@ -439,9 +438,12 @@ export const GraphCanvas: Component = () => {
           const btnY = () => Math.max(sr().collapsed ? sr().y + sr().h / 2 - 12 : sr().y + 4, 4)
           return (
             <button
+              data-testid="container-expand-btn"
               class="absolute z-40 flex items-center gap-1 text-xs px-2 py-1 rounded shadow
                      bg-blue-600 hover:bg-blue-500 text-white font-medium transition-colors"
               style={{ left: `${btnX() - 76}px`, top: `${btnY()}px` }}
+              onMouseDown={(e) => e.stopPropagation()}
+              onMouseUp={(e) => e.stopPropagation()}
               onClick={(e) => {
                 e.stopPropagation()
                 toggleGroupExpanded(sr().filePath ?? sr().id)
