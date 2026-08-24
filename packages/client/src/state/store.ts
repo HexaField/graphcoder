@@ -27,16 +27,15 @@ export {
   toggleGroupByContract,
   toggleGroupByFile,
   toggleGroupByPackage,
-  toggleNodeKind,
-  visibleGraph
+  toggleNodeKind
 } from './filters.js'
 export type { FiltersState } from './filters.js'
 
-// Section: Graph  (nodes + edges managed by project / view / websocket)
+// Section: Graph  (view snapshots from server)
 export type { GraphState } from './graph.js'
 
 // Section: Project
-export { connectWebSocket, initFromUrl, openProject } from './project.js'
+export { connectWebSocket, initFromUrl, openProject, sendViewRequest } from './project.js'
 export type { ProjectState } from './project.js'
 
 // Section: Search
@@ -50,9 +49,6 @@ export type { SelectionState } from './selection.js'
 // Section: Storage  (PersistedFilters lives here — it owns the serialisation schema)
 export type { PersistedFilters } from './storage.js'
 export type { GraphDirection } from '@graphcoder/core'
-
-// Section: View
-export { reloadGraph } from './view.js'
 
 // Section: Hierarchy
 export {

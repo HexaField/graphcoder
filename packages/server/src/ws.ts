@@ -1,83 +1,87 @@
 import { WebSocketServer, WebSocket } from 'ws'
 import type { Server } from 'node:http'
+import type { ViewParams } from '@graphcoder/core'
+import { computeView, DEFAULT_VIEW_PARAMS } from '@graphcoder/core'
 import { graphService } from './codegraph/service.js'
-import type { Node, Edge } from '@colbymchenry/codegraph'
 
-interface SerializedNode {
-  id: string
-  kind: Node['kind']
-  name: string
-  qualifiedName: string
-  filePath: string
-  language: Node['language']
-  startLine: number
-  endLine: number
-  signature?: string
-  docstring?: string
-  isExported?: boolean
-}
-
-interface SerializedEdge {
-  source: string
-  target: string
-  kind: Edge['kind']
-}
-
-function serializeNode(node: Node): SerializedNode {
-  return {
-    id: node.id,
-    kind: node.kind,
-    name: node.name,
-    qualifiedName: node.qualifiedName,
-    filePath: node.filePath,
-    language: node.language,
-    startLine: node.startLine,
-    endLine: node.endLine,
-    signature: node.signature,
-    docstring: node.docstring,
-    isExported: node.isExported
-  }
-}
-
-function serializeEdge(edge: Edge): SerializedEdge {
-  return {
-    source: edge.source,
-    target: edge.target,
-    kind: edge.kind
-  }
-}
-
-function getSerializedGraphData(): { nodes: SerializedNode[]; edges: SerializedEdge[] } {
-  if (!graphService.isOpen()) {
-    return { nodes: [], edges: [] }
-  }
-  const { nodes, edges } = graphService.getAllNodesAndEdges()
-  return {
-    nodes: nodes.map(serializeNode),
-    edges: edges.map(serializeEdge)
-  }
-}
+// Per-connection view params — each client independently controls its own view.
+const clientParams = new Map<WebSocket, ViewParams>()
 
 let wss: WebSocketServer | null = null
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+
+function sendViewSnapshot(ws: WebSocket, params: ViewParams): void {
+  if (!graphService.isOpen()) {
+    ws.send(JSON.stringify({ type: 'view_snapshot', nodes: [], edges: [], groups: [], fileNodes: [] }))
+    return
+  }
+  const { nodes: allNodes, edges: allEdges } = graphService.getAllNodesAndEdges()
+  const result = computeView(allNodes, allEdges, params)
+  ws.send(JSON.stringify({ type: 'view_snapshot', ...result }))
+}
+
+function sendHierarchySnapshot(ws: WebSocket): void {
+  // Hierarchy snapshot — sent once on connect so the sidebar can build its
+  // file/directory tree without the client needing the full raw graph.
+  // The same fileNodes field also arrives inside each view_snapshot; this
+  // initial message lets the panel render before any view_request round-trip.
+  if (!graphService.isOpen()) {
+    ws.send(JSON.stringify({ type: 'hierarchy_snapshot', fileNodes: [] }))
+    return
+  }
+  const { nodes } = graphService.getAllNodesAndEdges({ includeSynthetic: false })
+  const fileNodes = nodes.filter((n) => n.kind === 'file' || n.kind === 'module')
+  ws.send(JSON.stringify({ type: 'hierarchy_snapshot', fileNodes }))
+}
+
+// ── Setup ─────────────────────────────────────────────────────────────────────
 
 export function setupWebSocket(server: Server): void {
   wss = new WebSocketServer({ server, path: '/ws' })
 
   wss.on('connection', (ws: WebSocket) => {
-    const { nodes, edges } = getSerializedGraphData()
-    ws.send(JSON.stringify({ type: 'graph_snapshot', nodes, edges }))
+    const params = { ...DEFAULT_VIEW_PARAMS }
+    clientParams.set(ws, params)
+
+    // Send the initial data immediately on connect.
+    sendHierarchySnapshot(ws)
+    sendViewSnapshot(ws, params)
+
+    ws.on('message', (raw: Buffer | string) => {
+      try {
+        const msg = JSON.parse(raw.toString()) as { type: string; params?: ViewParams }
+
+        if (msg.type === 'view_request' && msg.params) {
+          const newParams = msg.params
+          clientParams.set(ws, newParams)
+          sendViewSnapshot(ws, newParams)
+        }
+      } catch {
+        // Ignore malformed messages.
+      }
+    })
+
+    ws.on('close', () => {
+      clientParams.delete(ws)
+    })
   })
 }
 
+// ── Broadcast ─────────────────────────────────────────────────────────────────
+
+/**
+ * Re-send each connected client's current view snapshot after a graph change
+ * (file save, manual sync, etc.). Each client gets the view filtered to its
+ * own current params, so different clients see different scopes simultaneously.
+ */
 export function broadcastGraphUpdate(): void {
   if (!wss || !graphService.isOpen()) return
 
-  const { nodes, edges } = getSerializedGraphData()
-  const message = JSON.stringify({ type: 'graph_update', nodes, edges })
-
-  wss.clients.forEach((client) => {
+  for (const [client, params] of clientParams) {
     if (client.readyState === WebSocket.OPEN) {
-      client.send(message)
+      sendHierarchySnapshot(client)
+      sendViewSnapshot(client, params)
     }
-  })
+  }
 }

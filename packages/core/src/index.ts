@@ -111,6 +111,8 @@ export interface SearchResultItem {
 export type GraphDirection = 'LR' | 'TB'
 
 export { normalizeSignature, nodeSemanticId, semanticId } from './identity.js'
+export type { FileGroup, ViewParams, ViewResult } from './view.js'
+export { computeView, DEFAULT_VIEW_PARAMS, globToRegex } from './view.js'
 export type { ArchDiff, ArchOp, EdgeTuple, LocationHint, NodeProps, NodeSnapshot } from './diff/types.js'
 export { canonicalJson, computeDiffHash, snapshotHash } from './diff/hash.js'
 export { computeArchDiff, sortOps } from './diff/compute.js'

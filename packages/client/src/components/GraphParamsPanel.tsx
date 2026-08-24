@@ -88,18 +88,18 @@ export const GraphParamsPanel: Component = () => {
   // ── Derived ──────────────────────────────────────────────────────────────────
 
   const presentNodeKinds = createMemo<NodeKind[]>(() => {
-    // Exclude 'import' — import nodes are always elevated to `imports` edges
-    const kinds = new Set(state.nodes.filter((n) => n.kind !== 'import').map((n) => n.kind))
+    // Derive from the current view — the server excluded import nodes already.
+    const kinds = new Set(state.viewNodes.map((n) => n.kind))
     return ([...kinds] as NodeKind[]).sort()
   })
 
   const presentEdgeKinds = createMemo<EdgeKind[]>(() => {
-    const kinds = new Set(state.edges.map((e) => e.kind))
+    const kinds = new Set(state.viewEdges.map((e) => e.kind))
     return ([...kinds] as EdgeKind[]).sort()
   })
 
   const focusedNode = createMemo(() =>
-    state.focusedNodeId ? state.nodes.find((n) => n.id === state.focusedNodeId) : null
+    state.focusedNodeId ? state.viewNodes.find((n) => n.id === state.focusedNodeId) : null
   )
 
   const hasFilters = createMemo(

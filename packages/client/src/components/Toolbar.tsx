@@ -113,7 +113,7 @@ export const Toolbar: Component = () => {
           <div class="h-4 border-l border-gray-300 dark:border-gray-600" />
           <DirectionToggle />
           <div class="h-4 border-l border-gray-300 dark:border-gray-600" />
-          <Show when={state.nodes.length > 0}>
+          <Show when={state.fileNodes.length > 0}>
             <Show
               when={state.baseSnapshot}
               fallback={
@@ -145,7 +145,7 @@ export const Toolbar: Component = () => {
 
         {/* Right group — search + theme always visible; history desktop-only */}
         <div class="ml-auto flex items-center gap-2 sm:gap-3">
-          <Show when={state.nodes.length > 0}>
+          <Show when={state.fileNodes.length > 0}>
             <button
               class={`hidden sm:flex items-center gap-1 text-xs px-2 py-1 rounded border transition-colors ${
                 state.gitBarOpen
@@ -177,7 +177,7 @@ export const Toolbar: Component = () => {
       {/* ── Secondary row — mobile only ── */}
       <div class="flex sm:hidden items-center gap-2 px-3 pb-2">
         <DirectionToggle />
-        <Show when={state.nodes.length > 0}>
+        <Show when={state.fileNodes.length > 0}>
           <button
             class={`flex items-center gap-1 text-xs px-2 py-1 rounded border transition-colors ${
               state.gitBarOpen
@@ -191,7 +191,7 @@ export const Toolbar: Component = () => {
             ⏱
           </button>
         </Show>
-        <Show when={state.nodes.length > 0 && state.baseSnapshot}>
+        <Show when={state.fileNodes.length > 0 && state.baseSnapshot}>
           <span class="text-xs text-blue-500 dark:text-blue-400 font-mono">diff on</span>
         </Show>
         <div class="ml-auto flex-1 max-w-xs">

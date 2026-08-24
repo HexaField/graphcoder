@@ -1,66 +1,25 @@
 /**
  * GraphCanvas — SolidJS wrapper around ThreeRenderer.
  *
- * Maintains the same reactive interface as the old PixiJS implementation:
- *   - ELK layout effect (layout changes on visible graph / direction / group changes)
- *   - Camera fit on first layout
- *   - Scene update effect (selection, diff overlay, theme)
- *   - Pan/zoom via wheel + mouse drag
- *   - Click hit testing via RBush (no DOM overlay buttons)
+ * Reactive interface:
+ *   - ELK layout effect: re-runs when the server sends a new view_snapshot
+ *     (viewNodes / viewEdges / viewGroups) or the layout direction changes.
+ *   - Camera fit on first layout.
+ *   - Scene update effect (selection, diff overlay, theme).
+ *   - Pan/zoom via wheel + mouse drag.
+ *   - Click hit testing via RBush.
  *
- * Keyboard interaction preserved in App.tsx (H=toggle git bar, Esc=clear diff).
- * Node click: detected in onMouseDown/onClick pair via hit test.
+ * All filtering and group computation runs server-side (core computeView).
+ * This component receives pre-filtered data and forwards it straight to ELK.
  */
 
 import { type Component, createEffect, createMemo, createSignal, onCleanup, onMount, Show } from 'solid-js'
-import type { GraphNode, NodeKind } from '@graphcoder/core'
-import type { FileGroup } from '../layout/elk.js'
+import type { GraphNode } from '@graphcoder/core'
 import { layoutGraph, type LayoutResult } from '../layout/elk.js'
-import { clearFocus, selectNode, state, visibleGraph } from '../state/store.js'
+import { clearFocus, selectNode, state } from '../state/store.js'
 import { resolvedTheme } from '../state/theme.js'
 import type { DiffOverlay } from './ThreeRenderer.js'
 import { ThreeRenderer } from './ThreeRenderer.js'
-
-// ── Contract group definitions (unchanged from PixiJS version) ────────────────
-
-interface ContractGroupDef {
-  id: string
-  label: string
-  color: string
-  test: (node: GraphNode) => boolean
-}
-
-const ROUTE_KINDS: NodeKind[] = ['route']
-
-const CONTRACT_GROUPS: ContractGroupDef[] = [
-  {
-    id: '__contract_rest',
-    label: 'REST API',
-    color: '#10b981',
-    test: (n) =>
-      (ROUTE_KINDS as string[]).includes(n.kind) ||
-      /\.(controller|router|route|handler|endpoint)\.[jt]sx?$/i.test(n.filePath ?? '') ||
-      /[\\/](controllers?|routes?|handlers?|endpoints?)[\\/]/i.test(n.filePath ?? '')
-  },
-  {
-    id: '__contract_ws',
-    label: 'WebSocket',
-    color: '#06b6d4',
-    test: (n) =>
-      /\.(gateway|socket|hub|ws)\.[jt]sx?$/i.test(n.filePath ?? '') ||
-      /[\\/](gateways?|sockets?|hubs?)[\\/]/i.test(n.filePath ?? '')
-  },
-  {
-    id: '__contract_graphql',
-    label: 'GraphQL',
-    color: '#e879f9',
-    test: (n) =>
-      /\.(resolver|typedef)\.[jt]sx?$/i.test(n.filePath ?? '') ||
-      /\.(graphql|gql)$/i.test(n.filePath ?? '') ||
-      /[\\/](resolvers?|graphql)[\\/]/i.test(n.filePath ?? '') ||
-      /(Query|Mutation|Subscription|Resolver)$/.test(n.name)
-  }
-]
 
 // ── GraphCanvas ───────────────────────────────────────────────────────────────
 
@@ -81,8 +40,7 @@ export const GraphCanvas: Component = () => {
 
   // ── Reactive memos ──────────────────────────────────────────────────────────
 
-  const visible = createMemo(visibleGraph)
-  const nodeById = createMemo(() => new Map(state.nodes.map((n) => [n.id, n])))
+  const nodeById = createMemo(() => new Map(state.viewNodes.map((n) => [n.id, n])))
 
   const diffOverlay = createMemo((): DiffOverlay => {
     const diff = state.currentDiff
@@ -98,224 +56,24 @@ export const GraphCanvas: Component = () => {
     return { added, modified, moved }
   })
 
-  /**
-   * Unified compound group memo — composes file, class, contract, and package
-   * grouping simultaneously.
-   *
-   * Returns `{ groups, collapsedChildIds, collapsedChildToGroup }` where:
-   *   - `collapsedChildIds` — node IDs that live inside collapsed containers;
-   *     excluded from the flat node list passed to ELK.
-   *   - `collapsedChildToGroup` — maps each collapsed child node ID to the
-   *     container node ID that represents it; used for edge promotion so that
-   *     inter-group edges still render even when both endpoints are collapsed.
-   *
-   * Returns `undefined` when no grouping is active.
-   */
-  const combinedGroups = createMemo(
-    ():
-      | { groups: FileGroup[]; collapsedChildIds: Set<string>; collapsedChildToGroup: Map<string, string> }
-      | undefined => {
-      const gf = state.groupByFile
-      const gc = state.groupByClass
-      const gct = state.groupByContract
-      const gp = state.groupByPackage
-
-      if (!gf && !gc && !gct && !gp) return undefined
-
-      function extractPackagePath(fp?: string): string | undefined {
-        if (!fp) return undefined
-        const m = fp.match(/^(packages\/[^/]+)/)
-        return m?.[1]
-      }
-
-      const visibleNodeIds = new Set(visible().nodes.map((n) => n.id))
-
-      const containsChildren = new Map<string, string[]>()
-      for (const e of state.edges) {
-        if (e.kind !== 'contains') continue
-        let ch = containsChildren.get(e.source)
-        if (!ch) containsChildren.set(e.source, (ch = []))
-        ch.push(e.target)
-      }
-
-      function collectDescendants(nodeId: string, out: Set<string>): void {
-        for (const child of containsChildren.get(nodeId) ?? []) {
-          out.add(child)
-          collectDescendants(child, out)
-        }
-      }
-
-      function fileLabel(fn: GraphNode): string {
-        const name = fn.name
-        return name && !name.includes('/') ? name : ((fn.filePath ?? name ?? fn.id).split('/').pop() ?? fn.id)
-      }
-
-      /**
-       * Check whether a file group at the given filePath should show its children
-       * expanded. Uses prefix matching: a dir or package path in expandedGroups
-       * expands all files under it.
-       *
-       * Groups without a filePath (contract groups, package-only groups) always
-       * expand — they have no HierarchyPanel eye-button link.
-       */
-      function isGroupExpanded(filePath?: string): boolean {
-        if (!filePath) return true
-        return state.expandedGroups.some((prefix) => filePath === prefix || filePath.startsWith(prefix + '/'))
-      }
-
-      const groups: FileGroup[] = []
-      const claimedByContract = new Set<string>()
-      // Nodes inside collapsed group containers — excluded from the ELK node list.
-      const collapsedChildIds = new Set<string>()
-      // Maps each collapsed child node ID → its group container ID, for edge promotion.
-      const collapsedChildToGroup = new Map<string, string>()
-
-      // 1. Contract groups (no collapse support — no HierarchyPanel 1-1 link)
-      if (gct) {
-        const visibleNodes = visible().nodes
-        const assigned = new Set<string>()
-        for (const def of CONTRACT_GROUPS) {
-          const childIds = visibleNodes.filter((n) => !assigned.has(n.id) && def.test(n)).map((n) => n.id)
-          if (childIds.length === 0) continue
-          childIds.forEach((id) => {
-            assigned.add(id)
-            claimedByContract.add(id)
-          })
-          groups.push({ id: def.id, label: def.label, color: def.color, childIds })
-        }
-      }
-
-      // 2a. File groups (with optional class sub-groups)
-      if (gf) {
-        const fileNodes = state.nodes.filter((n) => n.kind === 'file')
-        for (const fn of fileNodes) {
-          const allDesc = new Set<string>()
-          collectDescendants(fn.id, allDesc)
-          for (const id of claimedByContract) allDesc.delete(id)
-
-          const expanded = isGroupExpanded(fn.filePath)
-
-          if (!expanded) {
-            // Collapsed: exclude all visible descendants from ELK, push empty container.
-            const visibleChildIds = [...allDesc].filter((id) => visibleNodeIds.has(id))
-            if (visibleChildIds.length === 0) continue // nothing to show or collapse
-            for (const id of visibleChildIds) {
-              collapsedChildIds.add(id)
-              collapsedChildToGroup.set(id, fn.id)
-            }
-            groups.push({
-              id: fn.id,
-              label: fileLabel(fn),
-              childIds: [],
-              childGroups: undefined,
-              filePath: fn.filePath,
-              packagePath: gp ? extractPackagePath(fn.filePath) : undefined,
-              collapsed: true
-            })
-            continue
-          }
-
-          // Expanded: build child lists as normal.
-          if (gc) {
-            const childGroups: FileGroup[] = []
-            const assignedToClass = new Set<string>()
-            for (const classId of containsChildren.get(fn.id) ?? []) {
-              const classNode = state.nodes.find((n) => n.id === classId && n.kind === 'class')
-              if (!classNode) continue
-              const classChildIds = (containsChildren.get(classId) ?? []).filter(
-                (id) => visibleNodeIds.has(id) && !claimedByContract.has(id)
-              )
-              if (classChildIds.length === 0) continue
-              classChildIds.forEach((id) => assignedToClass.add(id))
-              childGroups.push({ id: classId, label: classNode.name, color: '#818cf8', childIds: classChildIds })
-            }
-            const leafIds = [...allDesc].filter((id) => visibleNodeIds.has(id) && !assignedToClass.has(id))
-            if (leafIds.length === 0 && childGroups.length === 0) continue
-            groups.push({
-              id: fn.id,
-              label: fileLabel(fn),
-              childIds: leafIds,
-              childGroups: childGroups.length > 0 ? childGroups : undefined,
-              filePath: fn.filePath,
-              packagePath: gp ? extractPackagePath(fn.filePath) : undefined
-            })
-          } else {
-            const childIds = [...allDesc].filter((id) => visibleNodeIds.has(id))
-            if (childIds.length === 0) continue
-            groups.push({
-              id: fn.id,
-              label: fileLabel(fn),
-              childIds,
-              filePath: fn.filePath,
-              packagePath: gp ? extractPackagePath(fn.filePath) : undefined
-            })
-          }
-        }
-      } else if (gc) {
-        // 2b. Class groups only (collapse keyed to the class's filePath)
-        const classNodes = state.nodes.filter((n) => n.kind === 'class')
-        for (const cn of classNodes) {
-          const childIds = (containsChildren.get(cn.id) ?? []).filter(
-            (id) => visibleNodeIds.has(id) && !claimedByContract.has(id)
-          )
-          if (childIds.length === 0) continue
-          const expanded = isGroupExpanded(cn.filePath)
-          if (!expanded) {
-            for (const id of childIds) {
-              collapsedChildIds.add(id)
-              collapsedChildToGroup.set(id, cn.id)
-            }
-            groups.push({
-              id: cn.id,
-              label: cn.name,
-              filePath: cn.filePath,
-              color: '#818cf8',
-              childIds: [],
-              collapsed: true
-            })
-          } else {
-            groups.push({ id: cn.id, label: cn.name, filePath: cn.filePath, color: '#818cf8', childIds })
-          }
-        }
-      }
-
-      // 3. Package-only groups (no collapse — no filePath link)
-      if (gp && !gf) {
-        const visibleNodes = visible().nodes
-        const pkgMap = new Map<string, string[]>()
-        for (const n of visibleNodes) {
-          if (claimedByContract.has(n.id)) continue
-          const pkg = extractPackagePath(n.filePath)
-          if (!pkg) continue
-          if (!pkgMap.has(pkg)) pkgMap.set(pkg, [])
-          pkgMap.get(pkg)!.push(n.id)
-        }
-        for (const [pkg, childIds] of pkgMap) {
-          if (childIds.length === 0) continue
-          groups.push({ id: `__pkg_${pkg.split('/').pop() ?? pkg}`, label: pkg.split('/').pop() ?? pkg, childIds })
-        }
-      }
-
-      return groups.length > 0 ? { groups, collapsedChildIds, collapsedChildToGroup } : undefined
-    }
-  )
-
   // ── ELK layout effect ───────────────────────────────────────────────────────
+  // Fires when the server sends a new view_snapshot or the direction changes.
+  // All filtering, group building, collapse logic, and edge promotion ran
+  // server-side — this effect just calls ELK with what it receives.
 
   const [layout, setLayout] = createSignal<LayoutResult | null>(null)
 
-  // Hard cap: prevent ELK worker from OOMing on very large expanded graphs.
-  // Collapsed groups are cheap (one placeholder node per group); OOM only
-  // happens when many groups are expanded simultaneously.
+  // Safety cap: prevent the ELK worker from OOMing if the server somehow sends
+  // a very large view. Normal usage stays well below this threshold because
+  // collapsed groups are represented as placeholder nodes (O(files) not
+  // O(files × symbols)).
   const MAX_LAYOUT_NODES = 1000
 
   createEffect(async () => {
-    const { nodes, edges } = visible()
+    const nodes = state.viewNodes
+    const edges = state.viewEdges
+    const groups = state.viewGroups.length > 0 ? state.viewGroups : undefined
     const direction = state.graphDirection
-    const grouped = combinedGroups()
-    const groups = grouped?.groups
-    const collapsedChildIds = grouped?.collapsedChildIds
-    const collapsedChildToGroup = grouped?.collapsedChildToGroup ?? new Map<string, string>()
 
     if (nodes.length === 0) {
       setLayout(null)
@@ -323,45 +81,17 @@ export const GraphCanvas: Component = () => {
       return
     }
 
-    // Exclude child nodes that belong inside collapsed group containers —
-    // they must not appear as free-floating ELK nodes outside their container.
-    const layoutNodes =
-      collapsedChildIds && collapsedChildIds.size > 0 ? nodes.filter((n) => !collapsedChildIds.has(n.id)) : nodes
-
-    // Hard cap: bail before calling ELK if the node count would OOM the worker.
-    // The previous layout remains visible while the error message guides the user.
-    if (layoutNodes.length > MAX_LAYOUT_NODES) {
-      setLayoutError(
-        `Too many nodes expanded (${layoutNodes.length}, limit ${MAX_LAYOUT_NODES}). Collapse some groups to continue.`
-      )
+    if (nodes.length > MAX_LAYOUT_NODES) {
+      setLayoutError(`Too many nodes to lay out (${nodes.length}, limit ${MAX_LAYOUT_NODES}). Collapse some groups.`)
       setIsLayouting(false)
       return
-    }
-
-    // Edge promotion: replace collapsed-child endpoint IDs with their group
-    // container ID so that inter-group connections still render as lines
-    // between container boxes even when both endpoints are collapsed.
-    let layoutEdges = edges
-    if (collapsedChildToGroup.size > 0) {
-      const seen = new Set<string>()
-      const promoted: typeof edges = []
-      for (const e of edges) {
-        const src = collapsedChildToGroup.get(e.source) ?? e.source
-        const tgt = collapsedChildToGroup.get(e.target) ?? e.target
-        if (src === tgt) continue // no self-loops after promotion
-        const key = `${src}|${tgt}|${e.kind}`
-        if (seen.has(key)) continue // deduplicate multi-edge promotions
-        seen.add(key)
-        promoted.push(src === e.source && tgt === e.target ? e : { ...e, source: src, target: tgt })
-      }
-      layoutEdges = promoted
     }
 
     setIsLayouting(true)
     setLayoutError(null)
     needsFit = true
     try {
-      const result = await layoutGraph(layoutNodes, layoutEdges, direction, groups)
+      const result = await layoutGraph(nodes, edges, direction, groups)
       setLayout(result)
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err)
@@ -373,7 +103,6 @@ export const GraphCanvas: Component = () => {
   })
 
   // ── Scene update effect ─────────────────────────────────────────────────────
-  // Fires on layout, selection, diff, or theme change.
 
   createEffect(() => {
     if (!rendererReady() || !r3) return
@@ -387,7 +116,6 @@ export const GraphCanvas: Component = () => {
 
     if (!l) return
 
-    // Auto-fit on first layout (or after re-layout)
     if (needsFit) {
       needsFit = false
       const fit = r3.fitLayout(l.width, l.height)
@@ -441,178 +169,111 @@ export const GraphCanvas: Component = () => {
         }
       }
     })
-    ro.observe(wrapperRef)
-
-    // ── Wheel zoom ─────────────────────────────────────────────────────────
-    const handleWheel = (e: WheelEvent) => {
-      e.preventDefault()
-      const rect = canvasRef!.getBoundingClientRect()
-      const cx = e.clientX - rect.left
-      const cy = e.clientY - rect.top
-      const sens = e.deltaMode === 0 ? 0.002 : 0.08
-      const factor = Math.exp(-e.deltaY * sens)
-      setCam((c) => ({
-        zoom: c.zoom * factor,
-        panX: cx - (cx - c.panX) * factor,
-        panY: cy - (cy - c.panY) * factor
-      }))
-    }
-    wrapperRef.addEventListener('wheel', handleWheel, { passive: false })
-
-    // ── Touch: single-finger pan, two-finger pinch-zoom, tap-to-select ─────
-    let activeTouches: Touch[] = []
-    let pinchDist = 0
-    let touchMoved = false
-
-    const handleTouchStart = (e: TouchEvent) => {
-      e.preventDefault()
-      activeTouches = Array.from(e.touches)
-      touchMoved = false
-      if (activeTouches.length === 2) {
-        pinchDist = Math.hypot(
-          activeTouches[0].clientX - activeTouches[1].clientX,
-          activeTouches[0].clientY - activeTouches[1].clientY
-        )
-      }
-    }
-
-    const handleTouchMove = (e: TouchEvent) => {
-      e.preventDefault()
-      const curr = Array.from(e.touches)
-      if (curr.length === 1 && activeTouches.length >= 1) {
-        const dx = curr[0].clientX - activeTouches[0].clientX
-        const dy = curr[0].clientY - activeTouches[0].clientY
-        if (Math.abs(dx) > 3 || Math.abs(dy) > 3) touchMoved = true
-        setCam((c) => ({ ...c, panX: c.panX + dx, panY: c.panY + dy }))
-      } else if (curr.length === 2 && activeTouches.length >= 2) {
-        touchMoved = true
-        const newDist = Math.hypot(curr[0].clientX - curr[1].clientX, curr[0].clientY - curr[1].clientY)
-        if (pinchDist > 0) {
-          const factor = newDist / pinchDist
-          const rect = canvasRef!.getBoundingClientRect()
-          const cx = (curr[0].clientX + curr[1].clientX) / 2 - rect.left
-          const cy = (curr[0].clientY + curr[1].clientY) / 2 - rect.top
-          setCam((c) => ({
-            zoom: c.zoom * factor,
-            panX: cx - (cx - c.panX) * factor,
-            panY: cy - (cy - c.panY) * factor
-          }))
-        }
-        pinchDist = newDist
-      }
-      activeTouches = curr
-    }
-
-    const handleTouchEnd = (e: TouchEvent) => {
-      // Tap-to-select: single touch, minimal movement, all fingers lifted
-      if (!touchMoved && activeTouches.length === 1 && e.touches.length === 0) {
-        const touch = activeTouches[0]
-        const rect = canvasRef!.getBoundingClientRect()
-        const sx = touch.clientX - rect.left
-        const sy = touch.clientY - rect.top
-        const { panX, panY, zoom } = cam()
-        if (r3) {
-          const nodeId = r3.hitTest(sx, sy, panX, panY, zoom)
-          if (nodeId) void selectNode(nodeId)
-          else clearFocus()
-        }
-      }
-      activeTouches = Array.from(e.touches)
-      if (activeTouches.length === 0) touchMoved = false
-    }
-
-    wrapperRef.addEventListener('touchstart', handleTouchStart, { passive: false })
-    wrapperRef.addEventListener('touchmove', handleTouchMove, { passive: false })
-    wrapperRef.addEventListener('touchend', handleTouchEnd)
-
-    onCleanup(() => {
-      ro.disconnect()
-      wrapperRef?.removeEventListener('wheel', handleWheel)
-      wrapperRef?.removeEventListener('touchstart', handleTouchStart)
-      wrapperRef?.removeEventListener('touchmove', handleTouchMove)
-      wrapperRef?.removeEventListener('touchend', handleTouchEnd)
-      window.removeEventListener('mousemove', onWindowMouseMove)
-      window.removeEventListener('mouseup', onWindowMouseUp)
-      renderer.dispose()
-      r3 = null
-    })
+    if (wrapperRef) ro.observe(wrapperRef)
+    onCleanup(() => ro.disconnect())
   })
 
-  // ── Pan via mouse drag ──────────────────────────────────────────────────────
+  // ── Pan / zoom ──────────────────────────────────────────────────────────────
 
-  let dragMoved = false // distinguish drag from click
+  let isPanning = false
+  let panStart = { x: 0, y: 0 }
+  let camAtPanStart = { panX: 0, panY: 0, zoom: 1 }
+  let didPan = false
 
-  const onWindowMouseMove = (e: MouseEvent) => {
-    dragMoved = true
-    setCam((c) => ({ ...c, panX: c.panX + e.movementX, panY: c.panY + e.movementY }))
-  }
-
-  const onWindowMouseUp = () => {
-    window.removeEventListener('mousemove', onWindowMouseMove)
-    window.removeEventListener('mouseup', onWindowMouseUp)
-  }
-
-  const handleMouseDown = (e: MouseEvent) => {
-    if (e.button !== 0) return
-    dragMoved = false
-    window.addEventListener('mousemove', onWindowMouseMove)
-    window.addEventListener('mouseup', onWindowMouseUp)
-  }
-
-  // ── Click: hit-test via RBush ───────────────────────────────────────────────
-
-  const handleClick = (e: MouseEvent) => {
-    if (dragMoved) return // suppress click at end of a drag
-    if (!r3) {
-      clearFocus()
-      return
-    }
-    const rect = canvasRef!.getBoundingClientRect()
-    const sx = e.clientX - rect.left
-    const sy = e.clientY - rect.top
+  const onWheel = (e: WheelEvent) => {
+    e.preventDefault()
     const { panX, panY, zoom } = cam()
-    const nodeId = r3.hitTest(sx, sy, panX, panY, zoom)
-    if (nodeId) {
-      void selectNode(nodeId)
+    const rect = (e.currentTarget as HTMLElement).getBoundingClientRect()
+    const mx = e.clientX - rect.left
+    const my = e.clientY - rect.top
+    const delta = e.deltaY < 0 ? 1.1 : 1 / 1.1
+    const newZoom = Math.max(0.05, Math.min(50, zoom * delta))
+    const newPanX = mx - (mx - panX) * (newZoom / zoom)
+    const newPanY = my - (my - panY) * (newZoom / zoom)
+    setCam({ panX: newPanX, panY: newPanY, zoom: newZoom })
+  }
+
+  const onMouseDown = (e: MouseEvent) => {
+    if (e.button !== 0) return
+    isPanning = true
+    didPan = false
+    panStart = { x: e.clientX, y: e.clientY }
+    camAtPanStart = cam()
+  }
+
+  const onMouseMove = (e: MouseEvent) => {
+    if (!isPanning) return
+    const dx = e.clientX - panStart.x
+    const dy = e.clientY - panStart.y
+    if (Math.abs(dx) > 2 || Math.abs(dy) > 2) didPan = true
+    setCam({
+      panX: camAtPanStart.panX + dx,
+      panY: camAtPanStart.panY + dy,
+      zoom: camAtPanStart.zoom
+    })
+  }
+
+  const onMouseUp = (e: MouseEvent) => {
+    if (e.button !== 0) return
+    const wasPanning = isPanning && didPan
+    isPanning = false
+    didPan = false
+    if (wasPanning || !r3) return
+
+    // Click — hit-test against the layout
+    const l = layout()
+    if (!l) return
+    const rect = (e.currentTarget as HTMLElement).getBoundingClientRect()
+    const mx = e.clientX - rect.left
+    const my = e.clientY - rect.top
+    const { panX, panY, zoom } = cam()
+    const hit = r3.hitTest(mx, my, panX, panY, zoom)
+    if (hit) {
+      selectNode(hit)
     } else {
       clearFocus()
     }
   }
 
-  // ── Render ───────────────────────────────────────────────────────────────────
+  // ── Render ──────────────────────────────────────────────────────────────────
 
   return (
     <div
       ref={wrapperRef}
-      class="relative w-full h-full overflow-hidden select-none"
-      data-testid="graph-canvas"
-      onMouseDown={handleMouseDown}
+      class="relative flex-1 overflow-hidden bg-slate-100 dark:bg-gray-950 select-none"
+      onWheel={onWheel}
+      onMouseDown={onMouseDown}
+      onMouseMove={onMouseMove}
+      onMouseUp={onMouseUp}
     >
+      <canvas ref={canvasRef} class="w-full h-full block" />
+
+      {/* Layout loading spinner */}
       <Show when={isLayouting()}>
-        <div class="absolute inset-0 flex items-center justify-center text-gray-500 dark:text-gray-400 z-10 pointer-events-none">
-          <span>Computing layout…</span>
-        </div>
-      </Show>
-      <Show when={state.nodes.length === 0 && !state.isLoading}>
-        <div class="absolute inset-0 flex items-center justify-center text-gray-400 dark:text-gray-500 pointer-events-none">
-          <span>No project open. Enter a project path above.</span>
+        <div class="absolute top-2 left-1/2 -translate-x-1/2 bg-white/80 dark:bg-gray-900/80 text-xs text-gray-500 dark:text-gray-400 px-3 py-1 rounded-full shadow">
+          Laying out…
         </div>
       </Show>
 
-      <Show when={layoutError() !== null}>
-        {(err) => (
-          <div class="absolute bottom-0 left-0 right-0 z-10 px-4 py-2 bg-red-50 dark:bg-red-950 border-t border-red-200 dark:border-red-800 text-xs text-red-800 dark:text-red-300 pointer-events-none flex items-center gap-2">
-            <span>⚠ Layout error:</span>
-            <span class="truncate">{err()}</span>
+      {/* Layout error */}
+      <Show when={layoutError()}>
+        {(msg) => (
+          <div class="absolute top-2 left-1/2 -translate-x-1/2 max-w-sm bg-red-100 dark:bg-red-900/60 text-red-700 dark:text-red-300 text-xs px-3 py-2 rounded shadow text-center">
+            {msg()}
           </div>
         )}
       </Show>
 
-      {/*
-        data-testid="graph-svg" kept for E2E backward compatibility.
-        onClick replaces the DOM button overlay for node selection.
-      */}
-      <canvas ref={canvasRef} class="block w-full h-full" data-testid="graph-svg" onClick={handleClick} />
+      {/* Empty state */}
+      <Show when={!isLayouting() && state.viewNodes.length === 0 && !state.isLoading}>
+        <div class="absolute inset-0 flex items-center justify-center text-gray-400 dark:text-gray-600 text-sm pointer-events-none">
+          {state.projectRoot ? 'No nodes match the current filters.' : 'Open a project to get started.'}
+        </div>
+      </Show>
     </div>
   )
 }
+
+// Needed by elk.ts hitTest — keep the GraphNode type accessible without
+// re-exporting from a component file.
+export type { GraphNode }

@@ -9,9 +9,13 @@ export interface DiffState {
   currentDiff: ArchDiff | null
 }
 
-/** Capture the current graph as the diff baseline. */
+/**
+ * Capture the current view as the diff baseline.
+ * Diffs operate on the view (filtered + grouped) not the raw graph, so they
+ * show changes relevant to what the user currently sees.
+ */
 export function captureSnapshot(): void {
-  setState('baseSnapshot', { nodes: [...state.nodes], edges: [...state.edges] })
+  setState('baseSnapshot', { nodes: [...state.viewNodes], edges: [...state.viewEdges] })
   setState('currentDiff', null)
   // Clear any temporal range label — switching to snapshot mode.
   setState('temporalRange', null)
@@ -28,8 +32,7 @@ export function clearDiff(): void {
  * Recompute the diff against the stored baseline using the supplied nodes and
  * edges. No-ops when no baseline has been captured.
  *
- * Called internally by project, view, and WebSocket handlers whenever the
- * graph changes — not part of the public API surface.
+ * Called internally by project and WebSocket handlers whenever the view changes.
  */
 export function recomputeDiff(nodes: GraphNode[], edges: GraphEdge[]): void {
   if (!state.baseSnapshot) return

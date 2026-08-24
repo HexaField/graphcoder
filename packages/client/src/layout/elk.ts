@@ -4,7 +4,7 @@ import type { ElkExtendedEdge, ElkNode } from 'elkjs/lib/elk-api.js'
 // gives us a constructor whose instances are real Web Workers — ELK layout
 // then runs off the main thread entirely.
 import ELKWorker from 'elkjs/lib/elk-worker.min.js?worker'
-import type { GraphDirection, GraphEdge, GraphNode } from '@graphcoder/core'
+import type { FileGroup, GraphDirection, GraphEdge, GraphNode } from '@graphcoder/core'
 
 const elk = new ELK({ workerFactory: () => new ELKWorker() })
 
@@ -63,49 +63,9 @@ export interface LayoutEdge {
   }>
 }
 
-/**
- * A group fed to layoutGraph to enable compound-node layout.
- *
- * Top-level groups (passed in the fileGroups array):
- *   - With filePath → nested inside a dir compound (file grouping, class grouping)
- *   - Without filePath → direct root compound (contract grouping)
- *
- * childGroups (optional sub-compound nesting, one level deep):
- *   - Class containers inside file containers use this.
- *   - childGroups inherit their parent's filePath for dir placement.
- */
-export interface FileGroup {
-  /** ELK compound node id. */
-  id: string
-  /** Display label for the container box. */
-  label: string
-  /** Leaf node ids directly inside this compound (not in any childGroup). */
-  childIds: string[]
-  /** Optional one-level-deep sub-compounds (e.g. class containers inside a file). */
-  childGroups?: FileGroup[]
-  /**
-   * Full file path — determines directory grouping.
-   * When omitted the group becomes a flat root-level compound.
-   */
-  filePath?: string
-  /**
-   * Optional accent color (CSS hex, e.g. '#10b981').
-   * Passed through to FileContainer for coloured-border rendering.
-   */
-  color?: string
-  /**
-   * Package path (e.g. 'packages/client') — triggers 4-tier layout when combined
-   * with filePath. File groups with this set get wrapped in a package compound.
-   * Omit for flat groups (contract groups, package-only groups).
-   */
-  packagePath?: string
-  /**
-   * True when this group is collapsed in the hierarchy view.
-   * `childIds` will be empty; ELK renders the container as a fixed-size placeholder
-   * so that edges can still connect to and from it.
-   */
-  collapsed?: boolean
-}
+// FileGroup is defined in @graphcoder/core and imported at the top of this file.
+// It is re-exported here so callers that import from elk.ts continue to work.
+export type { FileGroup }
 
 /** A rendered container box returned from a grouped layout. */
 export interface FileContainer {

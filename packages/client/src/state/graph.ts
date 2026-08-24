@@ -1,16 +1,25 @@
-import type { GraphEdge, GraphNode } from '@graphcoder/core'
+import type { FileGroup, GraphEdge, GraphNode } from '@graphcoder/core'
 
 // ── Graph ─────────────────────────────────────────────────────────────────────
 
 /**
- * Graph state — nodes and edges are managed by the project, view, and
- * WebSocket sections. This section owns the type definition and re-exports
- * the core store for consumers that need raw graph access without pulling in
- * unrelated sections.
+ * Graph state — view snapshots received from the server.
+ *
+ * The client never stores the raw graph; the server applies all filtering
+ * and group computation via computeView() and sends only what ELK needs.
  */
 export interface GraphState {
-  nodes: GraphNode[]
-  edges: GraphEdge[]
+  /** Layout-ready symbol nodes — server has excluded collapsed children. */
+  viewNodes: GraphNode[]
+  /** Layout-ready edges — server has promoted collapsed-group endpoints. */
+  viewEdges: GraphEdge[]
+  /** ELK compound group hierarchy — ready to pass straight to layoutGraph(). */
+  viewGroups: FileGroup[]
+  /**
+   * All file/module nodes in the project — used by the HierarchyPanel sidebar
+   * to build the directory/package tree. Independent of view params.
+   */
+  fileNodes: GraphNode[]
 }
 
 export { state, setState } from './core.js'

@@ -1,4 +1,4 @@
-import type { GraphEdge, GraphNode, ProjectStats } from '@graphcoder/core'
+import type { FileGroup, GraphEdge, GraphNode, ProjectStats, ViewParams } from '@graphcoder/core'
 import * as api from '../api/graph.js'
 import { state, setState } from './core.js'
 import { recomputeDiff } from './diff.js'
@@ -14,23 +14,25 @@ export interface ProjectState {
 }
 
 /**
- * Open a project by root path. Clears any stale graph data before fetching
- * so the canvas never shows a previous project's layout while loading.
+ * Open a project by root path. Clears any stale view data before calling the
+ * server, so the canvas never shows a previous project's layout while loading.
+ * The actual graph data arrives via the WebSocket view_snapshot after the server
+ * opens the project and broadcasts.
  */
 export async function openProject(projectRoot: string): Promise<void> {
-  setState('nodes', [])
-  setState('edges', [])
+  setState('viewNodes', [])
+  setState('viewEdges', [])
+  setState('viewGroups', [])
+  setState('fileNodes', [])
   setState('isLoading', true)
   setState('error', null)
   try {
     const result = await api.openProject(projectRoot)
     setState('projectRoot', result.projectRoot)
     setState('projectStats', result.stats)
-    const graph = await api.fetchGraph()
-    setState('nodes', graph.nodes)
-    setState('edges', graph.edges)
-    recomputeDiff(graph.nodes, graph.edges)
     syncUrlParams()
+    // The server broadcasts view_snapshot + hierarchy_snapshot to all connected
+    // clients after opening the project, so no explicit fetch is needed here.
   } catch (e) {
     setState('error', e instanceof Error ? e.message : 'Failed to open project')
   } finally {
@@ -49,32 +51,45 @@ export async function initFromUrl(): Promise<void> {
   if (projectParam) {
     await openProject(projectParam)
   } else {
-    // No URL param — check whether the server already has a project open
+    // No URL param — check whether the server already has a project open.
+    // If so, request its current view; the WS view_snapshot will deliver the data.
     try {
       const result = await api.fetchCurrentProject()
       if (result.open && result.projectRoot) {
         setState('projectRoot', result.projectRoot)
         if (result.stats) setState('projectStats', result.stats)
-        const graph = await api.fetchGraph()
-        setState('nodes', graph.nodes)
-        setState('edges', graph.edges)
-        recomputeDiff(graph.nodes, graph.edges)
         syncUrlParams()
+        // sendViewRequest() is called by the view-params effect in App.tsx as
+        // soon as the WebSocket is open, so no explicit call is needed here.
       }
     } catch {
-      // Server has no project open yet — not an error
+      // Server has no project open yet — not an error.
     }
   }
 }
 
 // ── WebSocket ─────────────────────────────────────────────────────────────────
 
+// Module-level WS reference — sendViewRequest() uses this to push new params.
+let activeWs: WebSocket | null = null
 let wsReconnectTimer: ReturnType<typeof setTimeout> | null = null
 
 /**
+ * Send the current view params to the server.
+ * The server recomputes the view and sends back a view_snapshot.
+ * No-ops if the WebSocket is not yet open.
+ */
+export function sendViewRequest(params: ViewParams): void {
+  if (activeWs?.readyState === WebSocket.OPEN) {
+    activeWs.send(JSON.stringify({ type: 'view_request', params }))
+  }
+}
+
+/**
  * Open a WebSocket connection to the server and keep it alive with exponential
- * reconnect. Updates the graph store on every `graph_snapshot` / `graph_update`
- * message.
+ * reconnect. Handles:
+ *   - view_snapshot → updates viewNodes / viewEdges / viewGroups
+ *   - hierarchy_snapshot → updates fileNodes
  */
 export function connectWebSocket(): void {
   const wsUrl = import.meta.env.VITE_WS_URL ?? `ws://${window.location.hostname}:3001/ws`
@@ -86,6 +101,13 @@ export function connectWebSocket(): void {
     }
 
     const ws = new WebSocket(wsUrl)
+    activeWs = ws
+
+    ws.addEventListener('open', () => {
+      // The server sends view_snapshot + hierarchy_snapshot on connect using the
+      // DEFAULT_VIEW_PARAMS. The view-params effect in App.tsx then fires with
+      // the actual persisted params and sends a view_request to refine it.
+    })
 
     ws.addEventListener('message', (event: MessageEvent<string>) => {
       try {
@@ -93,20 +115,28 @@ export function connectWebSocket(): void {
           type: string
           nodes?: GraphNode[]
           edges?: GraphEdge[]
+          groups?: FileGroup[]
+          fileNodes?: GraphNode[]
         }
-        if (data.type === 'graph_snapshot' || data.type === 'graph_update') {
-          if (data.nodes) setState('nodes', data.nodes)
-          if (data.edges) setState('edges', data.edges)
-          if (data.nodes || data.edges) {
-            recomputeDiff(data.nodes ?? state.nodes, data.edges ?? state.edges)
-          }
+
+        if (data.type === 'view_snapshot') {
+          if (data.nodes !== undefined) setState('viewNodes', data.nodes)
+          if (data.edges !== undefined) setState('viewEdges', data.edges)
+          if (data.groups !== undefined) setState('viewGroups', data.groups)
+          if (data.fileNodes !== undefined) setState('fileNodes', data.fileNodes)
+          recomputeDiff(data.nodes ?? state.viewNodes, data.edges ?? state.viewEdges)
+        }
+
+        if (data.type === 'hierarchy_snapshot') {
+          if (data.fileNodes !== undefined) setState('fileNodes', data.fileNodes)
         }
       } catch {
-        // ignore malformed messages
+        // Ignore malformed messages.
       }
     })
 
     ws.addEventListener('close', () => {
+      activeWs = null
       wsReconnectTimer = setTimeout(connect, 2000)
     })
 

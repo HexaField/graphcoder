@@ -6,7 +6,8 @@ import { GraphParamsPanel } from './components/GraphParamsPanel.js'
 import { HierarchyPanel } from './components/HierarchyPanel.js'
 import { NodeInspector } from './components/NodeInspector.js'
 import { Toolbar } from './components/Toolbar.js'
-import { clearDiff, connectWebSocket, initFromUrl, state, toggleGitBar } from './state/store.js'
+import type { ViewParams } from '@graphcoder/core'
+import { clearDiff, connectWebSocket, initFromUrl, sendViewRequest, state, toggleGitBar } from './state/store.js'
 // Import theme module to ensure the root-level createRoot runs on startup
 import './state/theme.js'
 
@@ -56,6 +57,25 @@ export default function App() {
     }
   })
 
+  // Reactive effect: send a view_request whenever any view param changes.
+  // This fires once on mount (with the locally-persisted params) and again
+  // on every toggle, hide, expand, or pattern change.
+  createEffect(() => {
+    const params: ViewParams = {
+      hiddenNodeKinds: state.hiddenNodeKinds,
+      hiddenEdgeKinds: state.hiddenEdgeKinds,
+      hiddenPaths: state.hiddenPaths,
+      excludePatterns: state.excludePatterns,
+      groupByFile: state.groupByFile,
+      groupByClass: state.groupByClass,
+      groupByContract: state.groupByContract,
+      groupByPackage: state.groupByPackage,
+      expandedGroups: state.expandedGroups,
+      focusedNodeId: state.focusedNodeId
+    }
+    sendViewRequest(params)
+  })
+
   onMount(() => {
     connectWebSocket()
     void initFromUrl()
@@ -74,7 +94,7 @@ export default function App() {
       switch (e.key) {
         case 'H':
         case 'h':
-          if (state.nodes.length > 0) void toggleGitBar()
+          if (state.fileNodes.length > 0) void toggleGitBar()
           break
         case 'Escape':
           if (hierarchyOpen() && isMobile()) {

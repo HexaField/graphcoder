@@ -44,9 +44,11 @@ export const [state, setState] = createStore<AppState>({
   isLoading: false,
   error: null,
 
-  // Graph
-  nodes: [],
-  edges: [],
+  // Graph — pre-filtered view snapshots from the server
+  viewNodes: [],
+  viewEdges: [],
+  viewGroups: [],
+  fileNodes: [],
 
   // Selection
   selectedNodeId: null,

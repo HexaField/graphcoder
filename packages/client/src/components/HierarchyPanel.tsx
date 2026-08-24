@@ -1,5 +1,5 @@
 import { createMemo, createSignal, For, onCleanup, Show, type Component } from 'solid-js'
-import type { GraphEdge, GraphNode, NodeKind } from '@graphcoder/core'
+import type { GraphNode } from '@graphcoder/core'
 import { nodeKindColor } from '../constants.js'
 import {
   addGroupExpanded,
@@ -60,8 +60,6 @@ interface HierarchyTree {
 
 // ── Tree builder ──────────────────────────────────────────────────────────────
 
-const SKIP_KINDS = new Set<NodeKind>(['import', 'export'])
-
 /**
  * Recognise monorepo-style roots: packages/, apps/, libs/, test-fixtures/,
  * fixtures/, examples/, tools/, e2e/ — anything two levels deep under these.
@@ -115,30 +113,14 @@ function nestDirs(allDirs: Set<string>, parentPath: string, dirToFiles: Map<stri
   }))
 }
 
-function buildTree(nodes: GraphNode[], edges: GraphEdge[]): HierarchyTree {
+function buildTree(nodes: GraphNode[]): HierarchyTree {
   if (nodes.length === 0) return { packages: [], dirs: [], files: [] }
 
-  const nodeMap = new Map(nodes.map((n) => [n.id, n]))
-
-  // Parent → [child id, ...] from contains edges
-  const containsMap = new Map<string, string[]>()
-  for (const e of edges) {
-    if (e.kind !== 'contains') continue
-    const list = containsMap.get(e.source) ?? []
-    list.push(e.target)
-    containsMap.set(e.source, list)
-  }
-
-  function buildSymbol(id: string): TreeSymbol | null {
-    const node = nodeMap.get(id)
-    if (!node || SKIP_KINDS.has(node.kind as NodeKind)) return null
-    const children = (containsMap.get(id) ?? []).map(buildSymbol).filter((n): n is TreeSymbol => n !== null)
-    return { type: 'symbol', node, key: node.id, children }
-  }
-
+  // `nodes` contains only file/module nodes (state.fileNodes).
+  // Symbol children are visible in the canvas when a group is expanded;
+  // they do not appear in the sidebar tree (on-demand fetch is future work).
   function buildFile(fn: GraphNode): TreeFile {
-    const children = (containsMap.get(fn.id) ?? []).map(buildSymbol).filter((n): n is TreeSymbol => n !== null)
-    return { type: 'file', node: fn, key: fn.filePath ?? fn.id, children }
+    return { type: 'file', node: fn, key: fn.filePath ?? fn.id, children: [] }
   }
 
   // Group files by their immediate parent directory path
@@ -574,7 +556,7 @@ const ContextMenu: Component<CtxMenuProps> = (props) => {
 // ── HierarchyPanel ────────────────────────────────────────────────────────────
 
 export const HierarchyPanel: Component = () => {
-  const tree = createMemo(() => buildTree(state.nodes, state.edges))
+  const tree = createMemo(() => buildTree(state.fileNodes))
 
   // Expand all packages by default; sync when project data changes.
   const [expandedSet, setExpandedSet] = createSignal<Set<string>>(new Set())
