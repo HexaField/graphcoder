@@ -59,12 +59,32 @@ export async function listBranches(projectRoot: string): Promise<{ branches: str
 }
 
 /**
+ * Resolve a short branch name to a git-resolvable ref.
+ *
+ * The branch dropdown shows clean names like "feat/ecs-foundations" even when
+ * the branch only exists as a remote tracking ref (origin/feat/ecs-foundations).
+ * Git cannot resolve the bare name in that case, so this helper tries the bare
+ * name first and falls back to "origin/<name>".
+ */
+async function resolveBranchRef(git: ReturnType<typeof simpleGit>, name: string): Promise<string> {
+  try {
+    await git.revparse(['--verify', name])
+    return name
+  } catch {
+    // Bare name failed — try the remote tracking ref.
+    const remote = `origin/${name}`
+    await git.revparse(['--verify', remote]) // throws if this also fails
+    return remote
+  }
+}
+
+/**
  * Return up to `limit` commits on `branch` (newest first).
  * Defaults to HEAD branch, limit 50.
  */
 export async function listCommits(projectRoot: string, branch?: string, limit = 50): Promise<CommitInfo[]> {
   const git = simpleGit(projectRoot)
-  const ref = branch || 'HEAD'
+  const ref = branch ? await resolveBranchRef(git, branch) : 'HEAD'
   const log = await git.log({
     from: undefined,
     to: ref,
@@ -83,9 +103,18 @@ export async function listCommits(projectRoot: string, branch?: string, limit = 
 /**
  * Resolve a ref string ('HEAD', a branch name, or a commit hash) to a full
  * 40-character commit hash. Throws if the ref does not exist.
+ *
+ * For branch names that only exist as remote tracking refs, automatically
+ * falls back to "origin/<name>".
  */
 export async function resolveRef(projectRoot: string, ref: string): Promise<string> {
   const git = simpleGit(projectRoot)
-  const hash = await git.revparse([ref])
-  return hash.trim()
+  try {
+    const hash = await git.revparse([ref])
+    return hash.trim()
+  } catch {
+    // Could be a remote-only branch name — try origin/<ref>.
+    const hash = await git.revparse([`origin/${ref}`])
+    return hash.trim()
+  }
 }
