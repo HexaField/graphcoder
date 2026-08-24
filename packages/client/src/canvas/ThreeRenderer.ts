@@ -591,7 +591,10 @@ export class ThreeRenderer {
       }
       pushContainer(fc, fill, border, cornerR, borderW)
       const short = fc.label.length > 32 ? `…${fc.label.slice(-31)}` : fc.label
-      pushLabel(short, fc.x + (fc.color ? 12 : 10), fc.y + (fc.collapsed ? 14 : 10), 11, labelColor)
+      // Collapsed chips now use 2× node height; centre label vertically.
+      // Expanded containers keep the label near the top (y+10).
+      const chipLabelY = fc.collapsed ? fc.y + fc.height / 2 - 8 : fc.y + 10
+      pushLabel(short, fc.x + (fc.color ? 12 : 10), chipLabelY, 11, labelColor)
     }
 
     // ── Class sub-containers ─────────────────────────────────────────────────

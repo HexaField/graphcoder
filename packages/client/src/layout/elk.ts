@@ -274,6 +274,15 @@ async function layoutGrouped(
   }
   const isValidEndpoint = (id: string) => nodeIds.has(id) || groupContainerIds.has(id)
   const validEdges = edges.filter((e) => isValidEndpoint(e.source) && isValidEndpoint(e.target))
+
+  // Resolve an edge endpoint to its owning top-level group ID.
+  // Works for both leaf nodes (in nodeToTopGroup) and promoted collapsed-group IDs
+  // (which ARE top-level groups themselves). Without this, promoted edges where the
+  // endpoint IS the group ID would return undefined from nodeToTopGroup, causing them
+  // to always fall back to root-level ELK edges instead of being placed at the correct
+  // dir/package compound level — leading to mis-routed edges in nested layouts.
+  const getEffectiveTopGroup = (id: string): string | undefined =>
+    nodeToTopGroup.get(id) ?? (topGroupMap.has(id) ? id : undefined)
   const edgeKindMap = new Map<string, string>()
   validEdges.forEach((e, i) => edgeKindMap.set(`e${i}`, e.kind))
 
@@ -372,7 +381,10 @@ async function layoutGrouped(
         // so that promoted edges (child → container) can be routed to it.
         // A plain leaf node of fixed size achieves this — the renderer still
         // displays it as a container box (it's in topGroupMap).
-        return { id: fg.id, width: NODE_WIDTH * 2, height: NODE_HEIGHT }
+        // Height is doubled vs a regular node (80 instead of 40) so collapsed chips
+        // remain legible at low zoom levels — at zoom ≈ 0.08 a 40-unit chip renders
+        // as a ~3 px hairline, making edges appear to terminate at empty space.
+        return { id: fg.id, width: NODE_WIDTH * 2, height: NODE_HEIGHT * 2 }
       }
       return null // Genuinely empty expanded group — skip
     }
@@ -468,8 +480,8 @@ async function layoutGrouped(
     validEdges.forEach((e, i) => {
       const id = `e${i}`
       const elk_edge: ElkExtendedEdge = { id, sources: [e.source], targets: [e.target] }
-      const srcGroup = nodeToTopGroup.get(e.source)
-      const tgtGroup = nodeToTopGroup.get(e.target)
+      const srcGroup = getEffectiveTopGroup(e.source)
+      const tgtGroup = getEffectiveTopGroup(e.target)
       if (srcGroup !== undefined && srcGroup === tgtGroup) {
         if (!groupEdgeMap.has(srcGroup)) groupEdgeMap.set(srcGroup, [])
         groupEdgeMap.get(srcGroup)!.push(elk_edge)
@@ -576,8 +588,8 @@ async function layoutGrouped(
     validEdges.forEach((e, i) => {
       const id = `e${i}`
       const elk_edge: ElkExtendedEdge = { id, sources: [e.source], targets: [e.target] }
-      const srcTop = nodeToTopGroup.get(e.source)
-      const tgtTop = nodeToTopGroup.get(e.target)
+      const srcTop = getEffectiveTopGroup(e.source)
+      const tgtTop = getEffectiveTopGroup(e.target)
 
       if (srcTop !== undefined && srcTop === tgtTop) {
         const fg = topGroupMap.get(srcTop)!
@@ -898,8 +910,8 @@ async function layoutGrouped(
     const id = `e${i}`
     const elk_edge: ElkExtendedEdge = { id, sources: [e.source], targets: [e.target] }
 
-    const srcTopGroup = nodeToTopGroup.get(e.source)
-    const tgtTopGroup = nodeToTopGroup.get(e.target)
+    const srcTopGroup = getEffectiveTopGroup(e.source)
+    const tgtTopGroup = getEffectiveTopGroup(e.target)
 
     if (srcTopGroup !== undefined && srcTopGroup === tgtTopGroup) {
       // Same top-level group

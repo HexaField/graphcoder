@@ -57,7 +57,9 @@ export const [state, setState] = createStore<AppState>({
 
   // Filters & focus
   hiddenNodeKinds: _saved.hiddenNodeKinds ?? [],
-  hiddenEdgeKinds: _saved.hiddenEdgeKinds ?? [],
+  // Default: hide structural edges shown spatially (contains) and mirror-of-imports (exports).
+  // Same as DEFAULT_VIEW_PARAMS.hiddenEdgeKinds in @graphcoder/core.
+  hiddenEdgeKinds: _saved.hiddenEdgeKinds ?? ['contains', 'exports'],
   excludePatterns: _saved.excludePatterns ?? '',
   groupByFile: _saved.groupByFile ?? true,
   groupByContract: _saved.groupByContract ?? false,
