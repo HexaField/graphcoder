@@ -7,18 +7,30 @@
  *   - Camera fit on first layout.
  *   - Scene update effect (selection, diff overlay, theme).
  *   - Pan/zoom via wheel + mouse drag.
- *   - Click hit testing via RBush.
+ *   - Hover hit testing via RBush (nodes + containers) + CPU edge proximity.
+ *   - Click hit testing: select node or toggle group expand/collapse.
+ *   - Tooltip overlay and expand/collapse button for non-leaf containers.
  *
  * All filtering and group computation runs server-side (core computeView).
  * This component receives pre-filtered data and forwards it straight to ELK.
  */
 
-import { type Component, createEffect, createMemo, createSignal, onCleanup, onMount, Show } from 'solid-js'
+import {
+  type Component,
+  createEffect,
+  createMemo,
+  createSignal,
+  onCleanup,
+  onMount,
+  Show,
+  Switch,
+  Match
+} from 'solid-js'
 import type { GraphNode } from '@graphcoder/core'
 import { layoutGraph, type LayoutResult } from '../layout/elk.js'
-import { clearFocus, selectNode, state } from '../state/store.js'
+import { clearFocus, selectNode, state, toggleGroupExpanded } from '../state/store.js'
 import { resolvedTheme } from '../state/theme.js'
-import type { DiffOverlay } from './ThreeRenderer.js'
+import type { DiffOverlay, HitResult } from './ThreeRenderer.js'
 import { ThreeRenderer } from './ThreeRenderer.js'
 
 /** Layout result paired with the node lookup used to produce it.
@@ -29,6 +41,13 @@ interface LayoutSnap {
   nodeById: Map<string, GraphNode>
 }
 
+// ── Tooltip data types ────────────────────────────────────────────────────────
+
+type NodeTooltip = { kind: 'node'; id: string; name: string; nodeKind?: string }
+type ContainerTooltip = { kind: 'container'; id: string; label: string; collapsed: boolean }
+type EdgeTooltip = { kind: 'edge'; id: string; edgeKind?: string; source: string; target: string }
+type TooltipData = NodeTooltip | ContainerTooltip | EdgeTooltip
+
 // ── GraphCanvas ───────────────────────────────────────────────────────────────
 
 export const GraphCanvas: Component = () => {
@@ -37,6 +56,11 @@ export const GraphCanvas: Component = () => {
   const [cam, setCam] = createSignal({ panX: 0, panY: 0, zoom: 1 })
   const [rendererReady, setRendererReady] = createSignal(false)
   const [layoutError, setLayoutError] = createSignal<string | null>(null)
+
+  // Hover / tooltip state
+  const [tooltipData, setTooltipData] = createSignal<TooltipData | null>(null)
+  const [mousePos, setMousePos] = createSignal({ x: 0, y: 0 })
+  const [cursor, setCursor] = createSignal<'default' | 'pointer'>('default')
 
   let canvasRef: HTMLCanvasElement | undefined
   let wrapperRef: HTMLDivElement | undefined
@@ -118,6 +142,8 @@ export const GraphCanvas: Component = () => {
         // scene from rendering a mismatched (layout, nodeById) pair during the
         // async gap between a viewNodes update and ELK resolving.
         setLayoutSnap({ result, nodeById: new Map(nodes.map((n) => [n.id, n])) })
+        // Clear stale tooltip data when layout changes.
+        setTooltipData(null)
       }
     } catch (err) {
       if (ver === layoutVersion) {
@@ -172,6 +198,26 @@ export const GraphCanvas: Component = () => {
     if (!rendererReady() || !r3) return
     r3.setBackground(resolvedTheme() === 'dark' ? 0x030712 : 0xf1f5f9)
     r3.render()
+  })
+
+  // ── Container screen rect (for expand/collapse button positioning) ──────────
+
+  const containerScreenRect = createMemo(() => {
+    const td = tooltipData()
+    if (td?.kind !== 'container') return null
+    if (!r3) return null
+    const fc = r3.getContainerWorldRect(td.id)
+    if (!fc) return null
+    const { panX, panY, zoom } = cam()
+    return {
+      x: fc.x * zoom + panX,
+      y: fc.y * zoom + panY,
+      w: fc.width * zoom,
+      h: fc.height * zoom,
+      collapsed: fc.collapsed ?? false,
+      id: td.id,
+      label: td.label
+    }
   })
 
   // ── Mount: init Three.js renderer ──────────────────────────────────────────
@@ -232,17 +278,82 @@ export const GraphCanvas: Component = () => {
     camAtPanStart = cam()
   }
 
+  // ── Mouse move: pan + hover hit-testing ────────────────────────────────────
+
   const onMouseMove = (e: MouseEvent) => {
-    if (!isPanning) return
-    const dx = e.clientX - panStart.x
-    const dy = e.clientY - panStart.y
-    if (Math.abs(dx) > 2 || Math.abs(dy) > 2) didPan = true
-    setCam({
-      panX: camAtPanStart.panX + dx,
-      panY: camAtPanStart.panY + dy,
-      zoom: camAtPanStart.zoom
-    })
+    const rect = (e.currentTarget as HTMLElement).getBoundingClientRect()
+    const mx = e.clientX - rect.left
+    const my = e.clientY - rect.top
+
+    if (isPanning) {
+      const dx = e.clientX - panStart.x
+      const dy = e.clientY - panStart.y
+      if (Math.abs(dx) > 2 || Math.abs(dy) > 2) didPan = true
+      setCam({
+        panX: camAtPanStart.panX + dx,
+        panY: camAtPanStart.panY + dy,
+        zoom: camAtPanStart.zoom
+      })
+      return
+    }
+
+    // Hover hit-testing — only when not panning
+    setMousePos({ x: mx, y: my })
+    if (!r3 || !layoutSnap()) return
+
+    const { panX, panY, zoom } = cam()
+    const hit = r3.hitTest(mx, my, panX, panY, zoom)
+
+    if (hit !== null) {
+      // Node or container hit — no edge test needed
+      applyHover(hit, -1)
+    } else {
+      // No node/container — test edge proximity
+      const wx = (mx - panX) / zoom
+      const wy = (my - panY) / zoom
+      const edgeIdx = r3.edgeHitTest(wx, wy, zoom)
+      applyHover(null, edgeIdx)
+    }
   }
+
+  const applyHover = (hit: HitResult | null, edgeIdx: number) => {
+    if (!r3) return
+    const snap = layoutSnap()
+
+    if (hit?.kind === 'node') {
+      r3.setHovered(hit.id, null, -1)
+      setCursor('pointer')
+      const gn = snap?.nodeById.get(hit.id)
+      setTooltipData({ kind: 'node', id: hit.id, name: hit.label, nodeKind: gn?.kind ?? hit.nodeKind })
+    } else if (hit?.kind === 'container') {
+      r3.setHovered(null, hit.id, -1)
+      setCursor(hit.collapsed ? 'pointer' : 'default')
+      setTooltipData({ kind: 'container', id: hit.id, label: hit.label, collapsed: hit.collapsed })
+    } else if (edgeIdx >= 0) {
+      r3.setHovered(null, null, edgeIdx)
+      setCursor('default')
+      const ed = r3.getEdgeData(edgeIdx)
+      if (ed) {
+        const srcName = snap?.nodeById.get(ed.source)?.name ?? ed.source
+        const tgtName = snap?.nodeById.get(ed.target)?.name ?? ed.target
+        setTooltipData({ kind: 'edge', id: ed.id, edgeKind: ed.kind, source: srcName, target: tgtName })
+      } else {
+        setTooltipData(null)
+      }
+    } else {
+      r3.setHovered(null, null, -1)
+      setCursor('default')
+      setTooltipData(null)
+    }
+  }
+
+  const onMouseLeave = () => {
+    if (r3) r3.setHovered(null, null, -1)
+    setCursor('default')
+    setTooltipData(null)
+  }
+
+  // ── Click: select node or toggle container expand ───────────────────────────
 
   const onMouseUp = (e: MouseEvent) => {
     if (e.button !== 0) return
@@ -251,15 +362,18 @@ export const GraphCanvas: Component = () => {
     didPan = false
     if (wasPanning || !r3) return
 
-    // Click — hit-test against the last rendered layout (rbush is populated by updateScene).
     if (!layoutSnap()) return
     const rect = (e.currentTarget as HTMLElement).getBoundingClientRect()
     const mx = e.clientX - rect.left
     const my = e.clientY - rect.top
     const { panX, panY, zoom } = cam()
     const hit = r3.hitTest(mx, my, panX, panY, zoom)
-    if (hit) {
-      selectNode(hit)
+
+    if (hit?.kind === 'node') {
+      void selectNode(hit.id)
+    } else if (hit?.kind === 'container' && hit.collapsed) {
+      // Clicking a collapsed chip expands it
+      toggleGroupExpanded(hit.id)
     } else {
       clearFocus()
     }
@@ -272,16 +386,18 @@ export const GraphCanvas: Component = () => {
       ref={wrapperRef}
       class="relative flex-1 overflow-hidden bg-slate-100 dark:bg-gray-950 select-none"
       data-testid="graph-canvas"
+      style={{ cursor: cursor() }}
       onWheel={onWheel}
       onMouseDown={onMouseDown}
       onMouseMove={onMouseMove}
       onMouseUp={onMouseUp}
+      onMouseLeave={onMouseLeave}
     >
       <canvas ref={canvasRef} class="w-full h-full block" data-testid="graph-webgl-canvas" />
 
       {/* Layout loading spinner */}
       <Show when={isLayouting()}>
-        <div class="absolute top-2 left-1/2 -translate-x-1/2 bg-white/80 dark:bg-gray-900/80 text-xs text-gray-500 dark:text-gray-400 px-3 py-1 rounded-full shadow">
+        <div class="absolute top-2 left-1/2 -translate-x-1/2 bg-white/80 dark:bg-gray-900/80 text-xs text-gray-500 dark:text-gray-400 px-3 py-1 rounded-full shadow pointer-events-none">
           Laying out…
         </div>
       </Show>
@@ -289,7 +405,7 @@ export const GraphCanvas: Component = () => {
       {/* Layout error */}
       <Show when={layoutError()}>
         {(msg) => (
-          <div class="absolute top-2 left-1/2 -translate-x-1/2 max-w-sm bg-red-100 dark:bg-red-900/60 text-red-700 dark:text-red-300 text-xs px-3 py-2 rounded shadow text-center">
+          <div class="absolute top-2 left-1/2 -translate-x-1/2 max-w-sm bg-red-100 dark:bg-red-900/60 text-red-700 dark:text-red-300 text-xs px-3 py-2 rounded shadow text-center pointer-events-none">
             {msg()}
           </div>
         )}
@@ -300,6 +416,75 @@ export const GraphCanvas: Component = () => {
         <div class="absolute inset-0 flex items-center justify-center text-gray-400 dark:text-gray-600 text-sm pointer-events-none">
           {state.projectRoot ? 'No nodes match the current filters.' : 'Open a project to get started.'}
         </div>
+      </Show>
+
+      {/* ── Expand/collapse button anchored to hovered container ── */}
+      <Show when={containerScreenRect()}>
+        {(sr) => {
+          // Position button at top-right of container; for chips, center-right.
+          const btnX = () => Math.min(sr().x + sr().w - 4, (wrapperRef?.clientWidth ?? 800) - 90)
+          const btnY = () => Math.max(sr().collapsed ? sr().y + sr().h / 2 - 12 : sr().y + 4, 4)
+          return (
+            <button
+              class="absolute z-40 flex items-center gap-1 text-xs px-2 py-1 rounded shadow
+                     bg-blue-600 hover:bg-blue-500 text-white font-medium transition-colors"
+              style={{ left: `${btnX() - 76}px`, top: `${btnY()}px` }}
+              onClick={(e) => {
+                e.stopPropagation()
+                toggleGroupExpanded(sr().id)
+              }}
+            >
+              {sr().collapsed ? '+ Expand' : '- Collapse'}
+            </button>
+          )
+        }}
+      </Show>
+
+      {/* ── Tooltip ── */}
+      <Show when={tooltipData()}>
+        {(data) => {
+          // Clamp tooltip to stay within the wrapper bounds.
+          const tipX = () => {
+            const w = wrapperRef?.clientWidth ?? 800
+            return mousePos().x + 14 > w - 200 ? mousePos().x - 190 : mousePos().x + 14
+          }
+          const tipY = () => Math.max(mousePos().y - 10, 4)
+          return (
+            <div
+              class="absolute z-50 pointer-events-none max-w-xs rounded shadow-lg
+                     bg-gray-900/95 dark:bg-gray-950/95 text-white text-xs px-2.5 py-2"
+              style={{ left: `${tipX()}px`, top: `${tipY()}px` }}
+            >
+              <Switch>
+                <Match when={data().kind === 'node'}>
+                  <div class="font-semibold leading-snug">{(data() as NodeTooltip).name}</div>
+                  <Show when={(data() as NodeTooltip).nodeKind}>
+                    <div class="text-gray-400 mt-0.5">{(data() as NodeTooltip).nodeKind}</div>
+                  </Show>
+                </Match>
+                <Match when={data().kind === 'container'}>
+                  <div class="font-semibold leading-snug truncate max-w-[180px]">
+                    {(data() as ContainerTooltip).label}
+                  </div>
+                  <div class="text-blue-400 mt-0.5">
+                    {(data() as ContainerTooltip).collapsed
+                      ? 'click or use button to expand'
+                      : 'use button to collapse'}
+                  </div>
+                </Match>
+                <Match when={data().kind === 'edge'}>
+                  <Show when={(data() as EdgeTooltip).edgeKind}>
+                    <div class="text-gray-400 mb-0.5">{(data() as EdgeTooltip).edgeKind}</div>
+                  </Show>
+                  <div class="font-mono leading-snug truncate max-w-[200px]">
+                    {(data() as EdgeTooltip).source} <span class="text-gray-500">→</span>{' '}
+                    {(data() as EdgeTooltip).target}
+                  </div>
+                </Match>
+              </Switch>
+            </div>
+          )
+        }}
       </Show>
     </div>
   )

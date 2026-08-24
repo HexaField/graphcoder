@@ -92,7 +92,38 @@ interface HitItem {
   minY: number
   maxX: number
   maxY: number
-  nodeId: string
+  id: string
+  kind: 'node' | 'container'
+  collapsed: boolean
+  label: string
+  nodeKind?: string
+}
+
+// ── Hit result (public) ───────────────────────────────────────────────────────
+
+export type HitResult =
+  | { kind: 'node'; id: string; label: string; nodeKind?: string }
+  | { kind: 'container'; id: string; label: string; collapsed: boolean }
+
+// ── Edge hit data ─────────────────────────────────────────────────────────────
+
+export interface EdgeHitData {
+  id: string
+  kind?: string
+  source: string
+  target: string
+  pts: number[]
+}
+
+// ── Point-to-segment distance helper ─────────────────────────────────────────
+
+function pointToSegmentDist(px: number, py: number, ax: number, ay: number, bx: number, by: number): number {
+  const dx = bx - ax
+  const dy = by - ay
+  const len2 = dx * dx + dy * dy
+  if (len2 < 0.0001) return Math.hypot(px - ax, py - ay)
+  const t = Math.max(0, Math.min(1, ((px - ax) * dx + (py - ay) * dy) / len2))
+  return Math.hypot(px - (ax + t * dx), py - (ay + t * dy))
 }
 
 // ── InstancedBufferGeometry builder ──────────────────────────────────────────
@@ -105,6 +136,7 @@ interface RectArrays {
   radii: Float32Array // 2 (cornerRadius, borderWidth)
   status: Float32Array // 1
   selected: Float32Array // 1
+  hover: Float32Array // 1
 }
 
 function makeRectArrays(max: number): RectArrays {
@@ -115,7 +147,8 @@ function makeRectArrays(max: number): RectArrays {
     border: new Float32Array(max * 4),
     radii: new Float32Array(max * 2),
     status: new Float32Array(max),
-    selected: new Float32Array(max)
+    selected: new Float32Array(max),
+    hover: new Float32Array(max)
   }
 }
 
@@ -134,6 +167,7 @@ function makeRectGeo(_max: number, arrays: RectArrays): InstancedBufferGeometry 
   geo.setAttribute('iRadii', new InstancedBufferAttribute(arrays.radii, 2))
   geo.setAttribute('iStatus', new InstancedBufferAttribute(arrays.status, 1))
   geo.setAttribute('iSelected', new InstancedBufferAttribute(arrays.selected, 1))
+  geo.setAttribute('iHover', new InstancedBufferAttribute(arrays.hover, 1))
   geo.instanceCount = 0
   return geo
 }
@@ -150,7 +184,8 @@ function setRectInstance(
   cornerRadius: number,
   borderWidth: number,
   status = 0,
-  selected = 0
+  selected = 0,
+  hover = 0
 ): void {
   const b2 = i * 2,
     b4 = i * 4
@@ -170,10 +205,11 @@ function setRectInstance(
   arrays.radii[b2 + 1] = borderWidth
   arrays.status[i] = status
   arrays.selected[i] = selected
+  arrays.hover[i] = hover
 }
 
 function markRectGeoNeedsUpdate(geo: InstancedBufferGeometry): void {
-  for (const name of ['iCenter', 'iSize', 'iFill', 'iBorder', 'iRadii', 'iStatus', 'iSelected']) {
+  for (const name of ['iCenter', 'iSize', 'iFill', 'iBorder', 'iRadii', 'iStatus', 'iSelected', 'iHover']) {
     ;(geo.getAttribute(name) as InstancedBufferAttribute).needsUpdate = true
   }
 }
@@ -286,6 +322,29 @@ export class ThreeRenderer {
   // Hit-test spatial index (world coords)
   private rbush = new RBush<HitItem>()
 
+  // Per-instance lookup maps (node/container id → instance index in their respective arrays)
+  private nodeInstIdx = new Map<string, number>()
+  private contInstIdx = new Map<string, number>()
+
+  // Container world rects for screen-space positioning (tooltip/button anchoring)
+  private contById = new Map<string, FileContainer>()
+
+  // Edge segments for CPU hit-testing
+  private edgeHitData: EdgeHitData[] = []
+
+  // Hovered edge highlight line (separate LineSegments2 rendered above everything)
+  private hoveredEdgeLinesGeo: LineSegmentsGeometry
+  private hoveredEdgeLines: LineSegments2
+  private hoveredLineMat: LineMaterial
+
+  // Current hover state tracking (id-based to detect changes)
+  private _hovNodeId: string | null = null
+  private _hovContId: string | null = null
+  private _hovEdgeIdx = -1
+  // Corresponding instance indices (kept in sync with the maps above)
+  private _hovNodeInst = -1
+  private _hovContInst = -1
+
   // SDF atlas
   private atlas: SdfAtlas
 
@@ -389,6 +448,23 @@ export class ThreeRenderer {
     glyphMesh.renderOrder = 4
     glyphMesh.frustumCulled = false
     this.world.add(glyphMesh)
+
+    // ── Hovered edge highlight line ────────────────────────────────────────
+    // Rendered above all other geometry; only visible when an edge is hovered.
+    this.hoveredEdgeLinesGeo = new LineSegmentsGeometry()
+    this.hoveredLineMat = new LineMaterial({
+      linewidth: 3,
+      color: 0x60a5fa, // blue-400
+      transparent: true,
+      opacity: 0.85,
+      depthTest: false,
+      depthWrite: false
+    })
+    this.hoveredEdgeLines = new LineSegments2(this.hoveredEdgeLinesGeo, this.hoveredLineMat)
+    this.hoveredEdgeLines.renderOrder = 5
+    this.hoveredEdgeLines.frustumCulled = false
+    this.hoveredEdgeLines.visible = false
+    this.world.add(this.hoveredEdgeLines)
   }
 
   // ── Resize ────────────────────────────────────────────────────────────────
@@ -404,6 +480,7 @@ export class ThreeRenderer {
     this.camera.bottom = h
     this.camera.updateProjectionMatrix()
     this.lineMat.resolution.set(w, h)
+    this.hoveredLineMat.resolution.set(w, h)
   }
 
   // ── Set background colour ─────────────────────────────────────────────────
@@ -435,18 +512,124 @@ export class ThreeRenderer {
     this.lineMat.linewidth = Math.max(0.5, Math.min(2, zoom * 6))
     // opacity: reduce at low zoom so overlapping lines stay legible
     this.lineMat.opacity = Math.max(0.2, Math.min(0.65, 0.2 + zoom * 1.5))
+    // Hovered edge highlight scales with zoom too (always thicker than normal)
+    this.hoveredLineMat.linewidth = Math.max(1.5, Math.min(4, zoom * 9))
   }
 
-  // ── Hit test (returns node id or null) ────────────────────────────────────
+  // ── Hit test (returns node/container result or null) ──────────────────────
 
-  hitTest(screenX: number, screenY: number, panX: number, panY: number, zoom: number): string | null {
+  hitTest(screenX: number, screenY: number, panX: number, panY: number, zoom: number): HitResult | null {
     const wx = (screenX - panX) / zoom
     const wy = (screenY - panY) / zoom
     const hits = this.rbush.search({ minX: wx - 0.5, minY: wy - 0.5, maxX: wx + 0.5, maxY: wy + 0.5 })
     if (hits.length === 0) return null
-    // Return the hit with the smallest area (most specific)
+    // Return the hit with the smallest area (most specific — nodes before containers)
     hits.sort((a: HitItem, b: HitItem) => (a.maxX - a.minX) * (a.maxY - a.minY) - (b.maxX - b.minX) * (b.maxY - b.minY))
-    return hits[0].nodeId
+    const h = hits[0]
+    if (h.kind === 'node') {
+      return { kind: 'node', id: h.id, label: h.label, nodeKind: h.nodeKind }
+    }
+    return { kind: 'container', id: h.id, label: h.label, collapsed: h.collapsed }
+  }
+
+  // ── Edge CPU hit test ─────────────────────────────────────────────────────
+
+  edgeHitTest(wx: number, wy: number, zoom: number): number {
+    // Threshold in world units: generous at low zoom, tighter at high zoom.
+    const threshold = Math.max(6, 14 / zoom)
+    let best = Infinity
+    let bestIdx = -1
+    for (let i = 0; i < this.edgeHitData.length; i++) {
+      const { pts } = this.edgeHitData[i]
+      for (let k = 0; k < pts.length - 2; k += 2) {
+        const dist = pointToSegmentDist(wx, wy, pts[k], pts[k + 1], pts[k + 2], pts[k + 3])
+        if (dist < threshold && dist < best) {
+          best = dist
+          bestIdx = i
+        }
+      }
+    }
+    return bestIdx
+  }
+
+  // ── Get edge data by index ────────────────────────────────────────────────
+
+  getEdgeData(idx: number): EdgeHitData | null {
+    return this.edgeHitData[idx] ?? null
+  }
+
+  // ── Get container world rect ──────────────────────────────────────────────
+
+  getContainerWorldRect(id: string): FileContainer | null {
+    return this.contById.get(id) ?? null
+  }
+
+  // ── Lightweight hover update (no full scene rebuild) ───────────────────────
+
+  setHovered(nodeId: string | null, containerId: string | null, edgeIdx: number): void {
+    const sameNode = nodeId === this._hovNodeId
+    const sameCont = containerId === this._hovContId
+    const sameEdge = edgeIdx === this._hovEdgeIdx
+    if (sameNode && sameCont && sameEdge) return
+
+    // Clear previous node hover
+    if (!sameNode && this._hovNodeInst >= 0) {
+      this.nodeArrays.hover[this._hovNodeInst] = 0
+      ;(this.nodeGeo.getAttribute('iHover') as InstancedBufferAttribute).needsUpdate = true
+      this._hovNodeInst = -1
+    }
+
+    // Clear previous container hover
+    if (!sameCont && this._hovContInst >= 0) {
+      this.contArrays.hover[this._hovContInst] = 0
+      ;(this.contGeo.getAttribute('iHover') as InstancedBufferAttribute).needsUpdate = true
+      this._hovContInst = -1
+    }
+
+    this._hovNodeId = nodeId
+    this._hovContId = containerId
+
+    // Apply new node hover
+    if (nodeId !== null) {
+      const idx = this.nodeInstIdx.get(nodeId)
+      if (idx !== undefined) {
+        this.nodeArrays.hover[idx] = 1
+        ;(this.nodeGeo.getAttribute('iHover') as InstancedBufferAttribute).needsUpdate = true
+        this._hovNodeInst = idx
+      }
+    }
+
+    // Apply new container hover
+    if (containerId !== null) {
+      const idx = this.contInstIdx.get(containerId)
+      if (idx !== undefined) {
+        this.contArrays.hover[idx] = 1
+        ;(this.contGeo.getAttribute('iHover') as InstancedBufferAttribute).needsUpdate = true
+        this._hovContInst = idx
+      }
+    }
+
+    // Update hovered edge highlight
+    if (!sameEdge) {
+      this._hovEdgeIdx = edgeIdx
+      if (edgeIdx < 0 || edgeIdx >= this.edgeHitData.length) {
+        this.hoveredEdgeLines.visible = false
+      } else {
+        const { pts } = this.edgeHitData[edgeIdx]
+        const positions: number[] = []
+        for (let k = 0; k < pts.length - 2; k += 2) {
+          positions.push(pts[k], pts[k + 1], 0, pts[k + 2], pts[k + 3], 0)
+        }
+        if (positions.length > 0) {
+          this.hoveredEdgeLinesGeo.setPositions(new Float32Array(positions))
+          this.hoveredEdgeLines.visible = true
+        } else {
+          this.hoveredEdgeLines.visible = false
+        }
+      }
+    }
+
+    this.render()
   }
 
   // ── Update scene from layout ──────────────────────────────────────────────
@@ -458,8 +641,20 @@ export class ThreeRenderer {
     diff: DiffOverlay,
     isDark: boolean
   ): void {
-    // Clear hit tree
+    // Clear hit tree and lookup maps — hover state resets on layout change
     this.rbush.clear()
+    this.nodeInstIdx.clear()
+    this.contInstIdx.clear()
+    this.contById.clear()
+    this.edgeHitData = []
+
+    // Reset hovered edge line
+    this.hoveredEdgeLines.visible = false
+    this._hovNodeId = null
+    this._hovContId = null
+    this._hovEdgeIdx = -1
+    this._hovNodeInst = -1
+    this._hovContInst = -1
 
     let ci = 0 // container instance index
     let ni = 0 // node instance index
@@ -473,7 +668,7 @@ export class ThreeRenderer {
 
     const parseHex = (hex: string): [number, number, number] => hexToRgb(hex)
 
-    /** Push a container rect instance. */
+    /** Push a container rect instance. Records instance index for hover updates. */
     const pushContainer = (
       fc: FileContainer,
       fillRgba: [number, number, number, number],
@@ -482,6 +677,8 @@ export class ThreeRenderer {
       borderW: number
     ): void => {
       if (ci >= MAX_CONTAINERS) return
+      this.contInstIdx.set(fc.id, ci)
+      this.contById.set(fc.id, fc)
       setRectInstance(
         this.contArrays,
         ci++,
@@ -547,6 +744,16 @@ export class ThreeRenderer {
           : ([0.278, 0.337, 0.435] as [number, number, number])
         pushLabel(pc.label.toUpperCase(), pc.x + 16, pc.y + 10, 11, c, 48)
       }
+      this.rbush.insert({
+        minX: pc.x,
+        minY: pc.y,
+        maxX: pc.x + pc.width,
+        maxY: pc.y + pc.height,
+        id: pc.id,
+        kind: 'container',
+        collapsed: false,
+        label: pc.label
+      })
     }
 
     // ── Dir containers ────────────────────────────────────────────────────────
@@ -559,6 +766,16 @@ export class ThreeRenderer {
         ? ([0.216, 0.255, 0.318] as [number, number, number])
         : ([0.392, 0.455, 0.545] as [number, number, number])
       pushLabel(short, dc.x + 12, dc.y + 8, 10, c)
+      this.rbush.insert({
+        minX: dc.x,
+        minY: dc.y,
+        maxX: dc.x + dc.width,
+        maxY: dc.y + dc.height,
+        id: dc.id,
+        kind: 'container',
+        collapsed: false,
+        label: dc.label
+      })
     }
 
     // ── File + contract containers ────────────────────────────────────────────
@@ -594,7 +811,19 @@ export class ThreeRenderer {
       // Collapsed chips now use 2× node height; centre label vertically.
       // Expanded containers keep the label near the top (y+10).
       const chipLabelY = fc.collapsed ? fc.y + fc.height / 2 - 8 : fc.y + 10
-      pushLabel(short, fc.x + (fc.color ? 12 : 10), chipLabelY, 11, labelColor)
+      // Collapsed chips: prefix with `+` (ASCII, in atlas) to signal expandability.
+      const displayLabel = fc.collapsed ? `+ ${short}` : short
+      pushLabel(displayLabel, fc.x + (fc.color ? 12 : 10), chipLabelY, 11, labelColor)
+      this.rbush.insert({
+        minX: fc.x,
+        minY: fc.y,
+        maxX: fc.x + fc.width,
+        maxY: fc.y + fc.height,
+        id: fc.id,
+        kind: 'container',
+        collapsed: fc.collapsed ?? false,
+        label: fc.label
+      })
     }
 
     // ── Class sub-containers ─────────────────────────────────────────────────
@@ -602,6 +831,16 @@ export class ThreeRenderer {
       const [r, g, b] = [0.506, 0.549, 0.973] // #818cf8
       pushContainer(cc, [r, g, b, 0.07], [r, g, b, 0.6], 10, 2)
       pushLabel(cc.label, cc.x + 12, cc.y + 10, 11, [r, g, b])
+      this.rbush.insert({
+        minX: cc.x,
+        minY: cc.y,
+        maxX: cc.x + cc.width,
+        maxY: cc.y + cc.height,
+        id: cc.id,
+        kind: 'container',
+        collapsed: false,
+        label: cc.label
+      })
     }
 
     this.contGeo.instanceCount = ci
@@ -628,6 +867,7 @@ export class ThreeRenderer {
       // Visible border so nodes contrast clearly against container backgrounds
       const borderC: [number, number, number, number] = isDark ? [0.2, 0.255, 0.333, 0.55] : [0.39, 0.455, 0.557, 0.8]
 
+      this.nodeInstIdx.set(id, ni)
       setRectInstance(
         this.nodeArrays,
         ni,
@@ -644,8 +884,19 @@ export class ThreeRenderer {
       )
       ni++
 
-      // RBush entry (world coords)
-      this.rbush.insert({ minX: ln.x, minY: ln.y, maxX: ln.x + ln.width, maxY: ln.y + ln.height, nodeId: id })
+      // RBush entry (world coords) — nodes before containers (sorted by area, nodes win)
+      const nodeName = gn?.name ?? id
+      this.rbush.insert({
+        minX: ln.x,
+        minY: ln.y,
+        maxX: ln.x + ln.width,
+        maxY: ln.y + ln.height,
+        id,
+        kind: 'node',
+        collapsed: false,
+        label: nodeName,
+        nodeKind: kind
+      })
 
       // ── Node text ──────────────────────────────────────────────────────────
       const nameRaw = gn?.name ?? id
@@ -691,6 +942,9 @@ export class ThreeRenderer {
         pts.push(section.endPoint.x, section.endPoint.y)
       }
       if (pts.length < 4) continue
+
+      // Store for CPU edge hit-testing
+      this.edgeHitData.push({ id: edge.id, kind: edge.kind, source: edge.source, target: edge.target, pts })
 
       // Push segments (each segment = one pair of points)
       for (let k = 0; k < pts.length - 2; k += 2) {
@@ -756,7 +1010,9 @@ export class ThreeRenderer {
     this.arrowGeo.dispose()
     this.glyphGeo.dispose()
     this.edgeLinesGeo.dispose()
+    this.hoveredEdgeLinesGeo.dispose()
     this.lineMat.dispose()
+    this.hoveredLineMat.dispose()
     this.atlas.texture.dispose()
     this.renderer.dispose()
   }

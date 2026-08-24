@@ -20,6 +20,7 @@
  *   iRadii     vec2  — (cornerRadius, borderWidth)
  *   iStatus    float — diff status: 0=none 1=added 2=modified 3=moved
  *   iSelected  float — 1 if selected
+ *   iHover     float — 1 if hovered
  */
 export const RECT_VERT = /* glsl */ `
 attribute vec2 iCenter;
@@ -29,6 +30,7 @@ attribute vec4 iBorder;
 attribute vec2 iRadii;
 attribute float iStatus;
 attribute float iSelected;
+attribute float iHover;
 
 varying vec2  vLocalPos;
 varying vec2  vHalfSize;
@@ -37,6 +39,7 @@ varying vec4  vBorder;
 varying vec2  vRadii;
 varying float vStatus;
 varying float vSelected;
+varying float vHover;
 
 void main() {
   vHalfSize  = iSize * 0.5;
@@ -45,6 +48,7 @@ void main() {
   vRadii     = iRadii;
   vStatus    = iStatus;
   vSelected  = iSelected;
+  vHover     = iHover;
   // position.xy: -0.5..0.5 unit quad; map to pixel space centred on node
   vLocalPos  = position.xy * iSize;
   vec2 worldPos = iCenter + position.xy * iSize;
@@ -60,6 +64,7 @@ varying vec4  vBorder;
 varying vec2  vRadii;
 varying float vStatus;
 varying float vSelected;
+varying float vHover;
 
 float sdRoundedBox(vec2 p, vec2 b, float r) {
   vec2 q = abs(p) - b + r;
@@ -79,6 +84,16 @@ void main() {
   float borderT  = smoothstep(-bw, 0.0, d);
   vec3  col      = mix(vFill.rgb, vBorder.rgb, borderT * vBorder.a);
   float alpha    = fillA * vFill.a;
+
+  // Hover: brighten fill slightly (applied before selection ring)
+  if (vHover > 0.5) {
+    col   = mix(col, vec3(1.0, 1.0, 1.0), 0.13 * fillA);
+    // Also add a thin inner highlight border
+    float hd    = abs(d + bw * 0.8) - bw * 0.3;
+    float hA    = 1.0 - smoothstep(-1.0, 1.0, hd);
+    col         = mix(col, vec3(0.55, 0.72, 1.0), hA * 0.55);
+    alpha       = max(alpha, hA * 0.45);
+  }
 
   // Selection ring (blue outline outside the node)
   if (vSelected > 0.5) {
