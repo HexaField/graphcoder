@@ -590,16 +590,8 @@ const ContextMenu: Component<CtxMenuProps> = (props) => {
 export const HierarchyPanel: Component = () => {
   const tree = createMemo(() => buildTree(state.fileNodes))
 
-  // Expand all packages by default; sync when project data changes.
+  // Sidebar tree expand/collapse — starts fully collapsed.
   const [expandedSet, setExpandedSet] = createSignal<Set<string>>(new Set())
-  createMemo(() => {
-    const pkgKeys = tree().packages.map((p) => p.path)
-    setExpandedSet((prev) => {
-      const next = new Set(prev)
-      for (const k of pkgKeys) next.add(k)
-      return next
-    })
-  })
 
   const hiddenSet = createMemo(() => new Set(state.hiddenPaths))
   const fileDiffMap = createMemo(() => state.fileDiffStatus)
