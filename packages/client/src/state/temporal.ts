@@ -80,12 +80,25 @@ export const temporalInitial: TemporalState = {
 
 // ── Actions ───────────────────────────────────────────────────────────────────
 
-/** Toggle the git history bar open/closed. Loads git status on first open. */
+/** Toggle the git history bar open/closed. Loads git status and commits on first open. */
 export async function toggleGitBar(): Promise<void> {
-  // If not yet opened, fetch git status first.
   setState('gitBarOpen', (v: boolean) => !v)
-  // Check git status if not yet known.
   await refreshGitStatus()
+
+  // Auto-load commits when the bar was just opened and has no commits yet.
+  //
+  // This is done imperatively rather than via a createEffect in GitBar.tsx.
+  // The reactive approach caused an infinite loop: loadCommits() resets
+  // commits synchronously with setState('commits', []), which re-fires any
+  // createEffect that reads commits.length, which calls loadCommits again,
+  // producing thousands of concurrent GET /api/git/commits requests.
+  //
+  // Dynamic import of `state` avoids the circular dep (core → temporal → core).
+  // After setState('gitBarOpen', toggle), state.gitBarOpen is the new value.
+  const { state } = await import('./core.js')
+  if (state.gitBarOpen && state.isGitRepo && state.commits.length === 0) {
+    await loadCommits(null)
+  }
 }
 
 /** Fetch git status and branch list for the current project. */
