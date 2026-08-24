@@ -201,7 +201,7 @@ export const GraphCanvas: Component = () => {
 
       if (statuses.size === 0) return
       if (statuses.size === 1) {
-        const only = [...statuses][0] as 'added' | 'removed' | 'modified'
+        const only = [...statuses][0] as 'added' | 'removed' | 'modified' | 'moved'
         containerStatus.set(g.id, only === 'moved' ? 'modified' : only)
       } else {
         containerStatus.set(g.id, 'mixed')

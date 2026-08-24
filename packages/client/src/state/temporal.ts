@@ -45,8 +45,10 @@ export interface TemporalState {
   diffStatusMap: Map<string, 'added' | 'removed' | 'modified' | 'moved'> | null
   /** Diff status per edge key ("srcSem|tgtSem|kind") — drives edge colouring. */
   edgeStatusMap: Map<string, 'added' | 'removed'> | null
+  /** Aggregate diff status per filePath — drives hierarchy panel colouring. */
+  fileDiffStatus: Map<string, 'added' | 'removed' | 'modified' | 'mixed'> | null
   /** Snapshot of the live view before the diff replaced it — restored on clear. */
-  savedView: { nodes: GraphNode[]; edges: GraphEdge[]; groups: FileGroup[] } | null
+  savedView: { nodes: GraphNode[]; edges: GraphEdge[]; groups: FileGroup[]; fileNodes: GraphNode[] } | null
 }
 
 // ── Initialise ────────────────────────────────────────────────────────────────
@@ -65,6 +67,7 @@ export const temporalInitial: TemporalState = {
   diffError: null,
   diffStatusMap: null,
   edgeStatusMap: null,
+  fileDiffStatus: null,
   savedView: null
 }
 
@@ -216,8 +219,10 @@ function buildDiffView(
   nodes: GraphNode[]
   edges: GraphEdge[]
   groups: FileGroup[]
+  fileNodes: GraphNode[]
   nodeStatus: Map<string, 'added' | 'removed' | 'modified' | 'moved'>
   edgeStatus: Map<string, 'added' | 'removed'>
+  fileDiffStatus: Map<string, 'added' | 'removed' | 'modified' | 'mixed'>
 } {
   // Start with all target nodes (the "after" state).
   const mergedNodes = [...targetSnapshot.nodes]
@@ -233,13 +238,33 @@ function buildDiffView(
   for (const n of baseSnapshot.nodes) baseCgToSem.set(n.id, nodeSemanticId(n))
   for (const n of targetSnapshot.nodes) targetCgToSem.set(n.id, nodeSemanticId(n))
 
+  // Semantic-ID → filePath lookup for modify/move operations.
+  const semToFilePath = new Map<string, string>()
+  for (const n of targetSnapshot.nodes) semToFilePath.set(nodeSemanticId(n), n.filePath)
+  for (const n of baseSnapshot.nodes) {
+    const sem = nodeSemanticId(n)
+    if (!semToFilePath.has(sem)) semToFilePath.set(sem, n.filePath)
+  }
+
+  // Accumulate per-file diff statuses for the hierarchy panel.
+  const filePathStatuses = new Map<string, Set<string>>()
+  function trackFileStatus(filePath: string, status: string): void {
+    if (!filePath) return
+    const set = filePathStatuses.get(filePath) ?? new Set()
+    // Normalise 'moved' to 'modified' for file-level aggregation.
+    set.add(status === 'moved' ? 'modified' : status)
+    filePathStatuses.set(filePath, set)
+  }
+
   for (const op of diff.operations) {
     switch (op.op) {
       case 'add_node':
         nodeStatus.set(op.node.id, 'added')
+        trackFileStatus(op.node.filePath, 'added')
         break
       case 'remove_node': {
         nodeStatus.set(op.id, 'removed')
+        trackFileStatus(op.node.filePath, 'removed')
         // Inject removed node into the merged view so it appears on the canvas.
         if (!mergedNodeIds.has(op.id)) {
           mergedNodes.push(snapshotToGraphNode(op.node))
@@ -249,9 +274,11 @@ function buildDiffView(
       }
       case 'modify_node':
         nodeStatus.set(op.id, 'modified')
+        trackFileStatus(semToFilePath.get(op.id) ?? '', 'modified')
         break
       case 'move_node':
         nodeStatus.set(op.id, 'moved')
+        trackFileStatus(op.to.filePath, 'modified')
         break
       case 'add_edge':
         edgeStatus.set(`${op.edge.source}|${op.edge.target}|${op.edge.kind}`, 'added')
@@ -291,7 +318,35 @@ function buildDiffView(
   }
 
   const groups = buildDiffFileGroups(mergedNodes)
-  return { nodes: mergedNodes, edges: mergedEdges, groups, nodeStatus, edgeStatus }
+
+  // Build synthetic file nodes for the hierarchy panel — one per unique filePath.
+  const uniqueFilePaths = new Set<string>()
+  for (const n of mergedNodes) if (n.filePath) uniqueFilePaths.add(n.filePath)
+  const fileNodes: GraphNode[] = [...uniqueFilePaths].map((fp) => ({
+    id: `diff-file:${fp}`,
+    kind: 'file' as GraphNode['kind'],
+    name: fp.split('/').pop() ?? fp,
+    qualifiedName: fp,
+    filePath: fp,
+    language: '',
+    startLine: 0,
+    endLine: 0,
+    startColumn: 0,
+    endColumn: 0,
+    updatedAt: 0
+  }))
+
+  // Convert accumulated per-file status sets into a single aggregate status.
+  const fileDiffStatus = new Map<string, 'added' | 'removed' | 'modified' | 'mixed'>()
+  for (const [fp, statuses] of filePathStatuses) {
+    if (statuses.size === 1) {
+      fileDiffStatus.set(fp, [...statuses][0] as 'added' | 'removed' | 'modified')
+    } else {
+      fileDiffStatus.set(fp, 'mixed')
+    }
+  }
+
+  return { nodes: mergedNodes, edges: mergedEdges, groups, fileNodes, nodeStatus, edgeStatus, fileDiffStatus }
 }
 
 /**
@@ -334,17 +389,20 @@ export async function runTemporalDiff(): Promise<void> {
       setState('savedView', {
         nodes: [...state.viewNodes],
         edges: [...state.viewEdges],
-        groups: [...state.viewGroups]
+        groups: [...state.viewGroups],
+        fileNodes: [...state.fileNodes]
       })
     }
 
-    // Build the merged diff view and push it into the canvas.
+    // Build the merged diff view and push it into the canvas + hierarchy.
     const dv = buildDiffView(result.baseSnapshot, result.targetSnapshot, result.diff)
     setState('viewNodes', dv.nodes)
     setState('viewEdges', dv.edges)
     setState('viewGroups', dv.groups)
+    setState('fileNodes', dv.fileNodes)
     setState('diffStatusMap', dv.nodeStatus)
     setState('edgeStatusMap', dv.edgeStatus)
+    setState('fileDiffStatus', dv.fileDiffStatus)
     setState('currentDiff', result.diff)
     setState('temporalRange', { baseLabel: labelFor(base), targetLabel: labelFor(target) })
   } catch (err) {

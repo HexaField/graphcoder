@@ -28,6 +28,7 @@ export function clearDiff(): void {
     setState('viewNodes', state.savedView.nodes)
     setState('viewEdges', state.savedView.edges)
     setState('viewGroups', state.savedView.groups)
+    setState('fileNodes', state.savedView.fileNodes)
     setState('savedView', null)
   }
   setState('baseSnapshot', null)
@@ -35,6 +36,7 @@ export function clearDiff(): void {
   setState('temporalRange', null)
   setState('diffStatusMap', null)
   setState('edgeStatusMap', null)
+  setState('fileDiffStatus', null)
 }
 
 /**

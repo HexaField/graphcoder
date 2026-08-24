@@ -312,6 +312,29 @@ const EyeSlash: Component = () => (
 
 // ── Row ───────────────────────────────────────────────────────────────────────
 
+// ── Diff status colours ──────────────────────────────────────────────────────
+
+type DiffStatus = 'added' | 'removed' | 'modified' | 'mixed'
+
+const DIFF_COLORS: Record<DiffStatus, string> = {
+  added: '#4ade80', // green-400
+  removed: '#f87171', // red-400
+  modified: '#facc15', // yellow-400
+  mixed: '#facc15' // yellow-400
+}
+
+/**
+ * Aggregate child diff statuses into a single parent status.
+ * Returns undefined when no children carry a status.
+ */
+function aggregateDiffStatus(statuses: (DiffStatus | undefined)[]): DiffStatus | undefined {
+  const present = statuses.filter((s): s is DiffStatus => s !== undefined)
+  if (present.length === 0) return undefined
+  const unique = new Set(present)
+  if (unique.size === 1) return present[0]
+  return 'mixed'
+}
+
 interface RowProps {
   /** Stable key used for test selection. Exposed as data-nodeid on the row div. */
   nodeId?: string
@@ -336,6 +359,8 @@ interface RowProps {
    * the graph; only its children are collapsed.
    */
   collapseMode?: boolean
+  /** Diff status — drives label colour (green/red/yellow). */
+  diffStatus?: DiffStatus
   onToggleHide: (e: MouseEvent) => void
   onContextMenu?: (e: MouseEvent) => void
 }
@@ -378,8 +403,13 @@ const Row: Component<RowProps> = (props) => {
 
       <button
         class={`flex-1 min-w-0 text-left text-xs font-mono truncate px-1 leading-none ${
-          props.excluded ? "line-through text-gray-400 dark:text-gray-600" : "text-gray-700 dark:text-gray-300"
+          props.excluded
+            ? "line-through text-gray-400 dark:text-gray-600"
+            : props.diffStatus
+              ? ''
+              : "text-gray-700 dark:text-gray-300"
         }`}
+        style={props.diffStatus && !props.excluded ? { color: DIFF_COLORS[props.diffStatus] } : undefined}
         onClick={props.onExpand}
       >
         {props.label}
@@ -572,6 +602,7 @@ export const HierarchyPanel: Component = () => {
   })
 
   const hiddenSet = createMemo(() => new Set(state.hiddenPaths))
+  const fileDiffMap = createMemo(() => state.fileDiffStatus)
   // When any grouping is active, eye buttons on file rows control collapse/expand
   // of the group container rather than hiding the file from the graph entirely.
   const anyGroupingOn = () => state.groupByFile || state.groupByClass || state.groupByContract || state.groupByPackage
@@ -626,6 +657,7 @@ export const HierarchyPanel: Component = () => {
           const fileExcluded = () => isExcluded(file.key)
           const fileExpanded = () => expandedSet().has(file.key)
           const hasSymbols = file.children.length > 0
+          const fileDiff = () => fileDiffMap()?.get(file.key)
 
           // In group mode: eye reflects whether the group container is expanded.
           // Prefix-matches state.expandedGroups (same logic as GraphCanvas.isGroupExpanded)
@@ -650,6 +682,7 @@ export const HierarchyPanel: Component = () => {
                 ancestorHidden={anyGroupingOn() ? false : ancestorHiddenFn()}
                 excluded={fileExcluded()}
                 collapseMode={anyGroupingOn()}
+                diffStatus={fileDiff()}
                 onToggleHide={(e) => {
                   e.stopPropagation()
                   if (anyGroupingOn()) {
@@ -691,6 +724,22 @@ export const HierarchyPanel: Component = () => {
           const dirExpanded = () => expandedSet().has(dir.path)
           const hasContent = dir.children.length > 0 || dir.subdirs.length > 0
 
+          // Aggregate diff status from child files.
+          const dirDiff = (): DiffStatus | undefined => {
+            const map = fileDiffMap()
+            if (!map) return undefined
+            const childStatuses: (DiffStatus | undefined)[] = dir.children.map((f) => map.get(f.key))
+            // Recurse into subdirs — collect file statuses from the full subtree.
+            function collectSubdirStatuses(subdirs: TreeDir[]): void {
+              for (const sub of subdirs) {
+                for (const f of sub.children) childStatuses.push(map!.get(f.key))
+                collectSubdirStatuses(sub.subdirs)
+              }
+            }
+            collectSubdirStatuses(dir.subdirs)
+            return aggregateDiffStatus(childStatuses)
+          }
+
           return (
             <>
               <Row
@@ -702,6 +751,7 @@ export const HierarchyPanel: Component = () => {
                 onExpand={() => hasContent && toggleExpanded(dir.path)}
                 hidden={dirHidden()}
                 ancestorHidden={ancestorHiddenFn()}
+                diffStatus={dirDiff()}
                 onToggleHide={(e) => {
                   e.stopPropagation()
                   toggleHierarchyHidden(dir.path)
@@ -787,6 +837,21 @@ export const HierarchyPanel: Component = () => {
                 const pkgExpanded = () => expandedSet().has(pkg.path)
                 const hasContent = pkg.dirs.length > 0 || pkg.files.length > 0
 
+                // Aggregate diff status from all files in the package.
+                const pkgDiff = (): DiffStatus | undefined => {
+                  const map = fileDiffMap()
+                  if (!map) return undefined
+                  const childStatuses: (DiffStatus | undefined)[] = pkg.files.map((f) => map.get(f.key))
+                  function collectDirStatuses(dirs: TreeDir[]): void {
+                    for (const d of dirs) {
+                      for (const f of d.children) childStatuses.push(map!.get(f.key))
+                      collectDirStatuses(d.subdirs)
+                    }
+                  }
+                  collectDirStatuses(pkg.dirs)
+                  return aggregateDiffStatus(childStatuses)
+                }
+
                 return (
                   <>
                     <Row
@@ -798,6 +863,7 @@ export const HierarchyPanel: Component = () => {
                       onExpand={() => hasContent && toggleExpanded(pkg.path)}
                       hidden={pkgHidden()}
                       ancestorHidden={false}
+                      diffStatus={pkgDiff()}
                       onToggleHide={(e) => {
                         e.stopPropagation()
                         toggleHierarchyHidden(pkg.path)
