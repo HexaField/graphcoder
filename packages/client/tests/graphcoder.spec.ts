@@ -223,49 +223,101 @@ test.describe('with open project', () => {
   // and verify the layout changes (spinner fires briefly then clears).
   // -------------------------------------------------------------------------
 
-  test('canvas expand button appears on hover and does not reset camera', async ({ page }) => {
-    // Start with all groups collapsed (default). Verify the canvas renders.
-    await expect(page.getByTestId('graph-canvas')).toBeVisible()
+  test('canvas expand button expands collapsed container and collapse reverses it', async ({ page }) => {
+    // Wait for graph data to load via WS.
+    await page.waitForFunction(
+      () => {
+        const gc = (window as any).__graphcoder
+        return gc && gc.viewNodes && gc.viewNodes.length > 0
+      },
+      { timeout: 15_000 }
+    )
 
-    // Wait for any initial layout to complete
-    await page
-      .waitForFunction(() => !document.querySelector('[data-testid="graph-canvas"] div.absolute'), { timeout: 15_000 })
-      .catch(() => {
-        /* spinner may already be gone */
-      })
+    // Wait for layout to finish (spinner disappears).
+    await page.waitForTimeout(2000)
 
-    // Hover over the centre of the canvas — a chip should be there in a typical
-    // project. The expand button is only visible on hover so we hover first.
     const canvas = page.getByTestId('graph-canvas')
     const box = await canvas.boundingBox()
+    expect(box).toBeTruthy()
     if (!box) return
 
-    const cx = box.x + box.width / 2
-    const cy = box.y + box.height / 2
-    await page.mouse.move(cx, cy)
-    await page.waitForTimeout(300)
-
-    // If the expand button appeared, click it and verify the layout reruns
+    // Scan the canvas to find a container with the expand button.
     const expandBtn = page.getByTestId('container-expand-btn')
-    if (await expandBtn.isVisible({ timeout: 1000 }).catch(() => false)) {
-      // Record camera-related state — canvas wrapper class shouldn't reload/recreate
-      const canvasPresent = await page.getByTestId('graph-webgl-canvas').isVisible()
-      expect(canvasPresent).toBe(true)
+    let foundBtn = false
+    const gridSize = 10
+    for (let row = 0; row < gridSize && !foundBtn; row++) {
+      for (let col = 0; col < gridSize && !foundBtn; col++) {
+        const x = box.x + (col + 0.5) * (box.width / gridSize)
+        const y = box.y + (row + 0.5) * (box.height / gridSize)
+        await page.mouse.move(x, y)
+        await page.waitForTimeout(100)
+        if (await expandBtn.isVisible({ timeout: 200 }).catch(() => false)) {
+          foundBtn = true
+        }
+      }
+    }
 
+    if (!foundBtn) {
+      // No container hit — pass trivially (project might have no file groups).
+      return
+    }
+
+    // ── Expand ──
+    const btnText = await expandBtn.textContent()
+    expect(btnText).toContain('Expand')
+
+    const beforeExpand = await page.evaluate(() => (window as any).__graphcoder.viewNodes.length)
+    await expandBtn.click()
+
+    // Wait for the server response and layout.
+    await page.waitForFunction((prev: number) => (window as any).__graphcoder.viewNodes.length !== prev, beforeExpand, {
+      timeout: 10_000
+    })
+    await page.waitForTimeout(1000)
+
+    const afterExpand = await page.evaluate(() => (window as any).__graphcoder.viewNodes.length)
+    expect(afterExpand).toBeGreaterThan(beforeExpand)
+
+    // WebGL canvas survived the relayout.
+    await expect(page.getByTestId('graph-webgl-canvas')).toBeVisible()
+
+    // ── Collapse back ──
+    // The expanded container should now show the collapse button on hover.
+    // Re-scan to find the button (layout moved things around).
+    foundBtn = false
+    for (let row = 0; row < gridSize && !foundBtn; row++) {
+      for (let col = 0; col < gridSize && !foundBtn; col++) {
+        const x = box.x + (col + 0.5) * (box.width / gridSize)
+        const y = box.y + (row + 0.5) * (box.height / gridSize)
+        await page.mouse.move(x, y)
+        await page.waitForTimeout(100)
+        if (await expandBtn.isVisible({ timeout: 200 }).catch(() => false)) {
+          const text = await expandBtn.textContent()
+          if (text?.includes('Collapse')) {
+            foundBtn = true
+          }
+        }
+      }
+    }
+
+    if (foundBtn) {
       await expandBtn.click()
 
-      // Layout spinner must appear then disappear (confirms layout reran)
+      // Wait for node count to change back.
+      await page.waitForFunction(
+        (prev: number) => (window as any).__graphcoder.viewNodes.length !== prev,
+        afterExpand,
+        { timeout: 10_000 }
+      )
       await page.waitForTimeout(500)
-      await expect(page.getByTestId('graph-canvas')).toBeVisible()
 
-      // WebGL canvas must still exist (camera was not destroyed/reset to init)
-      await expect(page.getByTestId('graph-webgl-canvas')).toBeVisible()
-
-      // Project stats must still be present (no crash or project unload)
-      await expect(page.getByTestId('project-stats')).toBeVisible()
+      const afterCollapse = await page.evaluate(() => (window as any).__graphcoder.viewNodes.length)
+      // Collapse reduces nodes back to original count (or at least fewer than expanded).
+      expect(afterCollapse).toBeLessThan(afterExpand)
     }
-    // If no chip was hovered (project has no collapsed containers at centre),
-    // the test passes trivially — the important coverage is the unit tests.
+
+    // Project still intact after the round-trip.
+    await expect(page.getByTestId('project-stats')).toBeVisible()
   })
 
   // -------------------------------------------------------------------------

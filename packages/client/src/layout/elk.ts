@@ -269,6 +269,16 @@ async function layoutGrouped(
     dirPathToFiles.get(dir)!.push(fg)
   }
 
+  // Collapsed state for directory containers: all child file groups collapsed → dir collapsed.
+  const dirCollapsed = (dirPath: string): boolean => {
+    const fgs = dirPathToFiles.get(dirPath)
+    return fgs !== undefined && fgs.length > 0 && fgs.every((fg) => fg.collapsed === true)
+  }
+
+  // Collapsed state for package containers: all nested file groups collapsed → package collapsed.
+  const packageCollapsed = (pkgPath: string): boolean =>
+    nestedGroups.filter((fg) => fg.packagePath === pkgPath).every((fg) => fg.collapsed === true)
+
   // ── Shared setup ──────────────────────────────────────────────────────────
 
   // Valid edge endpoints: layout nodes + group container IDs.
@@ -317,6 +327,7 @@ async function layoutGrouped(
 
   let packagePathToId = new Map<string, string>()
   let packageIdToLabel = new Map<string, string>()
+  let packageIdToPath = new Map<string, string>()
   let packageIdSet = new Set<string>()
   let fileIdToPackageId = new Map<string, string>() // fileGroup id → pkgCompound id
 
@@ -327,6 +338,7 @@ async function layoutGrouped(
         const id = `__pkg${pkgIdx++}`
         packagePathToId.set(fg.packagePath, id)
         packageIdToLabel.set(id, fg.packagePath.split('/').pop() ?? fg.packagePath)
+        packageIdToPath.set(id, fg.packagePath)
       }
     }
     for (const fg of nestedGroups) {
@@ -761,7 +773,17 @@ async function layoutGrouped(
       if (packageIdSet.has(rootChild.id)) {
         // Package compound
         const pkgLabel = packageIdToLabel.get(rootChild.id)!
-        pkg4PkgContainers.push({ id: rootChild.id, label: pkgLabel, x: rx, y: ry, width: rw, height: rh })
+        const pkgPath = packageIdToPath.get(rootChild.id)!
+        pkg4PkgContainers.push({
+          id: rootChild.id,
+          label: pkgLabel,
+          x: rx,
+          y: ry,
+          width: rw,
+          height: rh,
+          filePath: pkgPath,
+          collapsed: packageCollapsed(pkgPath)
+        })
 
         for (const dirChild of rootChild.children ?? []) {
           const dx = rx + (dirChild.x ?? 0)
@@ -771,7 +793,16 @@ async function layoutGrouped(
 
           if (dirIdSet.has(dirChild.id)) {
             const dp = dirIdToPath.get(dirChild.id)!
-            pkg4DirContainers.push({ id: dirChild.id, label: dirLabel(dp), x: dx, y: dy, width: dw, height: dh })
+            pkg4DirContainers.push({
+              id: dirChild.id,
+              label: dirLabel(dp),
+              x: dx,
+              y: dy,
+              width: dw,
+              height: dh,
+              filePath: dp,
+              collapsed: dirCollapsed(dp)
+            })
 
             for (const fileChild of dirChild.children ?? []) {
               const fx = dx + (fileChild.x ?? 0)
@@ -801,7 +832,16 @@ async function layoutGrouped(
       } else if (dirIdSet.has(rootChild.id)) {
         // Unpacked dir at root (no package)
         const dp = dirIdToPath.get(rootChild.id)!
-        pkg4DirContainers.push({ id: rootChild.id, label: dirLabel(dp), x: rx, y: ry, width: rw, height: rh })
+        pkg4DirContainers.push({
+          id: rootChild.id,
+          label: dirLabel(dp),
+          x: rx,
+          y: ry,
+          width: rw,
+          height: rh,
+          filePath: dp,
+          collapsed: dirCollapsed(dp)
+        })
         for (const fileChild of rootChild.children ?? []) {
           const fx = rx + (fileChild.x ?? 0)
           const fy = ry + (fileChild.y ?? 0)
@@ -1041,7 +1081,16 @@ async function layoutGrouped(
     if (dirIdSet.has(rootChild.id)) {
       // Directory compound
       const dp = dirIdToPath.get(rootChild.id)!
-      dirContainers.push({ id: rootChild.id, label: dirLabel(dp), x: rx, y: ry, width: rw, height: rh })
+      dirContainers.push({
+        id: rootChild.id,
+        label: dirLabel(dp),
+        x: rx,
+        y: ry,
+        width: rw,
+        height: rh,
+        filePath: dp,
+        collapsed: dirCollapsed(dp)
+      })
 
       for (const fileChild of rootChild.children ?? []) {
         const fx = rx + (fileChild.x ?? 0)

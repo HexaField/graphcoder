@@ -72,7 +72,7 @@ See `~/.sovereign/membranes/personal/plans/graphcoder.md` for the full design.
 - `shaders.ts` — GLSL ES 1.0 vertex/fragment shaders for rect (rounded-rect SDF), glyph (atlas sample), and arrow (rotated triangle)
 - `GraphCanvas.tsx` — SolidJS wrapper; `OrthographicCamera` with Y-down convention matching ELK; pan/zoom via World Group transform; `RBush` R-tree for hit testing (no DOM overlay)
 
-**No DOM overlay buttons** — click/hover hit-testing via RBush in world coordinates.
+**Minimal DOM overlays** — hover hit-testing via RBush in world coordinates; expand/collapse button on hovered containers is a positioned HTML `<button>` (`container-expand-btn`) above the canvas.
 
 ## Known gotchas
 
