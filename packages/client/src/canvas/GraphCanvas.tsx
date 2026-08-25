@@ -30,7 +30,7 @@ import {
 import type { FileGroup, GraphNode } from '@graphcoder/core'
 import { nodeSemanticId } from '@graphcoder/core'
 import { layoutGraph, type LayoutResult } from '../layout/elk.js'
-import { clearFocus, selectNode, state, toggleGroupExpanded } from '../state/store.js'
+import { addGroupExpanded, clearFocus, collapseGroup, selectNode, state } from '../state/store.js'
 import { resolvedTheme } from '../state/theme.js'
 import type { DiffOverlay, HitResult } from './ThreeRenderer.js'
 import { ThreeRenderer } from './ThreeRenderer.js'
@@ -359,6 +359,11 @@ export const GraphCanvas: Component = () => {
     const td = tooltipData()
     if (td?.kind !== 'container') return null
     if (!r3) return null
+    // Only show the expand/collapse button for containers that have a filePath —
+    // class sub-containers and contract groups lack one and cannot be toggled
+    // via expandedGroups (isGroupExpanded matches on filePath, not id).
+    const fp = (td as ContainerTooltip).filePath
+    if (!fp) return null
     const fc = r3.getContainerWorldRect(td.id)
     if (!fc) return null
     const { panX, panY, zoom } = cam()
@@ -370,7 +375,7 @@ export const GraphCanvas: Component = () => {
       collapsed: fc.collapsed ?? false,
       id: td.id,
       label: td.label,
-      filePath: (td as ContainerTooltip).filePath
+      filePath: fp
     }
   })
 
@@ -601,7 +606,11 @@ export const GraphCanvas: Component = () => {
                   screenX: sr().x,
                   screenY: sr().y
                 }
-                toggleGroupExpanded(sr().filePath ?? sr().id)
+                if (sr().collapsed) {
+                  addGroupExpanded(sr().filePath)
+                } else {
+                  collapseGroup(sr().filePath)
+                }
               }}
             >
               {sr().collapsed ? '+ Expand' : '- Collapse'}

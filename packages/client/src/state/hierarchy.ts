@@ -57,9 +57,41 @@ export function clearHierarchyHidden(): void {
  * Key semantics mirror hiddenPaths: file path, dir path, or package path.
  * Prefix matching applies — toggling a dir path expands/collapses all files
  * under that directory.
+ *
+ * Collapse logic removes the exact key AND any child paths that start with
+ * `key + '/'`. This handles the case where individual files under a dir were
+ * expanded separately — clicking collapse on the dir removes them all.
  */
 export function toggleGroupExpanded(key: string): void {
-  setState('expandedGroups', (prev) => (prev.includes(key) ? prev.filter((k) => k !== key) : [...prev, key]))
+  setState('expandedGroups', (prev) => {
+    const prefix = key + '/'
+    const hasExact = prev.includes(key)
+    const hasChildren = prev.some((k) => k.startsWith(prefix))
+    if (hasExact || hasChildren) {
+      // Collapse: remove exact match + all children under this prefix
+      return prev.filter((k) => k !== key && !k.startsWith(prefix))
+    }
+    // Expand
+    return [...prev, key]
+  })
+  persist()
+}
+
+/**
+ * Collapse a group — removes the key and all child paths from expandedGroups.
+ * Unlike toggleGroupExpanded, this never adds: it ensures the group ends up
+ * collapsed. If the group was expanded via a parent prefix, that parent gets
+ * removed too (collapsing siblings as a side effect — the user can re-expand
+ * the parent afterward).
+ */
+export function collapseGroup(key: string): void {
+  setState('expandedGroups', (prev) => {
+    const prefix = key + '/'
+    let next = prev.filter((k) => k !== key && !k.startsWith(prefix))
+    // If still expanded via a parent prefix, remove that parent too
+    next = next.filter((k) => !key.startsWith(k + '/'))
+    return next
+  })
   persist()
 }
 

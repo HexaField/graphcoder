@@ -55,6 +55,7 @@ export {
   addGroupExpanded,
   clearHierarchyHidden,
   collapseAllGroups,
+  collapseGroup,
   expandAllGroups,
   setHiddenPaths,
   toggleGroupExpanded,

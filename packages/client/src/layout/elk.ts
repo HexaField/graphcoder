@@ -79,10 +79,12 @@ export interface FileContainer {
   /** True for collapsed groups rendered as fixed-size chip placeholders. */
   collapsed?: boolean
   /**
-   * File path for groups that have one (file-level and class-level groups).
-   * Used as the key for toggleGroupExpanded — must match what the server
-   * checks in isGroupExpanded (fn.filePath, not fn.id).
-   * Absent for contract groups and dir/package compounds.
+   * File or directory path — the key for toggleGroupExpanded.
+   * Must match what isGroupExpanded checks (fn.filePath, not fn.id).
+   * Present on file containers, dir containers, and package containers.
+   * Absent on class sub-containers and contract groups (those cannot
+   * be toggled independently; the canvas suppresses the expand/collapse
+   * button when filePath is missing).
    */
   filePath?: string
 }
