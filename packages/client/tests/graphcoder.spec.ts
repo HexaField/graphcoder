@@ -657,30 +657,50 @@ test.describe('Temporal diff — git commit comparison', () => {
       return
     }
 
-    // Call selectNode programmatically — this exercises the full resolution path:
-    // semantic ID → diffCgIdMap lookup → REST fetch → fallback if 404
-    await page.evaluate(async (id: string) => {
-      const { selectNode } = await import('/src/state/selection.js')
-      await selectNode(id)
-    }, nodeId)
+    // Call selectNode programmatically — during a diff, selectNode builds
+    // detail from local diff data (semantic IDs) instead of REST (CG IDs).
+    // The REST call runs as optional enrichment for source code only.
+    await page.evaluate((id: string) => (window as any).__graphcoder.selectNode(id), nodeId)
+
+    // Wait for the async detail fetch to complete
+    await page.waitForFunction(
+      () => {
+        const gc = (window as any).__graphcoder
+        return gc.selectedNodeDetail !== null || gc.error !== null
+      },
+      { timeout: 15_000 }
+    )
 
     // The inspector panel should now show node detail
     const detail = await page.evaluate(() => {
       const gc = (window as any).__graphcoder
       const d = gc.selectedNodeDetail
+      if (!d) return { hasDetail: false, nodeName: null, nodeKind: null, error: gc.error, edgesUseCgIds: false }
+
+      // Verify edges use semantic IDs (64-char hex), not CG IDs (kind:hash)
+      const cgPattern = /^(file|function|class|interface|property|import|method|type|module):/
+      const endpoints = [
+        ...(d.incoming ?? []).map((e: { source: string }) => e.source),
+        ...(d.outgoing ?? []).map((e: { target: string }) => e.target)
+      ]
+      const edgesUseCgIds = endpoints.some((s: string) => cgPattern.test(s))
+
       return {
-        hasDetail: !!d,
-        nodeName: d?.node?.name ?? null,
-        nodeKind: d?.node?.kind ?? null,
-        error: gc.error
+        hasDetail: true,
+        nodeName: d.node?.name ?? null,
+        nodeKind: d.node?.kind ?? null,
+        error: gc.error,
+        edgesUseCgIds
       }
     })
 
-    // Detail must have loaded — either via REST (CodeGraph ID still at HEAD)
-    // or via local fallback (historical commit not indexed at HEAD)
+    // Detail must have loaded from local diff data
     expect(detail.hasDetail).toBe(true)
     expect(detail.nodeName).toBeTruthy()
     expect(detail.nodeKind).toBeTruthy()
+
+    // Edges must use semantic IDs (matching the diff canvas), not CG IDs
+    expect(detail.edgesUseCgIds).toBe(false)
 
     // The inspector panel should be visible with the node name
     const inspector = page.getByTestId('node-inspector')
@@ -742,10 +762,7 @@ test.describe('Temporal diff — git commit comparison', () => {
       await clearBtn.click()
     } else {
       // Fallback: clear programmatically
-      await page.evaluate(async () => {
-        const { clearDiff } = await import('/src/state/diff.js')
-        clearDiff()
-      })
+      await page.evaluate(() => (window as any).__graphcoder.clearDiff())
     }
 
     await page.waitForTimeout(500)

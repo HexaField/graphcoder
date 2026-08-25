@@ -12,6 +12,7 @@ import {
   connectWebSocket,
   initFromUrl,
   refilterDiffView,
+  selectNode,
   sendViewRequest,
   state,
   toggleGitBar
@@ -134,7 +135,9 @@ export default function App() {
     },
     get error() {
       return state.error
-    }
+    },
+    selectNode,
+    clearDiff
   }
 
   onMount(() => {

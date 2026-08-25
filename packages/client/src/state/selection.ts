@@ -36,29 +36,48 @@ function buildLocalDetail(nodeId: string): NodeDetail | null {
  * Select a node by ID and fetch its full detail from the server.
  * Clears any stale detail before the request resolves.
  *
- * During a temporal diff the view uses semantic IDs. The REST API expects
- * CodeGraph IDs, so we resolve through the reverse map first. If the
- * server returns 404 (the historical ID no longer exists at HEAD), we
- * fall back to building a detail object from the local diff data.
+ * During a temporal diff the view uses semantic IDs while the REST API
+ * returns edges keyed by CodeGraph IDs (HEAD topology). Those CG IDs
+ * don't match the diff canvas, so the inspector would show wrong
+ * connections. Fix: when a diff occupies the display, build the node
+ * detail from local diff data (correct semantic IDs for all edges).
+ * The REST call still runs as an optional enrichment for source code.
  */
 export async function selectNode(nodeId: string): Promise<void> {
   setState('selectedNodeId', nodeId)
   setState('selectedNodeDetail', null)
   setState('isLoadingDetail', true)
 
-  const cgMap = state.diffCgIdMap
-  const resolvedId = cgMap?.get(nodeId) ?? nodeId
-
   try {
-    const detail = await api.fetchNodeDetail(resolvedId)
+    // When a diff is active, the local data has the authoritative topology
+    // (edges use semantic IDs matching the canvas). REST returns HEAD's
+    // topology with CG IDs — wrong for the diff context.
+    if (state.rawDiffView) {
+      const local = buildLocalDetail(nodeId)
+      if (local) {
+        // Optionally enrich with source code from the REST endpoint.
+        const cgMap = state.diffCgIdMap
+        const resolvedId = cgMap?.get(nodeId) ?? nodeId
+        try {
+          const rest = await api.fetchNodeDetail(resolvedId)
+          if (rest.code) local.code = rest.code
+        } catch {
+          // Code unavailable for historical nodes — local detail still valid.
+        }
+        setState('selectedNodeDetail', local)
+        return
+      }
+    }
+
+    // Normal (non-diff) path — REST is authoritative.
+    const detail = await api.fetchNodeDetail(nodeId)
     setState('selectedNodeDetail', detail)
   } catch {
-    // When the REST lookup fails during a diff view, fall back to local data.
     const local = buildLocalDetail(nodeId)
     if (local) {
       setState('selectedNodeDetail', local)
     } else {
-      setState('error', `Node ${resolvedId} not found`)
+      setState('error', `Node ${nodeId} not found`)
     }
   } finally {
     setState('isLoadingDetail', false)
