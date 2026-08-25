@@ -10,20 +10,51 @@ export interface SearchState {
   isSearching: boolean
 }
 
-/** Run a fuzzy search against the server and update the search results. */
-export async function search(query: string): Promise<void> {
+/** Abort controller for the current in-flight search request. */
+let searchController: AbortController | null = null
+/** Debounce timer — 150 ms batches rapid keystrokes into one request. */
+let searchTimer: ReturnType<typeof setTimeout> | undefined
+
+/**
+ * Run a fuzzy search against the server and update the search results.
+ *
+ * Debounces keystrokes by 150 ms and aborts the previous in-flight
+ * request when a newer one fires, so rapid typing generates at most
+ * one server round-trip per pause.
+ */
+export function search(query: string): void {
   setState('searchQuery', query)
+  clearTimeout(searchTimer)
+
   if (!query.trim()) {
+    searchController?.abort()
+    searchController = null
     setState('searchResults', [])
+    setState('isSearching', false)
     return
   }
+
   setState('isSearching', true)
-  try {
-    const result = await api.searchNodes(query)
-    setState('searchResults', result.results)
-  } catch (e) {
-    setState('error', e instanceof Error ? e.message : 'Search failed')
-  } finally {
-    setState('isSearching', false)
-  }
+
+  searchTimer = setTimeout(() => {
+    // Abort previous in-flight request before starting the new one.
+    searchController?.abort()
+    const controller = new AbortController()
+    searchController = controller
+
+    api
+      .searchNodes(query, controller.signal)
+      .then((result) => {
+        if (controller.signal.aborted) return
+        setState('searchResults', result.results)
+      })
+      .catch((e) => {
+        if (controller.signal.aborted) return
+        setState('error', e instanceof Error ? e.message : 'Search failed')
+      })
+      .finally(() => {
+        if (controller.signal.aborted) return
+        setState('isSearching', false)
+      })
+  }, 150)
 }

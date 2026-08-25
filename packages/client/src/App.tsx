@@ -5,6 +5,7 @@ import { GitGraph } from './components/GitGraph.js'
 import { GraphParamsPanel } from './components/GraphParamsPanel.js'
 import { HierarchyPanel } from './components/HierarchyPanel.js'
 import { NodeInspector } from './components/NodeInspector.js'
+import { readLayoutSize, saveLayoutSize } from './components/ResizeHandle.js'
 import { Toolbar } from './components/Toolbar.js'
 import type { ViewParams } from '@graphcoder/core'
 import {
@@ -26,6 +27,10 @@ interface DrawerToggleProps {
   side: 'left' | 'right'
   open: boolean
   onToggle: () => void
+  /** Current panel width — used as starting value for resize drag. */
+  currentWidth?: number
+  /** Called with the clamped new width during drag. */
+  onResize?: (width: number) => void
 }
 
 const DrawerToggle = (props: DrawerToggleProps) => {
@@ -35,16 +40,76 @@ const DrawerToggle = (props: DrawerToggleProps) => {
     return props.open ? '›' : '‹'
   }
   const border = props.side === 'left' ? 'border-r' : 'border-l'
+
+  // Click-vs-drag: mousedown starts tracking.  If the user releases
+  // without significant movement, it's a click (toggle).  If they
+  // drag, it's a resize.  This unifies toggle and resize into one strip.
+  const handleMouseDown = (e: MouseEvent) => {
+    // Only resize when the panel already shows and a handler exists.
+    if (!props.open || !props.onResize) {
+      props.onToggle()
+      return
+    }
+
+    e.preventDefault()
+    const startX = e.clientX
+    const startWidth = props.currentWidth ?? 240
+    let dragged = false
+
+    const handleMouseMove = (moveEvent: MouseEvent) => {
+      const delta = moveEvent.clientX - startX
+      if (Math.abs(delta) > 3 || dragged) {
+        dragged = true
+        const newWidth = props.side === 'left' ? startWidth + delta : startWidth - delta
+        props.onResize!(Math.max(120, Math.min(600, newWidth)))
+      }
+    }
+
+    const handleMouseUp = () => {
+      document.removeEventListener('mousemove', handleMouseMove)
+      document.removeEventListener('mouseup', handleMouseUp)
+      document.body.style.cursor = ''
+      document.body.style.userSelect = ''
+      if (!dragged) props.onToggle()
+      else {
+        // Persist the final width.
+        const key = props.side === 'left' ? 'leftWidth' : 'rightWidth'
+        saveLayoutSize(
+          key,
+          props.side === 'left'
+            ? startWidth + 0 // already set via onResize
+            : startWidth
+        )
+        // Read the current signal value through onResize's last call.
+        saveLayoutSize(key, props.currentWidth ?? startWidth)
+      }
+    }
+
+    document.body.style.cursor = 'col-resize'
+    document.body.style.userSelect = 'none'
+    document.addEventListener('mousemove', handleMouseMove)
+    document.addEventListener('mouseup', handleMouseUp)
+  }
+
   return (
-    <button
+    <div
+      role="button"
+      tabIndex={0}
       class={`hidden sm:flex w-5 flex-shrink-0 bg-gray-100 dark:bg-gray-900 ${border} border-gray-200 dark:border-gray-700
         items-center justify-center hover:bg-gray-200 dark:hover:bg-gray-800
-        text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 transition-colors`}
-      onClick={props.onToggle}
-      title={props.open ? 'Close panel' : 'Open panel'}
+        text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 transition-colors select-none`}
+      style={{ cursor: props.open && props.onResize ? 'col-resize' : 'pointer' }}
+      onMouseDown={handleMouseDown}
+      onKeyDown={(e: KeyboardEvent) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault()
+          props.onToggle()
+        }
+      }}
+      title={props.open ? (props.onResize ? 'Drag to resize · click to close' : 'Close panel') : 'Open panel'}
     >
       <span class="text-xs leading-none">{arrow()}</span>
-    </button>
+    </div>
   )
 }
 
@@ -57,6 +122,10 @@ export default function App() {
   const [isMobile, setIsMobile] = createSignal(mobileMediaQuery.matches)
   const [hierarchyOpen, setHierarchyOpen] = createSignal(!mobileMediaQuery.matches)
   const [filterOpen, setFilterOpen] = createSignal(!mobileMediaQuery.matches)
+
+  // ── Resizable panel widths ─────────────────────────────────────────────────
+  const [leftWidth, setLeftWidth] = createSignal(readLayoutSize('leftWidth', 240))
+  const [rightWidth, setRightWidth] = createSignal(readLayoutSize('rightWidth', 176))
 
   // Auto-open inspector when a node gets selected
   createEffect(() => {
@@ -220,12 +289,23 @@ export default function App() {
         {/* Left panel — inline on desktop, fixed overlay on mobile */}
         <Show when={!isMobile()}>
           <Show when={hierarchyOpen()}>
-            <HierarchyPanel />
+            <div class="flex-shrink-0 overflow-hidden" style={{ width: `${leftWidth()}px` }}>
+              <HierarchyPanel />
+            </div>
           </Show>
-          <DrawerToggle side="left" open={hierarchyOpen()} onToggle={() => setHierarchyOpen((v) => !v)} />
+          <DrawerToggle
+            side="left"
+            open={hierarchyOpen()}
+            onToggle={() => setHierarchyOpen((v) => !v)}
+            currentWidth={leftWidth()}
+            onResize={setLeftWidth}
+          />
         </Show>
         <Show when={isMobile() && hierarchyOpen()}>
-          <div class="fixed inset-y-0 left-0 z-40 shadow-2xl flex flex-col" style={{ top: '0', bottom: '0' }}>
+          <div
+            class="fixed inset-y-0 left-0 z-40 shadow-2xl flex flex-col"
+            style={{ top: '0', bottom: '0', width: '240px' }}
+          >
             <HierarchyPanel />
           </div>
         </Show>
@@ -240,13 +320,24 @@ export default function App() {
 
         {/* Right panel — inline on desktop, fixed overlay on mobile */}
         <Show when={!isMobile()}>
-          <DrawerToggle side="right" open={filterOpen()} onToggle={() => setFilterOpen((v) => !v)} />
+          <DrawerToggle
+            side="right"
+            open={filterOpen()}
+            onToggle={() => setFilterOpen((v) => !v)}
+            currentWidth={rightWidth()}
+            onResize={setRightWidth}
+          />
           <Show when={filterOpen()}>
-            <GraphParamsPanel />
+            <div class="flex-shrink-0 overflow-hidden" style={{ width: `${rightWidth()}px` }}>
+              <GraphParamsPanel />
+            </div>
           </Show>
         </Show>
         <Show when={isMobile() && filterOpen()}>
-          <div class="fixed inset-y-0 right-0 z-40 shadow-2xl flex flex-col" style={{ top: '0', bottom: '0' }}>
+          <div
+            class="fixed inset-y-0 right-0 z-40 shadow-2xl flex flex-col"
+            style={{ top: '0', bottom: '0', width: '176px' }}
+          >
             <GraphParamsPanel />
           </div>
         </Show>

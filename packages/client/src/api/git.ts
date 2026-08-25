@@ -91,13 +91,20 @@ export interface DiffResult {
 export async function computeDiff(
   base: string,
   target: string,
-  onProgress?: (message: string) => void
+  onProgress?: (message: string) => void,
+  signal?: AbortSignal
 ): Promise<DiffResult> {
   return new Promise<DiffResult>((resolve, reject) => {
+    if (signal?.aborted) {
+      reject(signal.reason ?? new DOMException('Aborted', 'AbortError'))
+      return
+    }
+
     fetch(`${API}/api/git/diff`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Accept: 'text/event-stream' },
-      body: JSON.stringify({ base, target })
+      body: JSON.stringify({ base, target }),
+      signal
     })
       .then(async (response) => {
         if (!response.ok) {

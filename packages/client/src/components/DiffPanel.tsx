@@ -2,6 +2,7 @@ import type { Component } from 'solid-js'
 import { createMemo, createSignal, For, Show } from 'solid-js'
 import type { ArchOp } from '@graphcoder/core'
 import { clearDiff, state } from '../state/store.js'
+import { readLayoutSize, ResizeHandle, saveLayoutSize } from './ResizeHandle.js'
 
 /** Maximum operations rendered before "show more" pagination kicks in. */
 const PAGE_SIZE = 100
@@ -56,6 +57,7 @@ interface DiffSummary {
 export const DiffPanel: Component = () => {
   const [expanded, setExpanded] = createSignal(true)
   const [visibleCount, setVisibleCount] = createSignal(PAGE_SIZE)
+  const [expandedHeight, setExpandedHeight] = createSignal(readLayoutSize('diffHeight', 192))
 
   const diff = () => state.currentDiff
 
@@ -85,9 +87,22 @@ export const DiffPanel: Component = () => {
     <Show when={diff()}>
       <div
         class="flex-shrink-0 bg-gray-50 dark:bg-gray-900 border-t border-gray-200 dark:border-gray-700 flex flex-col"
-        style={{ 'max-height': expanded() ? '192px' : '36px' }}
+        style={{ 'max-height': expanded() ? `${expandedHeight()}px` : '36px' }}
         data-testid="diff-panel"
       >
+        {/* Resize handle — top edge (only when expanded) */}
+        <Show when={expanded()}>
+          <ResizeHandle
+            direction="vertical"
+            currentSize={expandedHeight()}
+            onResize={setExpandedHeight}
+            panelSide="after"
+            min={80}
+            max={500}
+            onResizeEnd={(v) => saveLayoutSize('diffHeight', v)}
+          />
+        </Show>
+
         {/* Summary bar */}
         <div class="flex flex-wrap items-center gap-x-3 gap-y-1 px-3 py-1.5 border-b border-gray-200 dark:border-gray-700 flex-shrink-0">
           <span class="text-xs font-semibold text-gray-600 dark:text-gray-300 mr-1">DIFF</span>

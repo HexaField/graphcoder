@@ -1,6 +1,7 @@
 import type { Component } from 'solid-js'
 import { createSignal, Show } from 'solid-js'
 import { clearFocus, clearSelection, setFocus, state } from '../state/store.js'
+import { readLayoutSize, ResizeHandle, saveLayoutSize } from './ResizeHandle.js'
 
 // ── NodeInspector (bottom panel) ──────────────────────────────────────────────
 
@@ -8,17 +9,32 @@ import { clearFocus, clearSelection, setFocus, state } from '../state/store.js'
  * Displays detail for the selected node in a collapsible horizontal strip at
  * the bottom of the canvas column. Metadata occupies the left third; source
  * code occupies the right two thirds.
+ *
+ * Expanded height can be adjusted by dragging the resize handle at the top.
  */
 export const NodeInspector: Component = () => {
   const [collapsed, setCollapsed] = createSignal(false)
+  const [expandedHeight, setExpandedHeight] = createSignal(readLayoutSize('inspectorHeight', 208))
 
   return (
     <div
-      class={`flex-shrink-0 bg-gray-50 dark:bg-gray-900 border-t border-gray-200 dark:border-gray-700 flex flex-col ${
-        collapsed() ? 'h-7' : "h-[40vh] sm:h-52"
-      }`}
+      class="flex-shrink-0 bg-gray-50 dark:bg-gray-900 border-t border-gray-200 dark:border-gray-700 flex flex-col"
+      style={{ height: collapsed() ? '28px' : `${expandedHeight()}px` }}
       data-testid="node-inspector"
     >
+      {/* Resize handle — top edge */}
+      <Show when={!collapsed()}>
+        <ResizeHandle
+          direction="vertical"
+          currentSize={expandedHeight()}
+          onResize={setExpandedHeight}
+          panelSide="after"
+          min={80}
+          max={600}
+          onResizeEnd={(v) => saveLayoutSize('inspectorHeight', v)}
+        />
+      </Show>
+
       <Show
         when={state.selectedNodeDetail}
         fallback={

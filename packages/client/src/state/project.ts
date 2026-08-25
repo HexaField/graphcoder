@@ -131,11 +131,19 @@ let wsReconnectTimer: ReturnType<typeof setTimeout> | null = null
  * Send the current view params to the server.
  * The server recomputes the view and sends back a view_snapshot.
  * No-ops if the WebSocket is not yet open.
+ *
+ * Debounced by 50 ms so rapid filter toggles (e.g. clicking several
+ * checkboxes) collapse into a single server computation.
  */
+let viewRequestTimer: ReturnType<typeof setTimeout> | undefined
+
 export function sendViewRequest(params: ViewParams): void {
-  if (activeWs?.readyState === WebSocket.OPEN) {
-    activeWs.send(JSON.stringify({ type: 'view_request', params }))
-  }
+  clearTimeout(viewRequestTimer)
+  viewRequestTimer = setTimeout(() => {
+    if (activeWs?.readyState === WebSocket.OPEN) {
+      activeWs.send(JSON.stringify({ type: 'view_request', params }))
+    }
+  }, 50)
 }
 
 /**

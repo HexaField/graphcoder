@@ -1,16 +1,17 @@
 /**
- * GitGraph — SVG-based Git DAG replacing the old dropdown-based GitBar.
+ * GitGraph — SVG-based Git DAG with sticky branch labels.
  *
- * Shows branches as expandable rows. Each branch displays its tip commit;
+ * Shows branches as expandable rows.  Each branch displays its tip commit;
  * expanding reveals the full commit chain with parent-child edges drawn as
- * SVG paths. Users click two commits to select base and target for diffing.
+ * SVG paths.  Users click two commits to select base and target for diffing.
  *
  * Layout:
- *   - Each branch occupies a lane (column).
- *   - Commits stack vertically (newest at top).
- *   - Merge edges curve between lanes.
+ *   - Branch name column pinned to the left (position: sticky).
+ *   - SVG lane graph scrolls horizontally when many branches exist.
+ *   - Commit hash + message sit to the right of the SVG.
+ *   - Bottom resize handle lets the user adjust the DAG area height.
  */
-import type { Component } from 'solid-js'
+import { createSignal, type Component } from 'solid-js'
 import { createMemo, For, Show } from 'solid-js'
 import type { BranchRef, GraphCommit } from '../api/git.js'
 import {
@@ -21,6 +22,7 @@ import {
   swapRefs,
   toggleBranchExpanded
 } from '../state/store.js'
+import { readLayoutSize, ResizeHandle, saveLayoutSize } from './ResizeHandle.js'
 
 // ── Layout constants ─────────────────────────────────────────────────────────
 
@@ -28,6 +30,8 @@ const ROW_H = 28
 const LANE_W = 16
 const DOT_R = 4
 const LEFT_PAD = 12
+/** Fixed width of the sticky branch-name column. */
+const BRANCH_COL_W = 160
 
 // ── Lane colours ─────────────────────────────────────────────────────────────
 
@@ -66,6 +70,7 @@ interface LayoutRow {
 export const GitGraph: Component = () => {
   const graph = () => state.gitGraph
   const expanded = () => state.expandedBranches
+  const [dagHeight, setDagHeight] = createSignal(readLayoutSize('gitHeight', 200))
 
   // Build laid-out rows from graph data + expansion state.
   const layout = createMemo(() => {
@@ -83,7 +88,10 @@ export const GitGraph: Component = () => {
     const commitIndex = new Map<string, number>() // hash → row index
     const edges: Array<{ x1: number; y1: number; x2: number; y2: number; color: string }> = []
 
-    // Assign each branch a lane.
+    // Assign each branch a lane, cycling through a small palette so the SVG
+    // stays narrow even with hundreds of branches.  Each branch occupies its
+    // own row range, so lane collisions never overlap visually.
+    const MAX_LANES = 8
     const branchLanes = new Map<string, number>()
     const sortedBranches = [...g.branches].sort((a, b) => {
       // Current branch first, then alphabetical.
@@ -92,8 +100,8 @@ export const GitGraph: Component = () => {
       return a.name.localeCompare(b.name)
     })
 
-    sortedBranches.forEach((br, i) => branchLanes.set(br.name, i))
-    const laneCount = sortedBranches.length
+    sortedBranches.forEach((br, i) => branchLanes.set(br.name, i % MAX_LANES))
+    const laneCount = Math.min(sortedBranches.length, MAX_LANES)
 
     // Build a set of commits reachable from each branch, walking parents.
     // For each branch, collect commits in topo order (they're already topo-sorted in g.commits).
@@ -191,7 +199,7 @@ export const GitGraph: Component = () => {
   return (
     <Show when={state.gitBarOpen}>
       <div
-        class="flex-shrink-0 bg-gray-50 dark:bg-gray-900 border-b border-gray-200 dark:border-gray-700"
+        class="flex-shrink-0 bg-gray-50 dark:bg-gray-900 border-b border-gray-200 dark:border-gray-700 flex flex-col"
         data-testid="git-graph"
       >
         {/* Not a git repo */}
@@ -204,7 +212,7 @@ export const GitGraph: Component = () => {
         {/* Git repo — show graph + controls */}
         <Show when={state.isGitRepo !== false && graph()}>
           {/* Controls bar */}
-          <div class="flex items-center gap-3 px-3 py-1.5 border-b border-gray-200 dark:border-gray-700">
+          <div class="flex items-center gap-3 px-3 py-1.5 border-b border-gray-200 dark:border-gray-700 flex-shrink-0">
             <span class="text-xs font-semibold text-gray-500 dark:text-gray-400 flex-shrink-0">GIT</span>
 
             {/* Selection display */}
@@ -275,10 +283,43 @@ export const GitGraph: Component = () => {
             </Show>
           </div>
 
-          {/* DAG area */}
-          <div class="overflow-auto" style={{ 'max-height': '200px' }}>
+          {/* DAG area — horizontal scroll with sticky branch names */}
+          <div class="overflow-auto" style={{ 'max-height': `${dagHeight()}px` }}>
             <div class="flex" style={{ 'min-height': `${layout().height}px` }}>
-              {/* SVG lane lines + dots */}
+              {/* ── Branch name column — sticky left ── */}
+              <div class="flex-shrink-0 sticky left-0 z-10 flex flex-col" style={{ width: `${BRANCH_COL_W}px` }}>
+                <For each={layout().rows}>
+                  {(row) => (
+                    <div
+                      class="flex items-center bg-gray-50 dark:bg-gray-900 border-r border-gray-100 dark:border-gray-800 px-1"
+                      style={{ height: `${ROW_H}px` }}
+                      onClick={() => void selectCommit(row.commit.hash)}
+                    >
+                      <Show when={row.branchName}>
+                        {(name) => (
+                          <button
+                            class={`text-xs font-semibold px-1.5 py-0.5 rounded flex-shrink-0 transition-colors truncate max-w-full ${
+                              state.currentBranch === name()
+                                ? "bg-blue-600 text-white"
+                                : "bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-300 dark:hover:bg-gray-600"
+                            }`}
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              toggleBranchExpanded(name())
+                            }}
+                            title={expanded().includes(name()) ? `Collapse ${name()}` : `Expand ${name()}`}
+                            data-testid={`git-branch-toggle-${name()}`}
+                          >
+                            {expanded().includes(name()) ? '▾' : '▸'} {name()}
+                          </button>
+                        )}
+                      </Show>
+                    </div>
+                  )}
+                </For>
+              </div>
+
+              {/* ── SVG lane lines + dots ── */}
               <svg
                 width={layout().width}
                 height={layout().height}
@@ -361,7 +402,7 @@ export const GitGraph: Component = () => {
                 </For>
               </svg>
 
-              {/* Labels column */}
+              {/* ── Labels column — hash + message ── */}
               <div class="flex-1 min-w-0">
                 <For each={layout().rows}>
                   {(row) => {
@@ -381,27 +422,6 @@ export const GitGraph: Component = () => {
                         onClick={() => void selectCommit(row.commit.hash)}
                         data-testid={`git-commit-row-${row.commit.shortHash}`}
                       >
-                        {/* Branch name (on tip rows) */}
-                        <Show when={row.branchName}>
-                          {(name) => (
-                            <button
-                              class={`text-xs font-semibold px-1.5 py-0.5 rounded flex-shrink-0 transition-colors ${
-                                state.currentBranch === name()
-                                  ? "bg-blue-600 text-white"
-                                  : "bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-300 dark:hover:bg-gray-600"
-                              }`}
-                              onClick={(e) => {
-                                e.stopPropagation()
-                                toggleBranchExpanded(name())
-                              }}
-                              title={expanded().includes(name()) ? `Collapse ${name()}` : `Expand ${name()}`}
-                              data-testid={`git-branch-toggle-${name()}`}
-                            >
-                              {expanded().includes(name()) ? '▾' : '▸'} {name()}
-                            </button>
-                          )}
-                        </Show>
-
                         {/* Commit hash */}
                         <span class="text-xs font-mono text-gray-400 dark:text-gray-500 flex-shrink-0">
                           {row.commit.shortHash}
@@ -430,6 +450,17 @@ export const GitGraph: Component = () => {
               </div>
             </div>
           </div>
+
+          {/* Resize handle — drag to adjust DAG area height */}
+          <ResizeHandle
+            direction="vertical"
+            currentSize={dagHeight()}
+            onResize={setDagHeight}
+            panelSide="before"
+            min={60}
+            max={600}
+            onResizeEnd={(v) => saveLayoutSize('gitHeight', v)}
+          />
         </Show>
       </div>
     </Show>

@@ -83,6 +83,9 @@ export const temporalInitial: TemporalState = {
   diffCgIdMap: null
 }
 
+/** Abort controller for the current in-flight diff computation SSE stream. */
+let diffController: AbortController | null = null
+
 // ── Actions ───────────────────────────────────────────────────────────────────
 
 /** Toggle the git graph panel open/closed. Loads graph data on first open. */
@@ -464,6 +467,11 @@ export async function runTemporalDiff(): Promise<void> {
     return commit?.shortHash ?? hash.slice(0, 8)
   }
 
+  // Abort any in-flight diff computation before starting a new one.
+  diffController?.abort()
+  const controller = new AbortController()
+  diffController = controller
+
   setState('isComputing', true)
   setState('computeProgress', 'Starting…')
   setState('diffError', null)
@@ -471,7 +479,8 @@ export async function runTemporalDiff(): Promise<void> {
   setState('currentDiff', null)
 
   try {
-    const result = await computeDiff(base, target, (msg) => setState('computeProgress', msg))
+    const result = await computeDiff(base, target, (msg) => setState('computeProgress', msg), controller.signal)
+    if (controller.signal.aborted) return
 
     // Save the live view so we can restore it when the diff clears.
     if (!state.savedView) {
@@ -519,10 +528,13 @@ export async function runTemporalDiff(): Promise<void> {
     setState('temporalRange', { baseLabel: labelFor(base), targetLabel: labelFor(target) })
     syncUrlParams()
   } catch (err) {
+    if (controller.signal.aborted) return
     setState('diffError', err instanceof Error ? err.message : 'Computation failed')
   } finally {
-    setState('isComputing', false)
-    setState('computeProgress', null)
+    if (!controller.signal.aborted) {
+      setState('isComputing', false)
+      setState('computeProgress', null)
+    }
   }
 }
 

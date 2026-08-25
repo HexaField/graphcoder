@@ -23,8 +23,8 @@ export async function fetchGraph(): Promise<GraphSnapshot> {
   return handleResponse<GraphSnapshot>(res)
 }
 
-export async function fetchNodeDetail(nodeId: string): Promise<NodeDetail> {
-  const res = await fetch(`${API}/api/nodes/${encodeURIComponent(nodeId)}`)
+export async function fetchNodeDetail(nodeId: string, signal?: AbortSignal): Promise<NodeDetail> {
+  const res = await fetch(`${API}/api/nodes/${encodeURIComponent(nodeId)}`, { signal })
   return handleResponse<NodeDetail>(res)
 }
 
@@ -40,8 +40,8 @@ export async function fetchImpactRadius(nodeId: string, depth?: number): Promise
   return handleResponse<Subgraph>(res)
 }
 
-export async function searchNodes(q: string): Promise<{ results: SearchResultItem[] }> {
-  const res = await fetch(`${API}/api/nodes/search?q=${encodeURIComponent(q)}`)
+export async function searchNodes(q: string, signal?: AbortSignal): Promise<{ results: SearchResultItem[] }> {
+  const res = await fetch(`${API}/api/nodes/search?q=${encodeURIComponent(q)}`, { signal })
   return handleResponse<{ results: SearchResultItem[] }>(res)
 }
 
