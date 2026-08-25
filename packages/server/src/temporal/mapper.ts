@@ -18,6 +18,7 @@ import simpleGit from 'simple-git'
 import type { GraphSnapshot } from '@graphcoder/core'
 import type { CodeGraph as CodeGraphType } from '@colbymchenry/codegraph'
 import { getCachedSnapshot, setCachedSnapshot } from './cache.js'
+import { analyzeHttpBridge } from '../codegraph/http-bridge.js'
 
 const require = createRequire(import.meta.url)
 const { CodeGraph, NODE_KINDS } = require('@colbymchenry/codegraph') as typeof import('@colbymchenry/codegraph')
@@ -25,11 +26,14 @@ const { CodeGraph, NODE_KINDS } = require('@colbymchenry/codegraph') as typeof i
 export type ProgressCallback = (message: string) => void
 
 /**
- * Extract all nodes and edges from a CodeGraph instance — mirrors the logic
- * in `GraphService.getAllNodesAndEdges` but without HTTP-bridge synthesis
- * (historical commits have no running server to probe).
+ * Extract all nodes and edges from a CodeGraph instance, including
+ * HTTP-bridge synthetic edges from the worktree source files.
+ *
+ * The bridge scans source files for fetch() calls and matches their
+ * normalised URLs against route nodes — exactly the same analysis
+ * that the live GraphService runs, but against historical source.
  */
-function extractSnapshot(cg: CodeGraphType): GraphSnapshot {
+async function extractSnapshot(cg: CodeGraphType, worktreePath: string): Promise<GraphSnapshot> {
   const nodes = []
   const seenIds = new Set<string>()
 
@@ -45,6 +49,18 @@ function extractSnapshot(cg: CodeGraphType): GraphSnapshot {
   const edges = []
   for (const node of nodes) {
     edges.push(...cg.getOutgoingEdges(node.id))
+  }
+
+  // Run HTTP bridge on the worktree source — produces synthetic `calls`
+  // edges from client fetch() sites to server route handler nodes.
+  const filePaths = cg.getFiles().map((f: { path: string }) => f.path)
+  const bridgeEdges = await analyzeHttpBridge(worktreePath, nodes, filePaths)
+  if (bridgeEdges.length > 0) {
+    const naturalKeys = new Set(edges.map((e) => `${e.source}\x00${e.target}\x00${e.kind}`))
+    for (const e of bridgeEdges) {
+      const key = `${e.source}\x00${e.target}\x00${e.kind}`
+      if (!naturalKeys.has(key)) edges.push(e)
+    }
   }
 
   // Cast: CodeGraph's Node/Edge shapes are wire-compatible with GraphNode/GraphEdge.
@@ -101,7 +117,7 @@ export async function snapshotAtCommit(
 
     // ── Extract & cache ────────────────────────────────────────────────────
     onProgress?.(`Extracting graph for ${commitHash.slice(0, 8)}…`)
-    const snapshot = extractSnapshot(cg)
+    const snapshot = await extractSnapshot(cg, worktreePath)
     cg.close()
 
     setCachedSnapshot(projectRoot, commitHash, snapshot)
