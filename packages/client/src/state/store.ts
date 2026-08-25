@@ -66,6 +66,7 @@ export type { HierarchyState } from './hierarchy.js'
 export {
   clearSelection as clearGraphSelection,
   loadGitGraph,
+  refilterDiffView,
   refreshGitStatus,
   runTemporalDiff,
   selectCommit,

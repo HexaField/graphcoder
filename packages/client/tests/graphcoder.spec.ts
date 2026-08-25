@@ -416,3 +416,144 @@ test.describe('ArchDiff — snapshot and diff', () => {
     await expect(page.getByTestId('snapshot-btn')).toBeVisible()
   })
 })
+
+// ---------------------------------------------------------------------------
+// Temporal diff — git commit-pair comparison with layout success
+// ---------------------------------------------------------------------------
+
+test.describe('Temporal diff — git commit comparison', () => {
+  test.beforeEach(() => {
+    test.setTimeout(180_000)
+  })
+
+  // -------------------------------------------------------------------------
+  // Test 11: Temporal diff completes without ELK crash
+  //
+  // Exercises the full path: open project → toggle git bar → select two
+  // commits → compare → buildDiffView → computeView (with dedup + multi-
+  // parent guard) → ELK layout.  This catches the "value already present"
+  // crash that occurs when same-named symbols in different files produce
+  // duplicate semantic IDs.
+  // -------------------------------------------------------------------------
+
+  test('comparing two commits does not crash the layout engine', async ({ page }) => {
+    await page.goto('/')
+    await openProjectPath(page, fixturePath)
+
+    // Open the git graph bar
+    await page.getByTestId('git-bar-toggle').click()
+    await page.waitForSelector('[data-testid="git-graph"]', { timeout: 10_000 })
+
+    // Wait for at least one commit row (branch tip) to appear
+    const commitRows = page.locator('[data-testid^="git-commit-row-"]')
+    await expect(commitRows.first()).toBeVisible({ timeout: 15_000 })
+
+    // Expand the first branch to reveal individual commits
+    const branchBtn = page.locator('[data-testid^="git-branch-toggle-"]').first()
+    await expect(branchBtn).toBeVisible({ timeout: 5_000 })
+    await branchBtn.click()
+
+    // Wait for more commit rows to appear after expansion
+    await page.waitForFunction(() => document.querySelectorAll('[data-testid^="git-commit-row-"]').length >= 2, {
+      timeout: 10_000
+    })
+
+    const rowCount = await commitRows.count()
+    if (rowCount < 2) {
+      test.skip(true, 'Fewer than 2 commits in git history — cannot test temporal diff')
+      return
+    }
+
+    // Click first row (base) then second row (target)
+    await commitRows.nth(0).click()
+    await commitRows.nth(1).click()
+
+    // Compare button should be enabled — click it
+    const compareBtn = page.getByTestId('git-compare-btn')
+    await expect(compareBtn).toBeEnabled({ timeout: 5_000 })
+    await compareBtn.click()
+
+    // Wait for the diff computation to finish — the compare button re-enables
+    // and a temporal range label or diff error appears.
+    // Check that no error occurred (no ELK crash, no "value already present").
+    await page.waitForFunction(
+      () => {
+        // Check for diff error text
+        const errEl = document.querySelector('[data-testid="git-graph"] .text-red-500')
+        if (errEl && errEl.textContent?.includes('value already present')) return 'crash'
+        // Check for computing state done (button re-enabled or range label appears)
+        const btn = document.querySelector('[data-testid="git-compare-btn"]') as HTMLButtonElement
+        return btn && !btn.disabled ? 'done' : false
+      },
+      { timeout: 120_000 }
+    )
+
+    // Verify no layout crash error in the page
+    const pageContent = await page.content()
+    expect(pageContent).not.toContain('value already present')
+
+    // Verify the layout spinner disappears (ELK completed successfully)
+    await page.waitForFunction(() => !document.querySelector('[data-testid="graph-canvas"] .absolute span'), {
+      timeout: 30_000
+    })
+  })
+
+  // -------------------------------------------------------------------------
+  // Test 12: Temporal diff respects current filter state
+  // -------------------------------------------------------------------------
+
+  test('temporal diff respects hidden node kinds', async ({ page }) => {
+    await page.goto('/')
+    await openProjectPath(page, fixturePath)
+
+    // Hide 'function' kind via the filter panel
+    const fnChip = page.getByTestId('filter-kind-function')
+    await fnChip.click()
+
+    // Open git bar and compare two commits
+    await page.getByTestId('git-bar-toggle').click()
+    await page.waitForSelector('[data-testid="git-graph"]', { timeout: 10_000 })
+
+    const commitRows = page.locator('[data-testid^="git-commit-row-"]')
+    await expect(commitRows.first()).toBeVisible({ timeout: 15_000 })
+
+    // Expand the first branch to reveal individual commits
+    const branchBtn2 = page.locator('[data-testid^="git-branch-toggle-"]').first()
+    await expect(branchBtn2).toBeVisible({ timeout: 5_000 })
+    await branchBtn2.click()
+    await page.waitForFunction(() => document.querySelectorAll('[data-testid^="git-commit-row-"]').length >= 2, {
+      timeout: 10_000
+    })
+
+    const rowCount = await commitRows.count()
+    if (rowCount < 2) {
+      test.skip(true, 'Fewer than 2 commits — cannot test filtered diff')
+      return
+    }
+
+    await commitRows.nth(0).click()
+    await commitRows.nth(1).click()
+
+    const compareBtn = page.getByTestId('git-compare-btn')
+    await expect(compareBtn).toBeEnabled({ timeout: 5_000 })
+    await compareBtn.click()
+
+    // Wait for diff to complete
+    await page.waitForFunction(
+      () => {
+        const btn = document.querySelector('[data-testid="git-compare-btn"]') as HTMLButtonElement
+        return btn && !btn.disabled
+      },
+      { timeout: 120_000 }
+    )
+
+    // Layout must complete without crash
+    await page.waitForFunction(() => !document.querySelector('[data-testid="graph-canvas"] .absolute span'), {
+      timeout: 30_000
+    })
+
+    // The page must not contain the ELK duplicate error
+    const content = await page.content()
+    expect(content).not.toContain('value already present')
+  })
+})

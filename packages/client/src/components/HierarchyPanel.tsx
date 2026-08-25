@@ -598,6 +598,10 @@ export const HierarchyPanel: Component = () => {
   // When any grouping is active, eye buttons on file rows control collapse/expand
   // of the group container rather than hiding the file from the graph entirely.
   const anyGroupingOn = () => state.groupByFile || state.groupByClass || state.groupByContract || state.groupByPackage
+  // Track which files actually have groups (visible descendants).
+  // Files without groups get the regular hide/show eye button even when grouping
+  // is active — their collapse/expand button would have no effect.
+  const groupFilePaths = createMemo(() => new Set(state.viewGroups.filter((g) => g.filePath).map((g) => g.filePath!)))
 
   // Compile active exclude patterns once per change so file rows can check membership
   const excludeRegexes = createMemo(() =>
@@ -650,12 +654,15 @@ export const HierarchyPanel: Component = () => {
           const fileExpanded = () => expandedSet().has(file.key)
           const hasSymbols = file.children.length > 0
           const fileDiff = () => fileDiffMap()?.get(file.key)
+          // Only use collapse/expand mode when the file actually has a group
+          // (visible descendants). Files without groups get hide/show instead.
+          const fileInGroup = () => anyGroupingOn() && groupFilePaths().has(file.key)
 
           // In group mode: eye reflects whether the group container is expanded.
           // Prefix-matches state.expandedGroups (same logic as GraphCanvas.isGroupExpanded)
           // so "Show all children" on a dir/package reflects correctly in the icons.
           const groupCollapsed = () => {
-            if (!anyGroupingOn()) return false
+            if (!fileInGroup()) return false
             const groups = state.expandedGroups
             return !groups.some((prefix) => file.key === prefix || file.key.startsWith(prefix + '/'))
           }
@@ -669,15 +676,15 @@ export const HierarchyPanel: Component = () => {
                 expandable={hasSymbols}
                 expanded={fileExpanded()}
                 onExpand={() => hasSymbols && toggleExpanded(file.key)}
-                hidden={anyGroupingOn() ? groupCollapsed() : fileHidden()}
+                hidden={fileInGroup() ? groupCollapsed() : fileHidden()}
                 // In group mode the row never dims — the container remains visible.
-                ancestorHidden={anyGroupingOn() ? false : ancestorHiddenFn()}
+                ancestorHidden={fileInGroup() ? false : ancestorHiddenFn()}
                 excluded={fileExcluded()}
-                collapseMode={anyGroupingOn()}
+                collapseMode={fileInGroup()}
                 diffStatus={fileDiff()}
                 onToggleHide={(e) => {
                   e.stopPropagation()
-                  if (anyGroupingOn()) {
+                  if (fileInGroup()) {
                     toggleGroupExpanded(file.key)
                   } else {
                     toggleHierarchyHidden(file.key)

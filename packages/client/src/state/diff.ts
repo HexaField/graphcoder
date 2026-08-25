@@ -37,6 +37,7 @@ export function clearDiff(): void {
   setState('diffStatusMap', null)
   setState('edgeStatusMap', null)
   setState('fileDiffStatus', null)
+  setState('rawDiffView', null)
 }
 
 /**

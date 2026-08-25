@@ -7,7 +7,15 @@ import { HierarchyPanel } from './components/HierarchyPanel.js'
 import { NodeInspector } from './components/NodeInspector.js'
 import { Toolbar } from './components/Toolbar.js'
 import type { ViewParams } from '@graphcoder/core'
-import { clearDiff, connectWebSocket, initFromUrl, sendViewRequest, state, toggleGitBar } from './state/store.js'
+import {
+  clearDiff,
+  connectWebSocket,
+  initFromUrl,
+  refilterDiffView,
+  sendViewRequest,
+  state,
+  toggleGitBar
+} from './state/store.js'
 // Import theme module to ensure the root-level createRoot runs on startup
 import './state/theme.js'
 
@@ -60,6 +68,10 @@ export default function App() {
   // Reactive effect: send a view_request whenever any view param changes.
   // This fires once on mount (with the locally-persisted params) and again
   // on every toggle, hide, expand, or pattern change.
+  //
+  // When a temporal diff occupies the display, the effect also re-filters
+  // the diff view locally via computeView so filters, grouping, and collapse
+  // all apply to the diff — not just the live graph.
   createEffect(() => {
     const params: ViewParams = {
       hiddenNodeKinds: state.hiddenNodeKinds,
@@ -73,8 +85,36 @@ export default function App() {
       expandedGroups: state.expandedGroups,
       focusedNodeId: state.focusedNodeId
     }
+    // Re-filter the diff view when a temporal diff occupies the display.
+    // No-ops when no raw diff data exists (no diff active).
+    refilterDiffView(params)
+    // Always send to the server — when savedView exists the WS handler
+    // routes the response into savedView so the live view restores
+    // correctly when the diff clears.
     sendViewRequest(params)
   })
+
+  // Expose store snapshot for E2E testing / console diagnostics.
+  ;(window as any).__graphcoder = {
+    get viewNodes() {
+      return state.viewNodes
+    },
+    get viewEdges() {
+      return state.viewEdges
+    },
+    get viewGroups() {
+      return state.viewGroups
+    },
+    get expandedGroups() {
+      return state.expandedGroups
+    },
+    get savedView() {
+      return state.savedView
+    },
+    get rawDiffView() {
+      return state.rawDiffView
+    }
+  }
 
   onMount(() => {
     connectWebSocket()

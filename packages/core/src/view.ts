@@ -197,6 +197,17 @@ function extractPackagePath(fp?: string): string | undefined {
   return m?.[1]
 }
 
+function deduplicateById(nodes: GraphNode[]): GraphNode[] {
+  const seen = new Set<string>()
+  const out: GraphNode[] = []
+  for (const n of nodes) {
+    if (seen.has(n.id)) continue
+    seen.add(n.id)
+    out.push(n)
+  }
+  return out.length === nodes.length ? nodes : out
+}
+
 function isHiddenByPath(node: GraphNode, hSet: Set<string>): boolean {
   if (hSet.has(node.id)) return true
   const fp = node.filePath
@@ -252,6 +263,13 @@ export function computeView(allNodes: GraphNode[], allEdges: GraphEdge[], params
 
   // Always collect file nodes for the hierarchy panel — independent of view params.
   const fileNodes = allNodes.filter((n) => n.kind === 'file' || n.kind === 'module')
+
+  // ── Phase 0: deduplicate input nodes ────────────────────────────────────
+  // Diff views can produce duplicate IDs when nodeSemanticId collides
+  // (kind + name + signature match across files). ELK throws
+  // "value already present" if any two children share an id.
+  // eslint-disable-next-line no-param-reassign
+  allNodes = deduplicateById(allNodes)
 
   // ── Phase 1: node filtering (mirrors visibleGraph) ────────────────────────
 
@@ -391,6 +409,11 @@ export function computeView(allNodes: GraphNode[], allEdges: GraphEdge[], params
   const visibleNodeIds = nodeIds // already-filtered symbol nodes
   const groups: FileGroup[] = []
   const claimedByContract = new Set<string>()
+  // Guard against multi-parent claims — a node must appear in at most one
+  // group's childIds.  Diff views can produce `contains` edges that give a
+  // single semantic ID two parents (e.g. identically-named helpers in
+  // different files).  First group to claim a node wins.
+  const claimedByGroup = new Set<string>()
   const collapsedChildIds = new Set<string>()
   const collapsedChildToGroup = new Map<string, string>()
 
@@ -420,9 +443,10 @@ export function computeView(allNodes: GraphNode[], allEdges: GraphEdge[], params
 
       if (!expanded) {
         // Collapsed: exclude all visible descendants from ELK, push empty container.
-        const visibleChildIds = [...allDesc].filter((id) => visibleNodeIds.has(id))
+        const visibleChildIds = [...allDesc].filter((id) => visibleNodeIds.has(id) && !claimedByGroup.has(id))
         if (visibleChildIds.length === 0) continue
         for (const id of visibleChildIds) {
+          claimedByGroup.add(id)
           collapsedChildIds.add(id)
           collapsedChildToGroup.set(id, fn.id)
         }
@@ -446,14 +470,20 @@ export function computeView(allNodes: GraphNode[], allEdges: GraphEdge[], params
           const classNode = allNodes.find((n) => n.id === classId && n.kind === 'class')
           if (!classNode) continue
           const classChildIds = (containsChildren.get(classId) ?? []).filter(
-            (id) => visibleNodeIds.has(id) && !claimedByContract.has(id)
+            (id) => visibleNodeIds.has(id) && !claimedByContract.has(id) && !claimedByGroup.has(id)
           )
           if (classChildIds.length === 0) continue
-          classChildIds.forEach((id) => assignedToClass.add(id))
+          classChildIds.forEach((id) => {
+            assignedToClass.add(id)
+            claimedByGroup.add(id)
+          })
           childGroups.push({ id: classId, label: classNode.name, color: '#818cf8', childIds: classChildIds })
         }
-        const leafIds = [...allDesc].filter((id) => visibleNodeIds.has(id) && !assignedToClass.has(id))
+        const leafIds = [...allDesc].filter(
+          (id) => visibleNodeIds.has(id) && !assignedToClass.has(id) && !claimedByGroup.has(id)
+        )
         if (leafIds.length === 0 && childGroups.length === 0) continue
+        for (const id of leafIds) claimedByGroup.add(id)
         groups.push({
           id: fn.id,
           label: fileLabel(fn),
@@ -463,8 +493,9 @@ export function computeView(allNodes: GraphNode[], allEdges: GraphEdge[], params
           packagePath: groupByPackage ? extractPackagePath(fn.filePath) : undefined
         })
       } else {
-        const childIds = [...allDesc].filter((id) => visibleNodeIds.has(id))
+        const childIds = [...allDesc].filter((id) => visibleNodeIds.has(id) && !claimedByGroup.has(id))
         if (childIds.length === 0) continue
+        for (const id of childIds) claimedByGroup.add(id)
         groups.push({
           id: fn.id,
           label: fileLabel(fn),
@@ -479,9 +510,10 @@ export function computeView(allNodes: GraphNode[], allEdges: GraphEdge[], params
     const classNodes = allNodes.filter((n) => n.kind === 'class')
     for (const cn of classNodes) {
       const childIds = (containsChildren.get(cn.id) ?? []).filter(
-        (id) => visibleNodeIds.has(id) && !claimedByContract.has(id)
+        (id) => visibleNodeIds.has(id) && !claimedByContract.has(id) && !claimedByGroup.has(id)
       )
       if (childIds.length === 0) continue
+      for (const id of childIds) claimedByGroup.add(id)
       const expanded = isGroupExpanded(cn.filePath, expandedGroups)
       if (!expanded) {
         for (const id of childIds) {

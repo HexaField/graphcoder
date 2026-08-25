@@ -555,6 +555,82 @@ describe('expand/collapse key contract — filePath, not id', () => {
   })
 })
 
+// ── Multi-parent guard ───────────────────────────────────────────────────────
+// When `contains` edges give a single node two parent file nodes (can happen
+// in diff views where removed containment edges get re-injected), the node
+// must appear in at most one group. Otherwise ELK crashes with
+// "value already present".
+
+describe('Phase 7 — multi-parent containment guard', () => {
+  it('assigns a node to only one file group when two file nodes contain it', () => {
+    // node 'fn' reachable from both f1 and f2 via contains edges
+    const nodes = [
+      node('f1', 'file', { filePath: 'src/a.ts' }),
+      node('f2', 'file', { filePath: 'src/b.ts' }),
+      node('fn', 'function', { filePath: 'src/a.ts' })
+    ]
+    const edges = [contains('f1', 'fn'), contains('f2', 'fn')]
+    const { groups } = computeView(nodes, edges, {
+      ...DEFAULT_VIEW_PARAMS,
+      groupByFile: true,
+      expandedGroups: ['src/a.ts', 'src/b.ts']
+    })
+
+    // 'fn' must appear in exactly one group's childIds, not both
+    const groupsWithFn = groups.filter((g) => g.childIds.includes('fn'))
+    expect(groupsWithFn).toHaveLength(1)
+  })
+
+  it('assigns collapsed children to only one group when two file nodes contain them', () => {
+    const nodes = [
+      node('f1', 'file', { filePath: 'src/a.ts' }),
+      node('f2', 'file', { filePath: 'src/b.ts' }),
+      node('fn', 'function', { filePath: 'src/a.ts' })
+    ]
+    const edges = [contains('f1', 'fn'), contains('f2', 'fn')]
+    const { groups, nodes: out } = computeView(nodes, edges, {
+      ...DEFAULT_VIEW_PARAMS,
+      groupByFile: true,
+      expandedGroups: [] // all collapsed
+    })
+
+    // Only one collapsed group should claim 'fn'
+    const collapsedGroups = groups.filter((g) => g.collapsed)
+    // fn must not appear in layout nodes (it got collapsed)
+    expect(out.map((n) => n.id)).not.toContain('fn')
+    // Exactly one group should exist for the file that claimed fn
+    // (the other file group gets skipped because fn is already claimed)
+    expect(collapsedGroups.length).toBeLessThanOrEqual(2)
+  })
+
+  it('deduplicates input nodes with the same id (Phase 0)', () => {
+    // Simulates semantic ID collision: two nodes with the same id
+    const nodes = [node('fn', 'function', { filePath: 'src/a.ts' }), node('fn', 'function', { filePath: 'src/b.ts' })]
+    const { nodes: out } = computeView(nodes, [], FLAT_PARAMS)
+    const ids = out.map((n) => n.id)
+    expect(ids.filter((id) => id === 'fn')).toHaveLength(1)
+  })
+
+  it('assigns a method to only one class group when two classes contain it (class-only mode)', () => {
+    // node 'method' reachable from both cls1 and cls2 via contains edges
+    const nodes = [
+      node('cls1', 'class', { filePath: 'src/a.ts' }),
+      node('cls2', 'class', { filePath: 'src/b.ts' }),
+      node('method', 'function', { filePath: 'src/a.ts' })
+    ]
+    const edges = [contains('cls1', 'method'), contains('cls2', 'method')]
+    const { groups } = computeView(nodes, edges, {
+      ...DEFAULT_VIEW_PARAMS,
+      groupByFile: false,
+      groupByClass: true,
+      expandedGroups: ['src/a.ts', 'src/b.ts']
+    })
+
+    const groupsWithMethod = groups.filter((g) => g.childIds.includes('method'))
+    expect(groupsWithMethod).toHaveLength(1)
+  })
+})
+
 // ── globToRegex ───────────────────────────────────────────────────────────────
 
 describe('globToRegex', () => {

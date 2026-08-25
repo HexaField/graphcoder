@@ -5,12 +5,12 @@
  * Users click two commits (or branch tips) to select base and target,
  * then compare to compute an ArchDiff between them.
  */
-import { computeArchDiff, nodeSemanticId } from '@graphcoder/core'
-import type { FileGroup, GraphEdge, GraphNode, GraphSnapshot } from '@graphcoder/core'
+import { computeArchDiff, computeView, nodeSemanticId } from '@graphcoder/core'
+import type { FileGroup, GraphEdge, GraphNode, GraphSnapshot, ViewParams } from '@graphcoder/core'
 import type { NodeSnapshot } from '@graphcoder/core'
 import type { BranchRef, GitGraph, GitStatus, GraphCommit } from '../api/git.js'
 import { computeDiff, fetchGitGraph, fetchGitStatus } from '../api/git.js'
-import { setState } from './core.js'
+import { state, setState } from './core.js'
 
 // ── State shape ───────────────────────────────────────────────────────────────
 
@@ -49,6 +49,8 @@ export interface TemporalState {
   fileDiffStatus: Map<string, 'added' | 'removed' | 'modified' | 'mixed'> | null
   /** Snapshot of the live view before the diff replaced it — restored on clear. */
   savedView: { nodes: GraphNode[]; edges: GraphEdge[]; groups: FileGroup[]; fileNodes: GraphNode[] } | null
+  /** Raw unfiltered diff nodes/edges — re-filtered via computeView when filters change during a diff. */
+  rawDiffView: { nodes: GraphNode[]; edges: GraphEdge[]; fileNodes: GraphNode[] } | null
 }
 
 // ── Initialise ────────────────────────────────────────────────────────────────
@@ -68,7 +70,8 @@ export const temporalInitial: TemporalState = {
   diffStatusMap: null,
   edgeStatusMap: null,
   fileDiffStatus: null,
-  savedView: null
+  savedView: null,
+  rawDiffView: null
 }
 
 // ── Actions ───────────────────────────────────────────────────────────────────
@@ -299,8 +302,13 @@ function buildDiffView(
   const edgeKeySet = new Set(mergedEdges.map((e) => `${e.source}|${e.target}|${e.kind}`))
 
   // Add removed edges that don't already exist in the merged set.
+  // Skip `contains` — removed containment re-introduces old parent→child
+  // relationships that conflict with current file grouping (a moved symbol
+  // would become a descendant of both old and new file, crashing ELK with
+  // "value already present").
   for (const op of diff.operations) {
     if (op.op !== 'remove_edge') continue
+    if (op.edge.kind === 'contains') continue
     const key = `${op.edge.source}|${op.edge.target}|${op.edge.kind}`
     if (edgeKeySet.has(key)) continue
     // Only include if both endpoints exist in the merged node set.
@@ -315,6 +323,25 @@ function buildDiffView(
   for (const n of mergedNodes) {
     const sem = targetCgToSem.get(n.id) ?? baseCgToSem.get(n.id)
     if (sem && sem !== n.id) n.id = sem
+  }
+
+  // Deduplicate after ID remapping — nodeSemanticId hashes (kind, name,
+  // signature) without filePath, so identically-named symbols in different
+  // files collapse to the same semantic ID. Keep the first occurrence
+  // (target snapshot version, which represents the current state).
+  {
+    const seen = new Set<string>()
+    const deduped: GraphNode[] = []
+    for (const n of mergedNodes) {
+      if (seen.has(n.id)) continue
+      seen.add(n.id)
+      deduped.push(n)
+    }
+    mergedNodes.length = 0
+    mergedNodes.push(...deduped)
+    // Rebuild the set so downstream edge endpoint checks stay correct.
+    mergedNodeIds.clear()
+    for (const n of mergedNodes) mergedNodeIds.add(n.id)
   }
 
   const groups = buildDiffFileGroups(mergedNodes)
@@ -396,9 +423,31 @@ export async function runTemporalDiff(): Promise<void> {
 
     // Build the merged diff view and push it into the canvas + hierarchy.
     const dv = buildDiffView(result.baseSnapshot, result.targetSnapshot, result.diff)
-    setState('viewNodes', dv.nodes)
-    setState('viewEdges', dv.edges)
-    setState('viewGroups', dv.groups)
+
+    // Store unfiltered diff data so filter changes can re-apply computeView.
+    setState('rawDiffView', { nodes: dv.nodes, edges: dv.edges, fileNodes: dv.fileNodes })
+
+    // Apply current filter/collapse state to the diff view — same pipeline the
+    // server uses for the live graph, so hidden kinds, paths, grouping, and
+    // collapse all take effect.
+    const viewParams: ViewParams = {
+      hiddenNodeKinds: state.hiddenNodeKinds,
+      hiddenEdgeKinds: state.hiddenEdgeKinds,
+      hiddenPaths: state.hiddenPaths,
+      excludePatterns: state.excludePatterns,
+      groupByFile: state.groupByFile,
+      groupByClass: state.groupByClass,
+      groupByContract: state.groupByContract,
+      groupByPackage: state.groupByPackage,
+      expandedGroups: state.expandedGroups,
+      focusedNodeId: state.focusedNodeId
+    }
+    const filtered = computeView(dv.nodes, dv.edges, viewParams)
+
+    setState('viewNodes', filtered.nodes)
+    setState('viewEdges', filtered.edges)
+    setState('viewGroups', filtered.groups)
+    // Keep the diff's synthetic fileNodes — computeView's list misses removed files.
     setState('fileNodes', dv.fileNodes)
     setState('diffStatusMap', dv.nodeStatus)
     setState('edgeStatusMap', dv.edgeStatus)
@@ -411,6 +460,24 @@ export async function runTemporalDiff(): Promise<void> {
     setState('isComputing', false)
     setState('computeProgress', null)
   }
+}
+
+/**
+ * Re-filter the active diff view with updated ViewParams.
+ *
+ * Called by the reactive effect in App.tsx when filters or collapse state
+ * change while a temporal diff occupies the display. Uses the stored raw
+ * diff data and runs it through computeView so hidden kinds, paths,
+ * grouping, and collapse all apply.
+ */
+export function refilterDiffView(params: ViewParams): void {
+  const raw = state.rawDiffView
+  if (!raw) return
+  const filtered = computeView(raw.nodes, raw.edges, params)
+  setState('viewNodes', filtered.nodes)
+  setState('viewEdges', filtered.edges)
+  setState('viewGroups', filtered.groups)
+  // fileNodes stay unchanged — synthetic diff fileNodes already in state.
 }
 
 export { computeArchDiff }

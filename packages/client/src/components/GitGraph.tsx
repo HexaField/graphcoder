@@ -380,6 +380,7 @@ export const GitGraph: Component = () => {
                         }`}
                         style={{ height: `${ROW_H}px` }}
                         onClick={() => void selectCommit(row.commit.hash)}
+                        data-testid={`git-commit-row-${row.commit.shortHash}`}
                       >
                         {/* Branch name (on tip rows) */}
                         <Show when={row.branchName}>
@@ -395,6 +396,7 @@ export const GitGraph: Component = () => {
                                 toggleBranchExpanded(name())
                               }}
                               title={expanded().includes(name()) ? `Collapse ${name()}` : `Expand ${name()}`}
+                              data-testid={`git-branch-toggle-${name()}`}
                             >
                               {expanded().includes(name()) ? '▾' : '▸'} {name()}
                             </button>
