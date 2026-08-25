@@ -1,6 +1,7 @@
 import type { ArchDiff, GraphEdge, GraphNode, GraphSnapshot } from '@graphcoder/core'
 import { computeArchDiff } from '@graphcoder/core'
 import { state, setState } from './core.js'
+import { syncUrlParams } from './url.js'
 
 // ── Diff ──────────────────────────────────────────────────────────────────────
 
@@ -38,6 +39,10 @@ export function clearDiff(): void {
   setState('edgeStatusMap', null)
   setState('fileDiffStatus', null)
   setState('rawDiffView', null)
+  // Clear diff refs from the URL so a reload doesn't re-trigger the diff.
+  setState('baseRef', null)
+  setState('targetRef', null)
+  syncUrlParams()
 }
 
 /**

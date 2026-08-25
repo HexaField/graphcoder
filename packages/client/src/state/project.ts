@@ -71,10 +71,20 @@ export async function openProject(projectRoot: string): Promise<void> {
 /**
  * Restore state from URL params on startup, then fall back to the server's
  * current project if no URL param specifies one.
+ *
+ * Recognised params:
+ *   - `project` — absolute path of the project to open
+ *   - `base`    — base commit hash for a temporal diff
+ *   - `target`  — target commit hash for a temporal diff
+ *
+ * When both `base` and `target` appear in the URL, the git graph panel
+ * opens automatically and a temporal diff starts after the project loads.
  */
 export async function initFromUrl(): Promise<void> {
   const params = new URLSearchParams(window.location.search)
   const projectParam = params.get('project')
+  const baseParam = params.get('base')
+  const targetParam = params.get('target')
 
   if (projectParam) {
     await openProject(projectParam)
@@ -94,6 +104,20 @@ export async function initFromUrl(): Promise<void> {
     } catch {
       // Server has no project open yet — not an error.
     }
+  }
+
+  // Restore diff range from URL. Set refs first, then trigger the diff.
+  if (baseParam) setState('baseRef', baseParam)
+  if (targetParam) setState('targetRef', targetParam)
+  if (baseParam || targetParam) syncUrlParams()
+
+  if (baseParam && targetParam && state.projectRoot) {
+    // Open the git graph panel so the user sees the selected commits,
+    // then load the graph data and run the diff.
+    setState('gitBarOpen', true)
+    const { loadGitGraph, runTemporalDiff } = await import('./temporal.js')
+    await loadGitGraph()
+    await runTemporalDiff()
   }
 }
 

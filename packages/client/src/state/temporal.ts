@@ -11,6 +11,7 @@ import type { NodeSnapshot } from '@graphcoder/core'
 import type { BranchRef, GitGraph, GitStatus, GraphCommit } from '../api/git.js'
 import { computeDiff, fetchGitGraph, fetchGitStatus } from '../api/git.js'
 import { state, setState } from './core.js'
+import { syncUrlParams } from './url.js'
 
 // ── State shape ───────────────────────────────────────────────────────────────
 
@@ -129,10 +130,12 @@ export async function selectCommit(hash: string): Promise<void> {
 
   if (state.baseRef === hash) {
     setState('baseRef', null)
+    syncUrlParams()
     return
   }
   if (state.targetRef === hash) {
     setState('targetRef', null)
+    syncUrlParams()
     return
   }
 
@@ -144,6 +147,7 @@ export async function selectCommit(hash: string): Promise<void> {
     // Both set — replace target.
     setState('targetRef', hash)
   }
+  syncUrlParams()
 }
 
 /** Swap base and target. */
@@ -155,6 +159,7 @@ export function swapRefs(): void {
     const t = state.targetRef
     setState('baseRef', t)
     setState('targetRef', b)
+    syncUrlParams()
   })
 }
 
@@ -162,6 +167,7 @@ export function swapRefs(): void {
 export function clearSelection(): void {
   setState('baseRef', null)
   setState('targetRef', null)
+  syncUrlParams()
 }
 
 // ── Diff view helpers ────────────────────────────────────────────────────────
@@ -454,6 +460,7 @@ export async function runTemporalDiff(): Promise<void> {
     setState('fileDiffStatus', dv.fileDiffStatus)
     setState('currentDiff', result.diff)
     setState('temporalRange', { baseLabel: labelFor(base), targetLabel: labelFor(target) })
+    syncUrlParams()
   } catch (err) {
     setState('diffError', err instanceof Error ? err.message : 'Computation failed')
   } finally {
