@@ -62,37 +62,40 @@ const ProjectInput: Component = () => {
 
 // ── Direction toggle ───────────────────────────────────────────────────────
 
-const DirectionToggle: Component = () => (
-  <div
-    class="flex items-center gap-0.5 rounded border border-gray-200 dark:border-gray-700 overflow-hidden"
-    title="Layout direction"
-  >
-    <button
-      class={`px-2.5 py-1 text-sm transition-colors ${
-        state.graphDirection === 'TB'
-          ? "bg-blue-600 text-white"
-          : "text-gray-500 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white hover:bg-gray-200 dark:hover:bg-gray-700"
-      }`}
-      data-testid="direction-tb"
-      onClick={() => setGraphDirection('TB')}
-      title="Top-to-bottom layout"
+const DirectionToggle: Component<{ variant?: string }> = (props) => {
+  const testId = (base: string) => (props.variant ? `${base}-${props.variant}` : base)
+  return (
+    <div
+      class="flex items-center gap-0.5 rounded border border-gray-200 dark:border-gray-700 overflow-hidden"
+      title="Layout direction"
     >
-      ⇕
-    </button>
-    <button
-      class={`px-2.5 py-1 text-sm transition-colors ${
-        state.graphDirection === 'LR'
-          ? "bg-blue-600 text-white"
-          : "text-gray-500 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white hover:bg-gray-200 dark:hover:bg-gray-700"
-      }`}
-      data-testid="direction-lr"
-      onClick={() => setGraphDirection('LR')}
-      title="Left-to-right layout"
-    >
-      ⇔
-    </button>
-  </div>
-)
+      <button
+        class={`px-2.5 py-1 text-sm transition-colors ${
+          state.graphDirection === 'TB'
+            ? "bg-blue-600 text-white"
+            : "text-gray-500 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white hover:bg-gray-200 dark:hover:bg-gray-700"
+        }`}
+        data-testid={testId('direction-tb')}
+        onClick={() => setGraphDirection('TB')}
+        title="Top-to-bottom layout"
+      >
+        ⇕
+      </button>
+      <button
+        class={`px-2.5 py-1 text-sm transition-colors ${
+          state.graphDirection === 'LR'
+            ? "bg-blue-600 text-white"
+            : "text-gray-500 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white hover:bg-gray-200 dark:hover:bg-gray-700"
+        }`}
+        data-testid={testId('direction-lr')}
+        onClick={() => setGraphDirection('LR')}
+        title="Left-to-right layout"
+      >
+        ⇔
+      </button>
+    </div>
+  )
+}
 
 // ── Toolbar ────────────────────────────────────────────────────────────────
 
@@ -176,7 +179,7 @@ export const Toolbar: Component = () => {
 
       {/* ── Secondary row — mobile only ── */}
       <div class="flex sm:hidden items-center gap-2 px-3 pb-2">
-        <DirectionToggle />
+        <DirectionToggle variant="mobile" />
         <Show when={state.fileNodes.length > 0}>
           <button
             class={`flex items-center gap-1 text-xs px-2 py-1 rounded border transition-colors ${
@@ -195,7 +198,7 @@ export const Toolbar: Component = () => {
           <span class="text-xs text-blue-500 dark:text-blue-400 font-mono">diff on</span>
         </Show>
         <div class="ml-auto flex-1 max-w-xs">
-          <SearchBar />
+          <SearchBar variant="mobile" />
         </div>
       </div>
     </div>

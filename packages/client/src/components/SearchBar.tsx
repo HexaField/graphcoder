@@ -2,9 +2,10 @@ import type { Component } from 'solid-js'
 import { For, Show } from 'solid-js'
 import { search, selectNode, setState, state } from '../state/store.js'
 
-export const SearchBar: Component = () => {
+export const SearchBar: Component<{ variant?: string }> = (props) => {
+  const testId = (base: string) => (props.variant ? `${base}-${props.variant}` : base)
   return (
-    <div class="relative w-full sm:w-auto" data-testid="search-bar">
+    <div class="relative w-full sm:w-auto" data-testid={testId('search-bar')}>
       <input
         type="text"
         placeholder="Search symbols…"
@@ -13,7 +14,7 @@ export const SearchBar: Component = () => {
           w-full sm:w-64 min-w-0
           focus:outline-none focus:border-blue-500
           placeholder-gray-400 dark:placeholder-gray-500"
-        data-testid="search-input"
+        data-testid={testId('search-input')}
         value={state.searchQuery}
         onInput={(e) => void search(e.currentTarget.value)}
       />
@@ -23,7 +24,7 @@ export const SearchBar: Component = () => {
             w-full sm:w-80 min-w-[240px]
             bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-600
             rounded mt-1 z-50 max-h-64 overflow-auto shadow-lg"
-          data-testid="search-results"
+          data-testid={testId('search-results')}
         >
           <For each={state.searchResults}>
             {(result) => (

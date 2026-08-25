@@ -224,11 +224,13 @@ test.describe('with open project', () => {
   // -------------------------------------------------------------------------
 
   test('canvas expand button expands collapsed container and collapse reverses it', async ({ page }) => {
-    // Wait for graph data to load via WS.
+    // Wait for graph groups to load via WS.  With groupByFile=true (default),
+    // all nodes collapse into file groups — viewNodes stays empty while
+    // viewGroups holds the collapsed containers the canvas renders.
     await page.waitForFunction(
       () => {
         const gc = (window as any).__graphcoder
-        return gc && gc.viewNodes && gc.viewNodes.length > 0
+        return gc && gc.viewGroups && gc.viewGroups.length > 0
       },
       { timeout: 15_000 }
     )
@@ -269,8 +271,9 @@ test.describe('with open project', () => {
     const beforeExpand = await page.evaluate(() => (window as any).__graphcoder.viewNodes.length)
     await expandBtn.click()
 
-    // Wait for the server response and layout.
-    await page.waitForFunction((prev: number) => (window as any).__graphcoder.viewNodes.length !== prev, beforeExpand, {
+    // Wait for the server response and layout — expanding a group reveals its
+    // children as viewNodes, so the count must increase from 0 (all collapsed).
+    await page.waitForFunction((prev: number) => (window as any).__graphcoder.viewNodes.length > prev, beforeExpand, {
       timeout: 10_000
     })
     await page.waitForTimeout(1000)
@@ -384,6 +387,28 @@ async function openProjectPath(page: Page, projectPath: string): Promise<void> {
   await page.waitForSelector('[data-testid="hierarchy-panel"] [data-nodeid]', { timeout: 30_000 })
 }
 
+/** Wait for at least one viewNode to appear (requires groupByFile=false or an expanded group). */
+async function waitForViewNodes(page: Page): Promise<void> {
+  await page.waitForFunction(
+    () => {
+      const gc = (window as any).__graphcoder
+      return gc && gc.viewNodes && gc.viewNodes.length > 0
+    },
+    { timeout: 30_000 }
+  )
+}
+
+/**
+ * Disable file grouping so viewNodes populates.
+ *
+ * With groupByFile=true (default), all symbol nodes collapse inside their file
+ * groups and viewNodes stays empty — captureSnapshot would capture nothing.
+ */
+async function disableGroupByFile(page: Page): Promise<void> {
+  await page.getByTestId('filter-scope-group-files').click()
+  await waitForViewNodes(page)
+}
+
 test.describe('ArchDiff — snapshot and diff', () => {
   test.beforeEach(() => {
     test.setTimeout(180_000)
@@ -408,6 +433,11 @@ test.describe('ArchDiff — snapshot and diff', () => {
     await page.goto('/')
     await openProjectPath(page, fixtureV1)
 
+    // Disable file grouping so viewNodes populates — with groupByFile=true
+    // (default), all nodes collapse into groups and captureSnapshot captures
+    // empty data, producing a null diff.
+    await disableGroupByFile(page)
+
     // Diff panel must NOT be visible yet (no snapshot)
     await expect(page.getByTestId('diff-panel')).not.toBeVisible()
 
@@ -415,8 +445,9 @@ test.describe('ArchDiff — snapshot and diff', () => {
     await page.getByTestId('snapshot-btn').click()
     await expect(page.getByTestId('clear-diff-toolbar-btn')).toBeVisible()
 
-    // Open v2
+    // Open v2 — groupByFile stays off (server remembers client params)
     await openProjectPath(page, fixtureV2)
+    await waitForViewNodes(page)
 
     // Diff panel must appear
     await page.waitForSelector('[data-testid="diff-panel"]', { timeout: 30_000 })
@@ -437,8 +468,10 @@ test.describe('ArchDiff — snapshot and diff', () => {
   test('diff summary shows correct change types', async ({ page }) => {
     await page.goto('/')
     await openProjectPath(page, fixtureV1)
+    await disableGroupByFile(page)
     await page.getByTestId('snapshot-btn').click()
     await openProjectPath(page, fixtureV2)
+    await waitForViewNodes(page)
     await page.waitForSelector('[data-testid="diff-panel"]', { timeout: 30_000 })
 
     const diffPanel = page.getByTestId('diff-panel')
@@ -458,8 +491,10 @@ test.describe('ArchDiff — snapshot and diff', () => {
   test('clear diff removes the diff panel', async ({ page }) => {
     await page.goto('/')
     await openProjectPath(page, fixtureV1)
+    await disableGroupByFile(page)
     await page.getByTestId('snapshot-btn').click()
     await openProjectPath(page, fixtureV2)
+    await waitForViewNodes(page)
     await page.waitForSelector('[data-testid="diff-panel"]', { timeout: 30_000 })
 
     await page.getByTestId('clear-diff-btn').click()
