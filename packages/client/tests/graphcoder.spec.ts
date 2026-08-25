@@ -551,7 +551,184 @@ test.describe('Temporal diff — git commit comparison', () => {
   })
 
   // -------------------------------------------------------------------------
-  // Test 12: Temporal diff respects current filter state
+  // Test 12: Clicking a node during a temporal diff loads detail via REST
+  //
+  // The diff view remaps node IDs to semantic IDs for diff overlay matching.
+  // The REST endpoint expects CodeGraph IDs, so selectNode must resolve
+  // through the reverse map (diffCgIdMap). When the CodeGraph ID refers to
+  // a historical commit no longer indexed at HEAD, the fallback path builds
+  // detail from the local diff data.
+  // -------------------------------------------------------------------------
+
+  test('clicking a node during temporal diff loads node detail', async ({ page }) => {
+    await page.goto('/')
+    await openProjectPath(page, fixturePath)
+
+    // Open the git graph bar
+    await page.getByTestId('git-bar-toggle').click()
+    await page.waitForSelector('[data-testid="git-graph"]', { timeout: 10_000 })
+
+    const commitRows = page.locator('[data-testid^="git-commit-row-"]')
+    await expect(commitRows.first()).toBeVisible({ timeout: 15_000 })
+
+    // Expand the first branch to reveal individual commits
+    const branchBtn = page.locator('[data-testid^="git-branch-toggle-"]').first()
+    await expect(branchBtn).toBeVisible({ timeout: 5_000 })
+    await branchBtn.click()
+    await page.waitForFunction(() => document.querySelectorAll('[data-testid^="git-commit-row-"]').length >= 2, {
+      timeout: 10_000
+    })
+
+    const rowCount = await commitRows.count()
+    if (rowCount < 2) {
+      test.skip(true, 'Fewer than 2 commits — cannot test diff node selection')
+      return
+    }
+
+    // Select two commits and compare
+    await commitRows.nth(0).click()
+    await commitRows.nth(1).click()
+
+    const compareBtn = page.getByTestId('git-compare-btn')
+    await expect(compareBtn).toBeEnabled({ timeout: 5_000 })
+    await compareBtn.click()
+
+    // Wait for diff computation to finish
+    await page.waitForFunction(
+      () => {
+        const gc = (window as any).__graphcoder
+        return gc?.diffStatusMap && gc?.viewNodes?.length > 0
+      },
+      { timeout: 120_000 }
+    )
+
+    // Verify the reverse ID map exists and has entries
+    const mapSize = await page.evaluate(() => (window as any).__graphcoder.diffCgIdMap?.size ?? 0)
+    expect(mapSize).toBeGreaterThan(0)
+
+    // Get a view node whose ID appears in the reverse map (semantic ID)
+    const nodeId = await page.evaluate(() => {
+      const gc = (window as any).__graphcoder
+      const cgMap: Map<string, string> = gc.diffCgIdMap
+      // Find the first view node whose ID maps to a CodeGraph ID
+      for (const node of gc.viewNodes) {
+        if (cgMap.has(node.id)) return node.id as string
+      }
+      return null
+    })
+
+    if (!nodeId) {
+      test.skip(true, 'No diff view node found in the reverse ID map')
+      return
+    }
+
+    // Call selectNode programmatically — this exercises the full resolution path:
+    // semantic ID → diffCgIdMap lookup → REST fetch → fallback if 404
+    await page.evaluate(async (id: string) => {
+      const { selectNode } = await import('/src/state/selection.js')
+      await selectNode(id)
+    }, nodeId)
+
+    // The inspector panel should now show node detail
+    const detail = await page.evaluate(() => {
+      const gc = (window as any).__graphcoder
+      const d = gc.selectedNodeDetail
+      return {
+        hasDetail: !!d,
+        nodeName: d?.node?.name ?? null,
+        nodeKind: d?.node?.kind ?? null,
+        error: gc.error
+      }
+    })
+
+    // Detail must have loaded — either via REST (CodeGraph ID still at HEAD)
+    // or via local fallback (historical commit not indexed at HEAD)
+    expect(detail.hasDetail).toBe(true)
+    expect(detail.nodeName).toBeTruthy()
+    expect(detail.nodeKind).toBeTruthy()
+
+    // The inspector panel should be visible with the node name
+    const inspector = page.getByTestId('node-inspector')
+    await expect(inspector).toBeVisible()
+    await expect(inspector).toContainText(detail.nodeName!)
+  })
+
+  // -------------------------------------------------------------------------
+  // Test 13: Clearing diff resets diffCgIdMap
+  // -------------------------------------------------------------------------
+
+  test('clearing temporal diff resets the reverse ID map', async ({ page }) => {
+    await page.goto('/')
+    await openProjectPath(page, fixturePath)
+
+    // Open git bar, compare two commits
+    await page.getByTestId('git-bar-toggle').click()
+    await page.waitForSelector('[data-testid="git-graph"]', { timeout: 10_000 })
+
+    const commitRows = page.locator('[data-testid^="git-commit-row-"]')
+    await expect(commitRows.first()).toBeVisible({ timeout: 15_000 })
+
+    const branchBtn = page.locator('[data-testid^="git-branch-toggle-"]').first()
+    await expect(branchBtn).toBeVisible({ timeout: 5_000 })
+    await branchBtn.click()
+    await page.waitForFunction(() => document.querySelectorAll('[data-testid^="git-commit-row-"]').length >= 2, {
+      timeout: 10_000
+    })
+
+    const rowCount = await commitRows.count()
+    if (rowCount < 2) {
+      test.skip(true, 'Fewer than 2 commits — cannot test diff clear')
+      return
+    }
+
+    await commitRows.nth(0).click()
+    await commitRows.nth(1).click()
+
+    const compareBtn = page.getByTestId('git-compare-btn')
+    await expect(compareBtn).toBeEnabled({ timeout: 5_000 })
+    await compareBtn.click()
+
+    // Wait for diff to load
+    await page.waitForFunction(
+      () => {
+        const gc = (window as any).__graphcoder
+        return gc?.diffStatusMap && gc?.diffCgIdMap?.size > 0
+      },
+      { timeout: 120_000 }
+    )
+
+    // Confirm map exists before clearing
+    const mapBefore = await page.evaluate(() => (window as any).__graphcoder.diffCgIdMap?.size ?? 0)
+    expect(mapBefore).toBeGreaterThan(0)
+
+    // Clear the diff
+    const clearBtn = page.locator('[data-testid="clear-diff-btn"], [title="Clear diff"]').first()
+    if (await clearBtn.isVisible({ timeout: 2_000 }).catch(() => false)) {
+      await clearBtn.click()
+    } else {
+      // Fallback: clear programmatically
+      await page.evaluate(async () => {
+        const { clearDiff } = await import('/src/state/diff.js')
+        clearDiff()
+      })
+    }
+
+    await page.waitForTimeout(500)
+
+    // After clearing, both maps should be null
+    const afterClear = await page.evaluate(() => {
+      const gc = (window as any).__graphcoder
+      return {
+        diffStatusMap: gc.diffStatusMap,
+        diffCgIdMap: gc.diffCgIdMap
+      }
+    })
+    expect(afterClear.diffStatusMap).toBeNull()
+    expect(afterClear.diffCgIdMap).toBeNull()
+  })
+
+  // -------------------------------------------------------------------------
+  // Test 14: Temporal diff respects current filter state
   // -------------------------------------------------------------------------
 
   test('temporal diff respects hidden node kinds', async ({ page }) => {

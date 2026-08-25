@@ -5,7 +5,7 @@
  * Users click two commits (or branch tips) to select base and target,
  * then compare to compute an ArchDiff between them.
  */
-import { computeArchDiff, computeView, nodeSemanticId } from '@graphcoder/core'
+import { buildDiffIdMap, computeArchDiff, computeView, nodeSemanticId } from '@graphcoder/core'
 import type { FileGroup, GraphEdge, GraphNode, GraphSnapshot, ViewParams } from '@graphcoder/core'
 import type { NodeSnapshot } from '@graphcoder/core'
 import type { BranchRef, GitGraph, GitStatus, GraphCommit } from '../api/git.js'
@@ -336,12 +336,8 @@ function buildDiffView(
   // Remap target node IDs from CodeGraph IDs to semantic IDs so the diff
   // overlay can match them. Keep the semantic ID as the node's `id`.
   // Build a reverse map (semantic → CodeGraph ID) so REST lookups can
-  // resolve back to the server's native IDs. Target IDs take priority
-  // (they refer to the current codebase); base IDs serve as fallback
-  // for removed nodes.
-  const cgIdMap = new Map<string, string>()
-  for (const [cgId, sem] of baseCgToSem) cgIdMap.set(sem, cgId)
-  for (const [cgId, sem] of targetCgToSem) cgIdMap.set(sem, cgId) // target wins
+  // resolve back to the server's native IDs.
+  const cgIdMap = buildDiffIdMap(baseSnapshot.nodes, targetSnapshot.nodes)
   for (const n of mergedNodes) {
     const sem = targetCgToSem.get(n.id) ?? baseCgToSem.get(n.id)
     if (sem && sem !== n.id) n.id = sem

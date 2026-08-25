@@ -25,3 +25,27 @@ export function semanticId(kind: string, name: string, signature?: string): stri
 export function nodeSemanticId(node: Pick<GraphNode, 'kind' | 'name' | 'signature'>): string {
   return semanticId(node.kind, node.name, node.signature)
 }
+
+/**
+ * Build a reverse map from semantic IDs back to CodeGraph IDs.
+ *
+ * During a temporal diff the canvas remaps node IDs to semantic IDs so the
+ * diff overlay can match nodes across commits. This function builds the
+ * inverse (semantic → CodeGraph ID) so REST calls can resolve back to the
+ * server's native IDs.
+ *
+ * Target IDs overwrite base IDs — the target snapshot represents the
+ * current codebase, so its CodeGraph IDs take priority. Base IDs serve
+ * as fallback for removed nodes.
+ *
+ * @returns Map<semanticId, codeGraphId>
+ */
+export function buildDiffIdMap(
+  baseNodes: Pick<GraphNode, 'id' | 'kind' | 'name' | 'signature'>[],
+  targetNodes: Pick<GraphNode, 'id' | 'kind' | 'name' | 'signature'>[]
+): Map<string, string> {
+  const map = new Map<string, string>()
+  for (const n of baseNodes) map.set(nodeSemanticId(n), n.id)
+  for (const n of targetNodes) map.set(nodeSemanticId(n), n.id) // target wins
+  return map
+}

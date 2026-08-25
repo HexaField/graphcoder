@@ -153,7 +153,7 @@ export interface SearchResultItem {
 /** Layout flow direction for the canvas. LR = left-to-right, TB = top-to-bottom. */
 export type GraphDirection = 'LR' | 'TB'
 
-export { normalizeSignature, nodeSemanticId, semanticId } from './identity.js'
+export { buildDiffIdMap, normalizeSignature, nodeSemanticId, semanticId } from './identity.js'
 export type { FileGroup, ViewParams, ViewResult } from './view.js'
 export { computeView, DEFAULT_VIEW_PARAMS, globToRegex } from './view.js'
 export type { ArchDiff, ArchOp, EdgeTuple, LocationHint, NodeProps, NodeSnapshot } from './diff/types.js'
