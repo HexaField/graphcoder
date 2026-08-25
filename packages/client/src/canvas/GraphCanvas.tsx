@@ -589,6 +589,7 @@ export const GraphCanvas: Component = () => {
               class="absolute z-40 flex items-center gap-1 text-xs px-2 py-1 rounded shadow
                      bg-blue-600 hover:bg-blue-500 text-white font-medium transition-colors"
               style={{ left: `${btnX() - 76}px`, top: `${btnY()}px` }}
+              onMouseMove={(e) => e.stopPropagation()}
               onMouseDown={(e) => e.stopPropagation()}
               onMouseUp={(e) => e.stopPropagation()}
               onClick={(e) => {
