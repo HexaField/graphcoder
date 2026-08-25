@@ -628,11 +628,13 @@ test.describe('Temporal diff — git commit comparison', () => {
     await expect(compareBtn).toBeEnabled({ timeout: 5_000 })
     await compareBtn.click()
 
-    // Wait for diff computation to finish
+    // Wait for diff computation to finish — with groupByFile enabled
+    // (default), all nodes collapse into groups so viewNodes stays empty.
+    // Wait for the raw diff data and reverse ID map instead.
     await page.waitForFunction(
       () => {
         const gc = (window as any).__graphcoder
-        return gc?.diffStatusMap && gc?.viewNodes?.length > 0
+        return gc?.diffStatusMap && gc?.diffCgIdMap?.size > 0
       },
       { timeout: 120_000 }
     )
@@ -641,13 +643,14 @@ test.describe('Temporal diff — git commit comparison', () => {
     const mapSize = await page.evaluate(() => (window as any).__graphcoder.diffCgIdMap?.size ?? 0)
     expect(mapSize).toBeGreaterThan(0)
 
-    // Get a view node whose ID appears in the reverse map (semantic ID)
+    // Get a raw diff node whose ID appears in the reverse map (semantic ID).
+    // viewNodes may be empty (all collapsed into groups), so use rawDiffView.
     const nodeId = await page.evaluate(() => {
       const gc = (window as any).__graphcoder
       const cgMap: Map<string, string> = gc.diffCgIdMap
-      // Find the first view node whose ID maps to a CodeGraph ID
-      for (const node of gc.viewNodes) {
-        if (cgMap.has(node.id)) return node.id as string
+      const nodes = gc.rawDiffView?.nodes ?? []
+      for (const node of nodes) {
+        if (node.kind !== 'file' && node.kind !== 'module' && cgMap.has(node.id)) return node.id as string
       }
       return null
     })

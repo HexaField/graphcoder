@@ -62,13 +62,29 @@ describe('semanticId', () => {
 })
 
 describe('nodeSemanticId', () => {
-  it('matches semanticId(kind, name, signature)', () => {
+  it('matches semanticId(kind, name, signature) for symbol nodes', () => {
     const node = {
       kind: 'function' as const,
       name: 'add',
+      filePath: 'src/math.ts',
       signature: '(a: number, b: number): number'
     }
     expect(nodeSemanticId(node)).toBe(semanticId(node.kind, node.name, node.signature))
+  })
+
+  it('uses filePath instead of name for file nodes', () => {
+    const fileA = { kind: 'file' as const, name: 'index.ts', filePath: 'packages/client/src/index.ts' }
+    const fileB = { kind: 'file' as const, name: 'index.ts', filePath: 'packages/server/src/index.ts' }
+    // Same name, different path → different semantic IDs
+    expect(nodeSemanticId(fileA)).not.toBe(nodeSemanticId(fileB))
+    // Path-based: matches semanticId with filePath as the name component
+    expect(nodeSemanticId(fileA)).toBe(semanticId('file', fileA.filePath))
+  })
+
+  it('uses filePath instead of name for module nodes', () => {
+    const modA = { kind: 'module' as const, name: 'utils', filePath: 'packages/core/src/utils.ts' }
+    const modB = { kind: 'module' as const, name: 'utils', filePath: 'packages/server/src/utils.ts' }
+    expect(nodeSemanticId(modA)).not.toBe(nodeSemanticId(modB))
   })
 })
 

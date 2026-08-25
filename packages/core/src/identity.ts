@@ -22,7 +22,13 @@ export function semanticId(kind: string, name: string, signature?: string): stri
   return bytesToHex(sha256(enc.encode(`${kind}\0${name}\0${sig}`)))
 }
 
-export function nodeSemanticId(node: Pick<GraphNode, 'kind' | 'name' | 'signature'>): string {
+export function nodeSemanticId(node: Pick<GraphNode, 'kind' | 'name' | 'signature' | 'filePath'>): string {
+  // File and module nodes represent unique filesystem paths — two files
+  // named `index.ts` in different directories are distinct entities.
+  // Include filePath so they don't collide during diff deduplication.
+  if (node.kind === 'file' || node.kind === 'module') {
+    return semanticId(node.kind, node.filePath ?? node.name, node.signature)
+  }
   return semanticId(node.kind, node.name, node.signature)
 }
 
@@ -41,8 +47,8 @@ export function nodeSemanticId(node: Pick<GraphNode, 'kind' | 'name' | 'signatur
  * @returns Map<semanticId, codeGraphId>
  */
 export function buildDiffIdMap(
-  baseNodes: Pick<GraphNode, 'id' | 'kind' | 'name' | 'signature'>[],
-  targetNodes: Pick<GraphNode, 'id' | 'kind' | 'name' | 'signature'>[]
+  baseNodes: Pick<GraphNode, 'id' | 'kind' | 'name' | 'signature' | 'filePath'>[],
+  targetNodes: Pick<GraphNode, 'id' | 'kind' | 'name' | 'signature' | 'filePath'>[]
 ): Map<string, string> {
   const map = new Map<string, string>()
   for (const n of baseNodes) map.set(nodeSemanticId(n), n.id)

@@ -316,18 +316,34 @@ function buildDiffView(
   }))
   const edgeKeySet = new Set(mergedEdges.map((e) => `${e.source}|${e.target}|${e.kind}`))
 
+  // Build a semantic-ID set for edge-endpoint validation.
+  // `mergedNodeIds` still holds CodeGraph IDs for target nodes at this
+  // point (remapping happens at line 341–344), so it rejects valid
+  // semantic-ID endpoints from removed-edge operations.  A parallel set
+  // of semantic IDs avoids false-negative endpoint checks.
+  const mergedSemIds = new Set<string>()
+  for (const sem of targetCgToSem.values()) mergedSemIds.add(sem)
+  for (const op of diff.operations) {
+    if (op.op === 'remove_node') mergedSemIds.add(op.id)
+  }
+
+  // Track removed child nodes — these need their original `contains`
+  // edge restored so computeView can place them inside file groups.
+  const removedNodeIds = new Set<string>()
+  for (const op of diff.operations) {
+    if (op.op === 'remove_node') removedNodeIds.add(op.id)
+  }
+
   // Add removed edges that don't already exist in the merged set.
-  // Skip `contains` — removed containment re-introduces old parent→child
-  // relationships that conflict with current file grouping (a moved symbol
-  // would become a descendant of both old and new file, crashing ELK with
-  // "value already present").
+  // `contains` edges are restored only for removed child nodes — adding
+  // the old parent→child back for a moved/modified node would give it
+  // two parents, crashing ELK with "value already present".
   for (const op of diff.operations) {
     if (op.op !== 'remove_edge') continue
-    if (op.edge.kind === 'contains') continue
+    if (op.edge.kind === 'contains' && !removedNodeIds.has(op.edge.target)) continue
     const key = `${op.edge.source}|${op.edge.target}|${op.edge.kind}`
     if (edgeKeySet.has(key)) continue
-    // Only include if both endpoints exist in the merged node set.
-    if (mergedNodeIds.has(op.edge.source) && mergedNodeIds.has(op.edge.target)) {
+    if (mergedSemIds.has(op.edge.source) && mergedSemIds.has(op.edge.target)) {
       mergedEdges.push({ source: op.edge.source, target: op.edge.target, kind: op.edge.kind })
       edgeKeySet.add(key)
     }
@@ -343,10 +359,9 @@ function buildDiffView(
     if (sem && sem !== n.id) n.id = sem
   }
 
-  // Deduplicate after ID remapping — nodeSemanticId hashes (kind, name,
-  // signature) without filePath, so identically-named symbols in different
-  // files collapse to the same semantic ID. Keep the first occurrence
-  // (target snapshot version, which represents the current state).
+  // Deduplicate after ID remapping — identically-named symbols in
+  // different files can still collide on semantic ID. Keep the first
+  // occurrence (target snapshot version, which represents the current state).
   {
     const seen = new Set<string>()
     const deduped: GraphNode[] = []
@@ -360,6 +375,35 @@ function buildDiffView(
     // Rebuild the set so downstream edge endpoint checks stay correct.
     mergedNodeIds.clear()
     for (const n of mergedNodes) mergedNodeIds.add(n.id)
+  }
+
+  // Synthesise missing `contains` edges for nodes that lack a containment
+  // parent (e.g. `route` nodes that CodeGraph extracts without creating a
+  // file → route containment edge). Without this, orphan nodes float
+  // outside all file groups in computeView's layout.
+  {
+    const hasContainsParent = new Set<string>()
+    for (const e of mergedEdges) {
+      if (e.kind === 'contains') hasContainsParent.add(e.target)
+    }
+    const fileIdByPath = new Map<string, string>()
+    for (const n of mergedNodes) {
+      if ((n.kind === 'file' || n.kind === 'module') && n.filePath) {
+        fileIdByPath.set(n.filePath, n.id)
+      }
+    }
+    for (const n of mergedNodes) {
+      if (n.kind === 'file' || n.kind === 'module') continue
+      if (hasContainsParent.has(n.id)) continue
+      if (!n.filePath) continue
+      const fileId = fileIdByPath.get(n.filePath)
+      if (!fileId) continue
+      const key = `${fileId}|${n.id}|contains`
+      if (!edgeKeySet.has(key)) {
+        mergedEdges.push({ source: fileId, target: n.id, kind: 'contains' })
+        edgeKeySet.add(key)
+      }
+    }
   }
 
   const groups = buildDiffFileGroups(mergedNodes)
