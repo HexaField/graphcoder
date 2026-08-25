@@ -52,6 +52,13 @@ export interface TemporalState {
   savedView: { nodes: GraphNode[]; edges: GraphEdge[]; groups: FileGroup[]; fileNodes: GraphNode[] } | null
   /** Raw unfiltered diff nodes/edges — re-filtered via computeView when filters change during a diff. */
   rawDiffView: { nodes: GraphNode[]; edges: GraphEdge[]; fileNodes: GraphNode[] } | null
+  /**
+   * Reverse map: semantic ID → CodeGraph ID from the target snapshot.
+   * Populated during buildDiffView. Lets selectNode resolve the original
+   * CodeGraph ID for REST calls when a diff view occupies the display.
+   * Falls back to the base snapshot for removed nodes.
+   */
+  diffCgIdMap: Map<string, string> | null
 }
 
 // ── Initialise ────────────────────────────────────────────────────────────────
@@ -72,7 +79,8 @@ export const temporalInitial: TemporalState = {
   edgeStatusMap: null,
   fileDiffStatus: null,
   savedView: null,
-  rawDiffView: null
+  rawDiffView: null,
+  diffCgIdMap: null
 }
 
 // ── Actions ───────────────────────────────────────────────────────────────────
@@ -232,6 +240,7 @@ function buildDiffView(
   nodeStatus: Map<string, 'added' | 'removed' | 'modified' | 'moved'>
   edgeStatus: Map<string, 'added' | 'removed'>
   fileDiffStatus: Map<string, 'added' | 'removed' | 'modified' | 'mixed'>
+  cgIdMap: Map<string, string>
 } {
   // Start with all target nodes (the "after" state).
   const mergedNodes = [...targetSnapshot.nodes]
@@ -326,6 +335,13 @@ function buildDiffView(
 
   // Remap target node IDs from CodeGraph IDs to semantic IDs so the diff
   // overlay can match them. Keep the semantic ID as the node's `id`.
+  // Build a reverse map (semantic → CodeGraph ID) so REST lookups can
+  // resolve back to the server's native IDs. Target IDs take priority
+  // (they refer to the current codebase); base IDs serve as fallback
+  // for removed nodes.
+  const cgIdMap = new Map<string, string>()
+  for (const [cgId, sem] of baseCgToSem) cgIdMap.set(sem, cgId)
+  for (const [cgId, sem] of targetCgToSem) cgIdMap.set(sem, cgId) // target wins
   for (const n of mergedNodes) {
     const sem = targetCgToSem.get(n.id) ?? baseCgToSem.get(n.id)
     if (sem && sem !== n.id) n.id = sem
@@ -379,7 +395,7 @@ function buildDiffView(
     }
   }
 
-  return { nodes: mergedNodes, edges: mergedEdges, groups, fileNodes, nodeStatus, edgeStatus, fileDiffStatus }
+  return { nodes: mergedNodes, edges: mergedEdges, groups, fileNodes, nodeStatus, edgeStatus, fileDiffStatus, cgIdMap }
 }
 
 /**
@@ -458,6 +474,7 @@ export async function runTemporalDiff(): Promise<void> {
     setState('diffStatusMap', dv.nodeStatus)
     setState('edgeStatusMap', dv.edgeStatus)
     setState('fileDiffStatus', dv.fileDiffStatus)
+    setState('diffCgIdMap', dv.cgIdMap)
     setState('currentDiff', result.diff)
     setState('temporalRange', { baseLabel: labelFor(base), targetLabel: labelFor(target) })
     syncUrlParams()

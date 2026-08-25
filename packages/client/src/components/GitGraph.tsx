@@ -19,8 +19,7 @@ import {
   selectCommit,
   state,
   swapRefs,
-  toggleBranchExpanded,
-  toggleGitBar
+  toggleBranchExpanded
 } from '../state/store.js'
 
 // ── Layout constants ─────────────────────────────────────────────────────────

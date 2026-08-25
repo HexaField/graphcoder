@@ -113,6 +113,27 @@ export default function App() {
     },
     get rawDiffView() {
       return state.rawDiffView
+    },
+    get diffStatusMap() {
+      return state.diffStatusMap
+    },
+    get diffCgIdMap() {
+      return state.diffCgIdMap
+    },
+    get gitCommits() {
+      return state.gitGraph?.commits ?? []
+    },
+    get selectedNodeId() {
+      return state.selectedNodeId
+    },
+    get selectedNodeDetail() {
+      return state.selectedNodeDetail
+    },
+    get isLoadingDetail() {
+      return state.isLoadingDetail
+    },
+    get error() {
+      return state.error
     }
   }
 

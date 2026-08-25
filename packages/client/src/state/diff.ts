@@ -39,6 +39,7 @@ export function clearDiff(): void {
   setState('edgeStatusMap', null)
   setState('fileDiffStatus', null)
   setState('rawDiffView', null)
+  setState('diffCgIdMap', null)
   // Clear diff refs from the URL so a reload doesn't re-trigger the diff.
   setState('baseRef', null)
   setState('targetRef', null)
