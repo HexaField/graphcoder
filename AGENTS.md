@@ -51,11 +51,11 @@ CodeGraph cannot link `fetch()` calls to route handlers because the URL is a run
 | 1     | ✅ Done | ArchDiff v2 format, semantic identity layer, diff visualization                   |
 | 2     | ✅ Done | Temporal mapper (Git history → per-commit diffs via worktrees, SQLite cache, SSE) |
 | —     | ✅ Done | Three.js WebGL renderer replacing PixiJS (5 draw calls, handles 10k+ nodes)       |
-| 3     | Next    | Concept graph (discovery + planning, projected commits, staleness)                |
-| 4     | Planned | Flows (architectural + user flow diagrams, concept-attached or standalone)        |
-| 5     | Planned | Prospective state engine (concepts → CoW graph forks)                             |
-| 6     | Planned | Code synthesis engine (concept → ArchDiff → file changes → commit)                |
-| 7     | Planned | AI agent MCP interface (agents create concepts + flows)                           |
+| 3     | Next    | Annotation surface (boundaries, paths, notes, questions — canvas-native)          |
+| 4     | Planned | Projections (speculative sketching, projected ArchDiffs, git graph integration)   |
+| 5     | Planned | Prospective state engine (projections → CoW graph forks)                          |
+| 6     | Planned | Code synthesis engine (projection → ArchDiff → file changes → commit)             |
+| 7     | Planned | AI agent MCP interface (agents create annotations + projections)                  |
 
 See `~/.sovereign/membranes/personal/plans/graphcoder.md` for the full design.
 
