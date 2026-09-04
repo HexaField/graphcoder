@@ -2,6 +2,7 @@ import type { Annotation, AnnotationKind, ConversationLog } from '@graphcoder/co
 import { batch } from 'solid-js'
 import * as api from '../api/annotations.js'
 import { state, setState } from './core.js'
+import type { AvailableProvider } from '../api/suggest.js'
 
 export interface AnnotationsState {
   annotations: Annotation[]
@@ -12,6 +13,8 @@ export interface AnnotationsState {
   refiningAnnotationId: string | null
   conversation: ConversationLog | null
   isRefining: boolean
+  availableProviders: AvailableProvider[]
+  selectedProvider: string | null
 }
 
 export const annotationsInitial: AnnotationsState = {
@@ -22,7 +25,9 @@ export const annotationsInitial: AnnotationsState = {
   suggestingIds: [],
   refiningAnnotationId: null,
   conversation: null,
-  isRefining: false
+  isRefining: false,
+  availableProviders: [],
+  selectedProvider: null
 }
 
 export async function loadAnnotations(): Promise<void> {
@@ -81,10 +86,30 @@ export function selectAnnotation(id: string | null): void {
   setState('selectedAnnotationId', id)
 }
 
-export async function requestSuggest(label: string, prompt: string, kind?: string): Promise<void> {
+export async function loadProviders(): Promise<void> {
   try {
     const suggestApi = await import('../api/suggest.js')
-    const { id } = await suggestApi.requestSuggestion({ label, prompt, kind })
+    const providers = await suggestApi.fetchProviders()
+    setState('availableProviders', providers)
+    // Auto-select the first non-test provider, or test if nothing else available
+    if (providers.length > 0 && !state.selectedProvider) {
+      const nonTest = providers.find((p) => p.type !== 'test')
+      setState('selectedProvider', nonTest?.id ?? providers[0]!.id)
+    }
+  } catch {
+    // Discovery failed — leave empty, SuggestForm will show a message
+  }
+}
+
+export function setSelectedProvider(id: string): void {
+  setState('selectedProvider', id)
+}
+
+export async function requestSuggest(label: string, prompt: string, kind?: string, provider?: string): Promise<void> {
+  try {
+    const suggestApi = await import('../api/suggest.js')
+    const providerToUse = provider ?? state.selectedProvider ?? undefined
+    const { id } = await suggestApi.requestSuggestion({ label, prompt, kind, provider: providerToUse })
     setState('suggestingIds', (prev) => [...prev, id])
   } catch (e) {
     setState('annotationError', e instanceof Error ? e.message : 'Failed to request suggestion')

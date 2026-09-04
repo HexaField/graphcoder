@@ -90,7 +90,9 @@ export {
   stopRefinement,
   sendRefinement,
   acceptAnnotation,
-  dismissAnnotation
+  dismissAnnotation,
+  loadProviders,
+  setSelectedProvider
 } from './annotations.js'
 export type { AnnotationsState } from './annotations.js'
 

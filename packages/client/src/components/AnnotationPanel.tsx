@@ -2,10 +2,12 @@ import { createMemo, createSignal, For, Show, type Component } from 'solid-js'
 import type { Annotation, AnnotationKind, ConversationTurn } from '@graphcoder/core'
 import {
   loadAnnotations,
+  loadProviders,
   patchAnnotation,
   removeAnnotation,
   selectAnnotation,
   requestSuggest,
+  setSelectedProvider,
   startRefinement,
   stopRefinement,
   sendRefinement,
@@ -148,6 +150,24 @@ const SuggestForm: Component = () => {
   const [label, setLabel] = createSignal('')
   const [prompt, setPrompt] = createSignal('')
   const [expanded, setExpanded] = createSignal(false)
+  const [discovering, setDiscovering] = createSignal(false)
+
+  const handleExpand = async () => {
+    setExpanded(true)
+    if (state.availableProviders.length === 0) {
+      setDiscovering(true)
+      await loadProviders()
+      setDiscovering(false)
+    }
+  }
+
+  const hasRealProvider = () => state.availableProviders.some((p) => p.type !== 'test')
+  const canSubmit = () =>
+    label().trim().length > 0 &&
+    prompt().trim().length > 0 &&
+    state.suggestingIds.length === 0 &&
+    state.selectedProvider !== null &&
+    !discovering()
 
   const handleSubmit = () => {
     const l = label().trim()
@@ -166,7 +186,7 @@ const SuggestForm: Component = () => {
         fallback={
           <button
             class="text-xs text-purple-600 dark:text-purple-400 hover:underline flex items-center gap-1"
-            onClick={() => setExpanded(true)}
+            onClick={() => void handleExpand()}
           >
             <span class="text-base leading-none">✦</span> AI Suggest
           </button>
@@ -186,11 +206,31 @@ const SuggestForm: Component = () => {
             value={prompt()}
             onInput={(e) => setPrompt(e.currentTarget.value)}
           />
+
+          {/* Provider selector */}
+          <Show
+            when={!discovering()}
+            fallback={<div class="text-[10px] text-gray-400 animate-pulse">Discovering providers…</div>}
+          >
+            <Show when={state.availableProviders.length > 0}>
+              <select
+                class="w-full text-xs px-2 py-1 rounded border border-gray-300 dark:border-gray-700 bg-transparent dark:bg-gray-900"
+                value={state.selectedProvider ?? ''}
+                onChange={(e) => setSelectedProvider(e.currentTarget.value)}
+              >
+                <For each={state.availableProviders}>{(p) => <option value={p.id}>{p.label}</option>}</For>
+              </select>
+            </Show>
+            <Show when={!hasRealProvider() && state.availableProviders.length > 0}>
+              <div class="text-[10px] text-amber-500">No AI backend detected — only the test provider available.</div>
+            </Show>
+          </Show>
+
           <div class="flex gap-1">
             <button
               class="text-[10px] px-2 py-0.5 rounded bg-purple-600 text-white hover:bg-purple-700 disabled:opacity-50"
               onClick={handleSubmit}
-              disabled={!label().trim() || !prompt().trim() || state.suggestingIds.length > 0}
+              disabled={!canSubmit()}
             >
               {state.suggestingIds.length > 0 ? 'Processing…' : 'Suggest'}
             </button>
@@ -199,6 +239,13 @@ const SuggestForm: Component = () => {
               onClick={() => setExpanded(false)}
             >
               Cancel
+            </button>
+            <button
+              class="text-[10px] px-1.5 py-0.5 rounded text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 ml-auto"
+              onClick={() => void loadProviders()}
+              title="Re-scan for providers"
+            >
+              ↻
             </button>
           </div>
         </div>

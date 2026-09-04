@@ -31,6 +31,17 @@ function getProjectRoot(res: Response): string | null {
   return graphService.getProjectRoot()
 }
 
+// GET /annotations/suggest/providers — discover available AI providers
+router.get('/suggest/providers', async (_req: Request, res: Response) => {
+  try {
+    const { discoverProviders } = await import('../suggest/providers/discovery.js')
+    const providers = await discoverProviders()
+    res.json({ providers })
+  } catch (err) {
+    res.status(500).json({ error: err instanceof Error ? err.message : 'Discovery failed' })
+  }
+})
+
 // GET /annotations
 router.get('/annotations', (_req: Request, res: Response) => {
   const root = getProjectRoot(res)

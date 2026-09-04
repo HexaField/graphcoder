@@ -16,6 +16,20 @@ async function handleResponse<T>(res: Response): Promise<T> {
   return res.json() as Promise<T>
 }
 
+export interface AvailableProvider {
+  id: string
+  label: string
+  type: 'openai-compat' | 'cli' | 'test'
+  model?: string
+}
+
+/** GET /api/suggest/providers — discover available AI backends */
+export async function fetchProviders(): Promise<AvailableProvider[]> {
+  const res = await fetch(`${API}/api/suggest/providers`)
+  const data = await handleResponse<{ providers: AvailableProvider[] }>(res)
+  return data.providers
+}
+
 /** POST /api/annotations/suggest — returns 202 with { id, status: 'processing' } */
 export async function requestSuggestion(input: {
   label: string
