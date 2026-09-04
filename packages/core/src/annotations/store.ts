@@ -77,12 +77,40 @@ export function saveAnnotation(projectRoot: string, annotation: Annotation): voi
   writeFileSync(filePath, canonicalStringify(annotation) + '\n', 'utf-8')
 }
 
+/**
+ * Fill missing fields with safe defaults. Handles annotations persisted
+ * before a schema change or hand-edited files with omitted fields.
+ */
+function normalizeAnnotation(raw: Record<string, unknown>): Annotation {
+  return {
+    id: (raw.id as string) ?? randomUUID(),
+    version: (raw.version as number) ?? SCHEMA_VERSION,
+    kind: (raw.kind as Annotation['kind']) ?? 'note',
+    status: (raw.status as Annotation['status']) ?? 'active',
+    label: (raw.label as string) ?? '',
+    description: (raw.description as string) ?? '',
+    members: Array.isArray(raw.members) ? (raw.members as string[]) : [],
+    steps: (raw.steps as Annotation['steps']) ?? null,
+    stepEdges: (raw.stepEdges as Annotation['stepEdges']) ?? null,
+    projectedDiff: (raw.projectedDiff as Annotation['projectedDiff']) ?? null,
+    dependencies: Array.isArray(raw.dependencies) ? (raw.dependencies as string[]) : [],
+    resolution: (raw.resolution as string) ?? null,
+    parentId: (raw.parentId as string) ?? null,
+    childIds: Array.isArray(raw.childIds) ? (raw.childIds as string[]) : [],
+    anchor: (raw.anchor as Annotation['anchor']) ?? { x: 0, y: 0, memberLayout: null },
+    author: (raw.author as Annotation['author']) ?? 'human',
+    createdAt: (raw.createdAt as string) ?? new Date().toISOString(),
+    updatedAt: (raw.updatedAt as string) ?? new Date().toISOString(),
+    reasoning: (raw.reasoning as string) ?? null
+  }
+}
+
 /** Load a single annotation by ID */
 export function loadAnnotation(projectRoot: string, id: string): Annotation | null {
   const filePath = annotationPath(projectRoot, id)
   if (!existsSync(filePath)) return null
   const raw = readFileSync(filePath, 'utf-8')
-  return JSON.parse(raw) as Annotation
+  return normalizeAnnotation(JSON.parse(raw) as Record<string, unknown>)
 }
 
 /** Load all annotations from disk */
@@ -94,7 +122,7 @@ export function loadAllAnnotations(projectRoot: string): Annotation[] {
   for (const file of files) {
     try {
       const raw = readFileSync(join(dir, file), 'utf-8')
-      annotations.push(JSON.parse(raw) as Annotation)
+      annotations.push(normalizeAnnotation(JSON.parse(raw) as Record<string, unknown>))
     } catch {
       // Skip malformed files
     }
