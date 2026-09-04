@@ -6,8 +6,8 @@ Bidirectional architectural flow & mutation platform. Digests codebases into det
 
 - **Package manager:** pnpm 11 (workspaces)
 - **Language:** TypeScript, strict ESM (`"type": "module"` throughout)
-- **Server:** Express 5, port 3001
-- **Client:** SolidJS + Vite + Tailwind v4, port 3000
+- **Server:** Express 5, port 3357
+- **Client:** SolidJS + Vite + Tailwind v4, port 3356
 - **Layout:** elkjs (ELK Eclipse Layout Kernel)
 - **Canvas renderer:** Three.js (WebGL2) — `packages/client/src/canvas/`
 - **Graph extraction:** `@colbymchenry/codegraph` v1.5.0 (tree-sitter + SQLite, 37 languages)
@@ -19,13 +19,28 @@ Bidirectional architectural flow & mutation platform. Digests codebases into det
 
 ```bash
 pnpm dev                                  # start both server + client
-pnpm --filter @graphcoder/server dev      # server only (http://localhost:3001)
-pnpm --filter @graphcoder/client dev      # client only (http://localhost:3000)
+pnpm --filter @graphcoder/server dev      # server only (http://localhost:3357)
+pnpm --filter @graphcoder/client dev      # client only (http://localhost:3356)
 pnpm build                                # build all packages
 pnpm -r check                             # type-check all
 pnpm test                                 # Playwright E2E (auto-starts server + client)
 pnpm test:unit                            # Vitest unit tests (server + core)
 ```
+
+## Ports
+
+Client `3356`, server `3357` — deliberately high in the range, since 3000/3001 collide with almost every other dev server. Override with `PORT` (both packages) or `VITE_API_URL` / `VITE_WS_URL` (client).
+
+Four files hold the defaults; changing a port means editing the matching pair, not hunting literals:
+
+| File                              | Holds                                       |
+| --------------------------------- | ------------------------------------------- |
+| `packages/server/src/index.ts`    | `DEFAULT_PORT` — the API port               |
+| `packages/client/src/config.ts`   | `DEFAULT_API_PORT` + all client API/WS URLs |
+| `packages/client/vite.config.ts`  | `DEFAULT_CLIENT_PORT` — dev/preview port    |
+| `packages/client/tests/config.ts` | Both ports for the E2E suite                |
+
+Client code must import `API_BASE` / `WS_URL` from `src/config.ts` rather than composing its own URL — the host is taken from `window.location` so a single build works on localhost, a LAN, or through a tunnel.
 
 ## HTTP Bridge
 

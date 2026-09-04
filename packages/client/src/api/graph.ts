@@ -1,8 +1,5 @@
 import type { FileEntry, GraphSnapshot, NodeDetail, ProjectStats, SearchResultItem, Subgraph } from '@graphcoder/core'
-
-// Derive server URL from the page's own host so the same build works on
-// localhost, LAN, and Tailscale without baking in any address.
-const API: string = import.meta.env.VITE_API_URL ?? `http://${window.location.hostname}:3001`
+import { API_BASE as API } from '../config.js'
 
 async function handleResponse<T>(res: Response): Promise<T> {
   if (!res.ok) {

@@ -11,8 +11,11 @@ import gitRouter from './routes/git.js'
 import annotationRouter from './routes/annotations.js'
 import { setupWebSocket } from './ws.js'
 
+/** API port. High in the range so it does not collide with other tooling. */
+const DEFAULT_PORT = 3357
+
 const app = express()
-const port = parseInt(process.env.PORT ?? '3001', 10)
+const port = parseInt(process.env.PORT ?? String(DEFAULT_PORT), 10)
 const host = process.env.HOST ?? '0.0.0.0'
 
 app.use(cors())

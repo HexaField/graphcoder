@@ -19,7 +19,7 @@ packages/
   client/  — SolidJS + ELK layout + Pixi.js canvas
 ```
 
-Server at `:3001`, client at `:3000`. Start both with `pnpm dev`.
+Server at `:3357`, client at `:3356`. Start both with `pnpm dev`.
 
 ## Phase progress
 
@@ -38,7 +38,7 @@ Server at `:3001`, client at `:3000`. Start both with `pnpm dev`.
 ```bash
 pnpm install
 pnpm dev
-# open http://localhost:3000
+# open http://localhost:3356
 # enter a project path → graph loads
 ```
 

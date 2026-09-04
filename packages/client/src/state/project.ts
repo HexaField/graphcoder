@@ -6,6 +6,7 @@ import { loadAnnotations } from './annotations.js'
 import { recomputeDiff } from './diff.js'
 import { loadFilters, loadHierarchy } from './storage.js'
 import { syncUrlParams } from './url.js'
+import { WS_URL } from '../config.js'
 
 // ── Project ───────────────────────────────────────────────────────────────────
 
@@ -154,7 +155,7 @@ export function sendViewRequest(params: ViewParams): void {
  *   - hierarchy_snapshot → updates fileNodes
  */
 export function connectWebSocket(): void {
-  const wsUrl = import.meta.env.VITE_WS_URL ?? `ws://${window.location.hostname}:3001/ws`
+  const wsUrl = WS_URL
 
   const connect = () => {
     if (wsReconnectTimer !== null) {

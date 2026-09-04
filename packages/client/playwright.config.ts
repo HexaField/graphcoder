@@ -1,4 +1,5 @@
 import { defineConfig, devices } from '@playwright/test'
+import { BASE_URL, SERVER } from './tests/config.js'
 
 export default defineConfig({
   testDir: './tests',
@@ -8,7 +9,7 @@ export default defineConfig({
   workers: 1, // serialized — server is stateful (one project at a time)
   reporter: process.env.CI ? 'github' : 'list',
   use: {
-    baseURL: 'http://localhost:3000',
+    baseURL: BASE_URL,
     trace: 'on-first-retry'
   },
   projects: [
@@ -24,13 +25,13 @@ export default defineConfig({
   webServer: [
     {
       command: 'pnpm --filter @graphcoder/server dev',
-      url: 'http://localhost:3001/api/projects/current',
+      url: `${SERVER}/api/projects/current`,
       reuseExistingServer: !process.env.CI,
       cwd: '../..'
     },
     {
       command: 'pnpm dev',
-      url: 'http://localhost:3000',
+      url: BASE_URL,
       reuseExistingServer: !process.env.CI
     }
   ]

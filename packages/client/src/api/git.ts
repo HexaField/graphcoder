@@ -5,8 +5,7 @@
  * granular progress messages while snapshot indexing runs on the server.
  */
 import type { ArchDiff, GraphSnapshot } from '@graphcoder/core'
-
-const API: string = import.meta.env.VITE_API_URL ?? `http://${window.location.hostname}:3001`
+import { API_BASE as API } from '../config.js'
 
 export interface CommitInfo {
   hash: string

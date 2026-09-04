@@ -9,11 +9,10 @@ import { test, expect, type Page } from '@playwright/test'
 import { fileURLToPath } from 'node:url'
 import { readFileSync } from 'node:fs'
 import path from 'node:path'
+import { SERVER } from './config.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const fixturePath = process.env.FIXTURE_PATH ?? path.resolve(__dirname, '../../../test-fixtures/sample-project')
-
-const SERVER = process.env.VITE_API_URL ?? 'http://localhost:3001'
 
 async function closeServerProject(): Promise<void> {
   await fetch(`${SERVER}/api/projects/close`, { method: 'POST' })

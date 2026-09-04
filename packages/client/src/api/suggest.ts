@@ -1,6 +1,5 @@
 import type { Annotation, ConversationLog } from '@graphcoder/core'
-
-const API: string = import.meta.env.VITE_API_URL ?? `http://${window.location.hostname}:3001`
+import { API_BASE as API } from '../config.js'
 
 async function handleResponse<T>(res: Response): Promise<T> {
   if (!res.ok) {
