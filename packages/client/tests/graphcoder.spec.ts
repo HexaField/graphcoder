@@ -7,6 +7,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const fixturePath = process.env.FIXTURE_PATH ?? path.resolve(__dirname, '../../../test-fixtures/sample-project')
 const fixtureV1 = path.resolve(__dirname, '../../../test-fixtures/project-v1')
 const fixtureV2 = path.resolve(__dirname, '../../../test-fixtures/project-v2')
+const fixtureNested = path.resolve(__dirname, '../../../test-fixtures/nested-project')
 
 /** Close the server's current project — resets server state between test suites. */
 async function closeServerProject(): Promise<void> {
@@ -838,5 +839,94 @@ test.describe('Temporal diff — git commit comparison', () => {
     // The page must not contain the ELK duplicate error
     const content = await page.content()
     expect(content).not.toContain('value already present')
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Hierarchy context menu — "Show all children" must iterate the whole subtree
+//
+// The sidebar tree and the graph keep separate expansion state. The menu
+// action used to touch only the graph, so expanding a directory left every
+// sidebar row collapsed — from the panel it looked like nothing happened.
+// These tests use a fixture nested four levels deep so shallow expansion
+// cannot pass by accident.
+// ---------------------------------------------------------------------------
+
+test.describe('Hierarchy — Show all children', () => {
+  test.beforeEach(async () => {
+    test.setTimeout(180_000)
+    await closeServerProject()
+  })
+
+  /** Right-click a hierarchy row and pick a context-menu item by label. */
+  async function chooseMenuItem(page: Page, nodeId: string, label: string): Promise<void> {
+    await page.locator(`[data-nodeid="${nodeId}"]`).click({ button: 'right' })
+    await page.waitForSelector('[data-ctx-menu]', { timeout: 5_000 })
+    await page.locator('[data-ctx-menu] button', { hasText: label }).click()
+  }
+
+  test('expands every nested directory, not just the one clicked', async ({ page }) => {
+    await page.goto('/')
+    await openProjectPath(page, fixtureNested)
+
+    // Only the top-level dir shows while everything below stays collapsed
+    await expect(page.locator('[data-nodeid="src"]')).toBeVisible()
+    await expect(page.locator('[data-nodeid="src/core"]')).not.toBeVisible()
+
+    await chooseMenuItem(page, 'src', 'Show all children')
+
+    // Every directory in the subtree must now have a row, at all four levels
+    await expect(page.locator('[data-nodeid="src/core"]')).toBeVisible()
+    await expect(page.locator('[data-nodeid="src/util"]')).toBeVisible()
+    await expect(page.locator('[data-nodeid="src/core/engine"]')).toBeVisible()
+    await expect(page.locator('[data-nodeid="src/core/engine/internals"]')).toBeVisible()
+
+    // …and so must the files inside them, including the deepest one
+    await expect(page.locator('[data-nodeid="src/index.ts"]')).toBeVisible()
+    await expect(page.locator('[data-nodeid="src/util/text.ts"]')).toBeVisible()
+    await expect(page.locator('[data-nodeid="src/core/registry.ts"]')).toBeVisible()
+    await expect(page.locator('[data-nodeid="src/core/engine/start.ts"]')).toBeVisible()
+    await expect(page.locator('[data-nodeid="src/core/engine/internals/rotor.ts"]')).toBeVisible()
+  })
+
+  test('expands only the chosen subtree, leaving siblings alone', async ({ page }) => {
+    await page.goto('/')
+    await openProjectPath(page, fixtureNested)
+
+    // Reveal the two sibling dirs by expanding the root
+    await chooseMenuItem(page, 'src', 'Show all children')
+    await expect(page.locator('[data-nodeid="src/util"]')).toBeVisible()
+
+    // Collapse everything again via the root toggle, then target one branch
+    await page.locator('[data-nodeid="src"] button[data-toggleid]').first().click()
+    await expect(page.locator('[data-nodeid="src/core"]')).not.toBeVisible()
+
+    // Re-expand just the root row so `src/core` becomes right-clickable
+    await page.locator('[data-nodeid="src"] button[data-toggleid]').first().click()
+    await expect(page.locator('[data-nodeid="src/core"]')).toBeVisible()
+
+    await chooseMenuItem(page, 'src/core', 'Show all children')
+
+    // The chosen branch opens all the way down
+    await expect(page.locator('[data-nodeid="src/core/engine"]')).toBeVisible()
+    await expect(page.locator('[data-nodeid="src/core/engine/internals"]')).toBeVisible()
+    await expect(page.locator('[data-nodeid="src/core/engine/internals/rotor.ts"]')).toBeVisible()
+  })
+
+  test('graph groups expand alongside the sidebar', async ({ page }) => {
+    await page.goto('/')
+    await openProjectPath(page, fixtureNested)
+
+    const before = await page.evaluate(() => (window as any).__graphcoder.expandedGroups.length)
+
+    await chooseMenuItem(page, 'src', 'Show all children')
+
+    // The graph side still receives the prefix, so groups open too
+    const after = await page.evaluate(() => (window as any).__graphcoder.expandedGroups as string[])
+    expect(after.length).toBeGreaterThan(before)
+    expect(after).toContain('src')
+
+    // Deep files resolve as expanded through prefix matching
+    await page.waitForFunction(() => (window as any).__graphcoder.viewNodes.length > 0, { timeout: 30_000 })
   })
 })

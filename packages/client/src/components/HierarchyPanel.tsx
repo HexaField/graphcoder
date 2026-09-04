@@ -203,6 +203,24 @@ function collectDirPaths(dirs: TreeDir[]): string[] {
 }
 
 /**
+ * Every expandable sidebar row at or beneath `targetPath`, including the
+ * target itself.
+ *
+ * Rows are keyed by path, so a prefix test finds the whole subtree however
+ * deeply it nests. Only package and directory rows need collecting — files
+ * are leaves in the sidebar (their symbols are not fetched into the tree).
+ */
+function collectSubtreeKeys(tree: HierarchyTree, targetPath: string): string[] {
+  const expandable = [
+    ...tree.packages.map((p) => p.path),
+    ...tree.packages.flatMap((p) => collectDirPaths(p.dirs)),
+    ...collectDirPaths(tree.dirs)
+  ]
+  const prefix = targetPath + '/'
+  return expandable.filter((p) => p === targetPath || p.startsWith(prefix))
+}
+
+/**
  * Hide everything except `targetPath` and its descendants.
  * Peers at every level from root to target get added to hiddenPaths.
  */
@@ -381,6 +399,7 @@ const Row: Component<RowProps> = (props) => {
         hover:bg-gray-100 dark:hover:bg-gray-800/60 ${dimmed() ? 'opacity-40' : ''}`} style={{ 'padding-left': `${props.depth * 12 + 4}px` }} data-nodeid={props.nodeId} onContextMenu={props.onContextMenu}>
       <button
         class={`w-4 h-4 flex items-center justify-center flex-shrink-0 text-gray-400 dark:text-gray-500 ${props.expandable ? "hover:text-gray-700 dark:hover:text-gray-200" : 'pointer-events-none'}`}
+        data-toggleid={props.nodeId}
         onClick={(e) => {
           e.stopPropagation()
           props.onExpand()
@@ -513,6 +532,8 @@ interface CtxMenuState {
 interface CtxMenuProps {
   menu: CtxMenuState
   tree: HierarchyTree
+  /** Reveal everything beneath the path — sidebar rows and graph groups alike. */
+  onShowAllChildren: (path: string) => void
   onClose: () => void
 }
 
@@ -537,7 +558,7 @@ const ContextMenu: Component<CtxMenuProps> = (props) => {
           {
             label: 'Show all children',
             action: () => {
-              addGroupExpanded(props.menu.path)
+              props.onShowAllChildren(props.menu.path)
               props.onClose()
             }
           }
@@ -633,6 +654,27 @@ export const HierarchyPanel: Component = () => {
       else next.add(key)
       return next
     })
+  }
+
+  /**
+   * "Show all children" — reveal everything beneath a path on both surfaces.
+   *
+   * The sidebar tree and the graph keep separate expansion state, and this
+   * action has to move both: expanding graph groups while leaving the tree
+   * collapsed looks like nothing happened in the panel the menu came from.
+   *
+   * Sidebar expansion must be recursive — every nested directory, not just
+   * the one clicked. The graph side needs only the single prefix, since the
+   * server prefix-matches expandedGroups against each file path.
+   */
+  function showAllChildren(path: string): void {
+    const keys = collectSubtreeKeys(tree(), path)
+    setExpandedSet((prev) => {
+      const next = new Set(prev)
+      for (const key of keys) next.add(key)
+      return next
+    })
+    addGroupExpanded(path)
   }
 
   function openCtxMenu(e: MouseEvent, path: string, label: string): void {
@@ -772,7 +814,14 @@ export const HierarchyPanel: Component = () => {
   return (
     <>
       <Show when={ctxMenu()}>
-        {(menu) => <ContextMenu menu={menu()} tree={tree()} onClose={() => setCtxMenu(null)} />}
+        {(menu) => (
+          <ContextMenu
+            menu={menu()}
+            tree={tree()}
+            onShowAllChildren={showAllChildren}
+            onClose={() => setCtxMenu(null)}
+          />
+        )}
       </Show>
 
       <div
