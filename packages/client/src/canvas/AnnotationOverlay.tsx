@@ -69,7 +69,7 @@ const BoundaryOverlay: Component<{
   semanticToLayoutId: Map<string, string>
 }> = (props) => {
   const positions = createMemo(() =>
-    memberPositions(props.annotation.members, props.semanticToLayoutId, props.layoutNodes)
+    memberPositions(props.annotation.members ?? [], props.semanticToLayoutId, props.layoutNodes)
   )
   const rect = createMemo(() => boundingRect(positions(), 16))
   const color = () => KIND_COLORS[props.annotation.kind]
@@ -199,10 +199,11 @@ const MarkerOverlay: Component<{
   semanticToLayoutId: Map<string, string>
 }> = (props) => {
   const position = createMemo(() => {
-    if (props.annotation.members.length === 0) {
-      return { cx: props.annotation.anchor.x, cy: props.annotation.anchor.y }
+    const members = props.annotation.members ?? []
+    if (members.length === 0) {
+      return { cx: props.annotation.anchor?.x ?? 0, cy: props.annotation.anchor?.y ?? 0 }
     }
-    const positions = memberPositions(props.annotation.members, props.semanticToLayoutId, props.layoutNodes)
+    const positions = memberPositions(members, props.semanticToLayoutId, props.layoutNodes)
     if (positions.length === 0) return null
     const first = positions[0]
     return { cx: first.x + first.width + 12, cy: first.y }
