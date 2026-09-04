@@ -15,3 +15,12 @@ export {
   appendTurn,
   deleteConversation
 } from './conversation.js'
+export {
+  loadKinds,
+  saveKinds,
+  findKind,
+  ensureKind,
+  updateKind,
+  deleteKind,
+  syncKindsFromAnnotations
+} from './kinds.js'

@@ -7,31 +7,18 @@ export interface ResolutionResult {
 
 /**
  * Resolve an annotation's member semantic IDs against a set of known IDs.
- * Also resolves path step architectureNodeIds if present.
+ * Members carry the full node set for every shape, so this covers regions,
+ * polylines, and points alike.
  */
 export function resolveAnnotation(annotation: Annotation, knownSemanticIds: Set<string>): ResolutionResult {
   const resolved: string[] = []
   const unresolved: string[] = []
 
-  // Check direct members
   for (const id of annotation.members) {
     if (knownSemanticIds.has(id)) {
       resolved.push(id)
     } else {
       unresolved.push(id)
-    }
-  }
-
-  // Check path steps
-  if (annotation.steps) {
-    for (const step of annotation.steps) {
-      if (step.architectureNodeId) {
-        if (knownSemanticIds.has(step.architectureNodeId)) {
-          resolved.push(step.architectureNodeId)
-        } else {
-          unresolved.push(step.architectureNodeId)
-        }
-      }
     }
   }
 

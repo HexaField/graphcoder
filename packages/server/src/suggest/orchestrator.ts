@@ -2,14 +2,15 @@
  * Suggest orchestrator — ties together context gathering, AI provider
  * invocation, nodeRef resolution, and annotation persistence.
  */
-import type { Annotation, AnnotationKind, ConversationLog, GraphNode } from '@graphcoder/core'
+import type { Annotation, ConversationLog, GraphNode } from '@graphcoder/core'
 import {
   createAnnotation,
   saveAnnotation,
   loadAnnotation,
   createConversation,
   saveConversation,
-  loadConversation
+  loadConversation,
+  ensureKind
 } from '@graphcoder/core/annotations/server'
 import { graphService } from '../codegraph/service.js'
 import { gatherContext } from './context.js'
@@ -29,7 +30,8 @@ import { SUGGEST_SKILL } from './skill.js'
 export async function suggestAnnotation(opts: {
   prompt: string
   label: string
-  kind?: AnnotationKind
+  /** Optional kind hint passed through to the AI prompt */
+  kind?: string
   provider?: string
   depth?: number
 }): Promise<{ annotation: Annotation; conversationLog: ConversationLog }> {
@@ -65,41 +67,19 @@ export async function suggestAnnotation(opts: {
   const resolutions = resolveNodeRefs(aiAnnotation.nodeRefs, graphNodes)
   const semanticMembers = resolutions.filter((r) => r.semanticId !== null).map((r) => r.semanticId!)
 
-  // 4. Build steps/stepEdges for path annotations.
-  let steps = null
-  let stepEdges = null
-  if (aiAnnotation.kind === 'path' && aiAnnotation.steps) {
-    steps = aiAnnotation.steps.map((s, i) => {
-      const stepRef = resolveNodeRefs([s.nodeRef], graphNodes)[0]
-      return {
-        id: `step-${i}`,
-        label: s.label,
-        description: s.description,
-        architectureNodeId: stepRef?.semanticId ?? null,
-        stepKind: s.stepKind
-      }
-    })
-    // Build sequential edges if the AI didn't provide explicit ones.
-    stepEdges = []
-    for (let i = 0; i < steps.length - 1; i++) {
-      stepEdges.push({
-        from: steps[i]!.id,
-        to: steps[i + 1]!.id,
-        label: null
-      })
-    }
-  }
-
-  // 5. Create and save annotation.
-  const annotation = createAnnotation(aiAnnotation.kind, aiAnnotation.label, semanticMembers, {
+  // 4. Create and save annotation. Member order carries the traversal for
+  //    polyline suggestions, so no parallel step structure is needed.
+  const annotation = createAnnotation(aiAnnotation.shape, aiAnnotation.label, semanticMembers, {
+    kind: aiAnnotation.kind,
     description: aiAnnotation.description,
     reasoning: aiAnnotation.reasoning,
     status: 'proposed',
-    author: 'agent',
-    steps,
-    stepEdges
+    author: 'agent'
   })
   saveAnnotation(projectRoot, annotation)
+
+  // 5. Register the kind the AI coined so it gets a stable colour.
+  if (annotation.kind) ensureKind(projectRoot, annotation.kind)
 
   // 6. Create conversation log.
   const conversationLog = createConversation(annotation.id, providerName, result.sessionId)
@@ -108,6 +88,7 @@ export async function suggestAnnotation(opts: {
     content: result.raw,
     timestamp: new Date().toISOString(),
     annotationDelta: {
+      shape: aiAnnotation.shape,
       kind: aiAnnotation.kind,
       label: aiAnnotation.label,
       description: aiAnnotation.description,
@@ -189,32 +170,13 @@ export async function refineAnnotation(opts: {
     annotation.description = aiUpdate.description
     annotation.reasoning = aiUpdate.reasoning
     annotation.members = newMembers
-
-    // Update steps for path annotations.
-    if (aiUpdate.kind === 'path' && aiUpdate.steps) {
-      annotation.steps = aiUpdate.steps.map((s, i) => {
-        const stepRef = resolveNodeRefs([s.nodeRef], graphNodes)[0]
-        return {
-          id: `step-${i}`,
-          label: s.label,
-          description: s.description,
-          architectureNodeId: stepRef?.semanticId ?? null,
-          stepKind: s.stepKind
-        }
-      })
-      annotation.stepEdges = []
-      for (let i = 0; i < annotation.steps.length - 1; i++) {
-        annotation.stepEdges.push({
-          from: annotation.steps[i]!.id,
-          to: annotation.steps[i + 1]!.id,
-          label: null
-        })
-      }
-    }
+    annotation.shape = aiUpdate.shape
+    if (aiUpdate.kind) annotation.kind = aiUpdate.kind
   }
 
   // 5. Persist.
   saveAnnotation(projectRoot, annotation)
+  if (annotation.kind) ensureKind(projectRoot, annotation.kind)
 
   conversationLog.turns.push({
     role: 'assistant',

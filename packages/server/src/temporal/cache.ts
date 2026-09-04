@@ -36,18 +36,25 @@ function getDb(projectRoot: string): Database.Database {
   const dir = graphcoderDir(projectRoot)
   mkdirSync(dir, { recursive: true })
 
-  // Ensure .gitignore allows annotations/ to be committed — SQLite stays local.
+  // Keep the SQLite caches out of git. Merge rather than overwrite — the file
+  // belongs to the user, who may have added their own rules (ignoring the
+  // annotations directory in a test fixture, for instance). Only append what
+  // is missing; never drop a line somebody else put there.
   const gi = join(dir, '.gitignore')
-  const expected = [
-    '# GraphCoder — SQLite caches stay local, annotations get committed.',
-    'temporal.sqlite',
-    'temporal.sqlite-wal',
-    'temporal.sqlite-shm',
-    ''
-  ].join('\n')
+  const required = ['temporal.sqlite', 'temporal.sqlite-wal', 'temporal.sqlite-shm']
+  const header = '# GraphCoder — SQLite caches stay local, annotations get committed.'
+
   const current = existsSync(gi) ? readFileSync(gi, 'utf-8') : ''
-  if (current !== expected) {
-    writeFileSync(gi, expected)
+  const lines = current.length > 0 ? current.split('\n') : []
+  const present = new Set(lines.map((l) => l.trim()))
+
+  const missing = required.filter((rule) => !present.has(rule))
+  if (missing.length > 0) {
+    const next =
+      lines.length === 0
+        ? [header, ...missing, '']
+        : [...lines.filter((l, i) => !(i === lines.length - 1 && l === '')), ...missing, '']
+    writeFileSync(gi, next.join('\n'))
   }
 
   const db = new Database(dbPath(projectRoot))

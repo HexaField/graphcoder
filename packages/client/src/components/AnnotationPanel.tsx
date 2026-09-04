@@ -1,49 +1,52 @@
+/**
+ * Annotation outline — an IDE-style explorer for annotations.
+ *
+ * Annotations group under their user-defined kind, the way a file explorer
+ * groups files under folders. Each group carries the kind's colour swatch,
+ * a count, a visibility toggle, and inline rename/recolour.
+ */
 import { createMemo, createSignal, For, Show, type Component } from 'solid-js'
-import type { Annotation, AnnotationKind, ConversationTurn } from '@graphcoder/core'
+import type { Annotation, ConversationTurn } from '@graphcoder/core'
 import {
-  loadAnnotations,
+  kindColor,
   loadProviders,
   patchAnnotation,
+  recolorKind,
   removeAnnotation,
-  selectAnnotation,
+  removeKind,
+  renameKind,
   requestSuggest,
+  selectAnnotation,
+  sendRefinement,
   setSelectedProvider,
+  showAllKinds,
   startRefinement,
   stopRefinement,
-  sendRefinement,
   acceptAnnotation,
   dismissAnnotation,
+  toggleKindVisibility,
+  UNKINDED_COLOR,
   state
 } from '../state/store.js'
-import { interactionMode, toggleInteractionMode, MODE_LABELS, type InteractionMode } from '../state/interaction.js'
+import { interactionMode, toggleInteractionMode } from '../state/interaction.js'
 
-const KIND_COLORS: Record<AnnotationKind, string> = {
-  boundary: 'text-blue-500',
-  path: 'text-amber-500',
-  note: 'text-emerald-500',
-  question: 'text-red-500',
-  projection: 'text-violet-500'
-}
-
-const KIND_ICONS: Record<AnnotationKind, string> = {
-  boundary: '⬡',
-  path: '→',
-  note: '✎',
-  question: '?',
-  projection: '◇'
+/** Glyph per shape — structure at a glance, independent of kind */
+const SHAPE_ICONS: Record<string, string> = {
+  region: '⬡',
+  polyline: '→',
+  point: '•'
 }
 
 const STATUS_BADGES: Record<string, { label: string; cls: string }> = {
-  draft: { label: 'Draft', cls: 'bg-gray-200 dark:bg-gray-700 text-gray-600 dark:text-gray-300' },
   active: { label: 'Active', cls: 'bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300' },
   proposed: { label: 'Proposed', cls: 'bg-purple-100 dark:bg-purple-900/40 text-purple-700 dark:text-purple-300' },
   stale: { label: 'Stale', cls: 'bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-300' },
-  resolved: { label: 'Resolved', cls: 'bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-300' },
-  dismissed: { label: 'Dismissed', cls: 'bg-gray-100 dark:bg-gray-800 text-gray-400' },
-  applied: { label: 'Applied', cls: 'bg-violet-100 dark:bg-violet-900/40 text-violet-700 dark:text-violet-300' }
+  dismissed: { label: 'Dismissed', cls: 'bg-gray-100 dark:bg-gray-800 text-gray-400' }
 }
 
-// ── Refinement Chat ──────────────────────────────────────────────────────────
+const UNKINDED_LABEL = 'unkinded'
+
+// ── Refinement chat ──────────────────────────────────────────────────────────
 
 const RefinementChat: Component<{ annotationId: string }> = (props) => {
   const [input, setInput] = createSignal('')
@@ -78,7 +81,6 @@ const RefinementChat: Component<{ annotationId: string }> = (props) => {
         </button>
       </div>
 
-      {/* Conversation turns */}
       <div class="max-h-48 overflow-y-auto px-3 py-2 space-y-2">
         <Show when={state.conversation?.turns}>
           <For each={state.conversation!.turns}>
@@ -105,7 +107,6 @@ const RefinementChat: Component<{ annotationId: string }> = (props) => {
         </Show>
       </div>
 
-      {/* Input */}
       <div class="flex border-t border-purple-200 dark:border-purple-800">
         <textarea
           class="flex-1 text-xs px-3 py-2 bg-transparent border-none outline-none resize-none"
@@ -125,7 +126,6 @@ const RefinementChat: Component<{ annotationId: string }> = (props) => {
         </button>
       </div>
 
-      {/* Quick actions */}
       <div class="flex gap-1 px-3 py-1.5 border-t border-purple-200 dark:border-purple-800">
         <button
           class="text-[10px] px-2 py-0.5 rounded bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-300 hover:bg-emerald-200"
@@ -144,7 +144,7 @@ const RefinementChat: Component<{ annotationId: string }> = (props) => {
   )
 }
 
-// ── Suggest Form ─────────────────────────────────────────────────────────────
+// ── Suggest form ─────────────────────────────────────────────────────────────
 
 const SuggestForm: Component = () => {
   const [label, setLabel] = createSignal('')
@@ -207,7 +207,6 @@ const SuggestForm: Component = () => {
             onInput={(e) => setPrompt(e.currentTarget.value)}
           />
 
-          {/* Provider selector */}
           <Show
             when={!discovering()}
             fallback={<div class="text-[10px] text-gray-400 animate-pulse">Discovering providers…</div>}
@@ -254,72 +253,107 @@ const SuggestForm: Component = () => {
   )
 }
 
-// ── Annotation Item ──────────────────────────────────────────────────────────
+// ── Annotation row ───────────────────────────────────────────────────────────
 
-const ProposedItem: Component<{ annotation: Annotation }> = (props) => {
+const AnnotationRow: Component<{ annotation: Annotation }> = (props) => {
+  const [editing, setEditing] = createSignal(false)
+  const [draft, setDraft] = createSignal('')
+
   const selected = () => state.selectedAnnotationId === props.annotation.id
   const refining = () => state.refiningAnnotationId === props.annotation.id
+  const badge = () => STATUS_BADGES[props.annotation.status]
+
+  const startEdit = (e: MouseEvent) => {
+    e.stopPropagation()
+    setDraft(props.annotation.label)
+    setEditing(true)
+  }
+
+  const commitEdit = () => {
+    const next = draft().trim()
+    if (next && next !== props.annotation.label) {
+      void patchAnnotation(props.annotation.id, { label: next })
+    }
+    setEditing(false)
+  }
 
   return (
     <div
-      class={`px-3 py-2 cursor-pointer border-l-2 transition-colors ${
+      class={`group pl-6 pr-2 py-1 cursor-pointer border-l-2 transition-colors text-xs ${
         selected()
-          ? "border-purple-500 bg-purple-50 dark:bg-purple-950/30"
+          ? "border-blue-500 bg-blue-50 dark:bg-blue-950/30"
           : "border-transparent hover:bg-gray-50 dark:hover:bg-gray-900/50"
       }`}
+      data-testid={`annotation-row-${props.annotation.id}`}
       onClick={() => selectAnnotation(selected() ? null : props.annotation.id)}
     >
-      <div class="flex items-center gap-2">
-        <span class={`text-sm font-bold ${KIND_COLORS[props.annotation.kind]}`}>
-          {KIND_ICONS[props.annotation.kind]}
-        </span>
-        <span class="text-sm font-medium truncate flex-1">{props.annotation.label}</span>
-        <span class="text-[9px] px-1 py-0.5 rounded bg-purple-100 dark:bg-purple-900/40 text-purple-600 dark:text-purple-300 font-medium">
-          AI
-        </span>
-        <span class={`text-[10px] px-1.5 py-0.5 rounded-full font-medium ${STATUS_BADGES.proposed.cls}`}>Proposed</span>
+      <div class="flex items-center gap-1.5">
+        <span class="opacity-50 w-3 flex-shrink-0 text-center">{SHAPE_ICONS[props.annotation.shape] ?? '•'}</span>
+
+        <Show
+          when={editing()}
+          fallback={
+            <span
+              class="truncate flex-1 text-gray-800 dark:text-gray-200"
+              onDblClick={startEdit}
+              title={props.annotation.description || props.annotation.label}
+            >
+              {props.annotation.label || '(untitled)'}
+            </span>
+          }
+        >
+          <input
+            class="flex-1 min-w-0 bg-white dark:bg-gray-800 border border-blue-400 rounded px-1 outline-none"
+            value={draft()}
+            autofocus
+            onClick={(e) => e.stopPropagation()}
+            onInput={(e) => setDraft(e.currentTarget.value)}
+            onBlur={commitEdit}
+            onKeyDown={(e) => {
+              e.stopPropagation()
+              if (e.key === 'Enter') commitEdit()
+              if (e.key === 'Escape') setEditing(false)
+            }}
+          />
+        </Show>
+
+        <Show when={props.annotation.members.length > 0}>
+          <span class="text-[10px] text-gray-400 flex-shrink-0">{props.annotation.members.length}</span>
+        </Show>
+
+        <Show when={props.annotation.status !== 'active'}>
+          <span class={`text-[9px] px-1 rounded flex-shrink-0 ${badge()?.cls ?? ''}`}>{badge()?.label}</span>
+        </Show>
+
+        <div class="hidden group-hover:flex items-center gap-0.5 flex-shrink-0">
+          <Show when={props.annotation.status === 'proposed'}>
+            <button
+              class="text-[10px] text-purple-500 hover:text-purple-700 px-0.5"
+              title="Refine with AI"
+              onClick={(e) => {
+                e.stopPropagation()
+                void startRefinement(props.annotation.id)
+              }}
+            >
+              ✦
+            </button>
+          </Show>
+          <button
+            class="text-[10px] text-gray-400 hover:text-red-500 px-0.5"
+            title="Delete"
+            data-testid={`annotation-delete-${props.annotation.id}`}
+            onClick={(e) => {
+              e.stopPropagation()
+              void removeAnnotation(props.annotation.id)
+            }}
+          >
+            ✕
+          </button>
+        </div>
       </div>
-      <Show when={props.annotation.description}>
-        <div class="text-xs text-gray-500 dark:text-gray-400 mt-0.5 truncate">{props.annotation.description}</div>
-      </Show>
-      <Show when={props.annotation.reasoning}>
-        <div class="text-[10px] text-gray-400 dark:text-gray-500 mt-0.5 italic truncate">
-          {props.annotation.reasoning}
-        </div>
-      </Show>
-      <Show when={selected() && !refining()}>
-        <div class="flex gap-1 mt-2">
-          <button
-            class="text-[10px] px-2 py-0.5 rounded bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-300 hover:bg-emerald-200"
-            onClick={(e) => {
-              e.stopPropagation()
-              void acceptAnnotation(props.annotation.id)
-            }}
-          >
-            Accept
-          </button>
-          <button
-            class="text-[10px] px-2 py-0.5 rounded bg-purple-100 dark:bg-purple-900/40 text-purple-700 dark:text-purple-300 hover:bg-purple-200"
-            onClick={(e) => {
-              e.stopPropagation()
-              void startRefinement(props.annotation.id)
-            }}
-          >
-            Refine
-          </button>
-          <button
-            class="text-[10px] px-2 py-0.5 rounded bg-gray-100 dark:bg-gray-800 text-gray-500 hover:bg-gray-200 ml-auto"
-            onClick={(e) => {
-              e.stopPropagation()
-              void dismissAnnotation(props.annotation.id)
-            }}
-          >
-            Dismiss
-          </button>
-        </div>
-      </Show>
+
       <Show when={refining()}>
-        <div class="mt-2">
+        <div class="mt-1.5 mb-1" onClick={(e) => e.stopPropagation()}>
           <RefinementChat annotationId={props.annotation.id} />
         </div>
       </Show>
@@ -327,165 +361,222 @@ const ProposedItem: Component<{ annotation: Annotation }> = (props) => {
   )
 }
 
-const AnnotationItem: Component<{ annotation: Annotation }> = (props) => {
-  const selected = () => state.selectedAnnotationId === props.annotation.id
-  const badge = () => STATUS_BADGES[props.annotation.status] ?? STATUS_BADGES.active
+// ── Kind group ───────────────────────────────────────────────────────────────
+
+const KindGroup: Component<{ kind: string; annotations: Annotation[] }> = (props) => {
+  const [collapsed, setCollapsed] = createSignal(false)
+  const [renaming, setRenaming] = createSignal(false)
+  const [draft, setDraft] = createSignal('')
+
+  const isUnkinded = () => props.kind === ''
+  const displayName = () => (isUnkinded() ? UNKINDED_LABEL : props.kind)
+  const color = () => (isUnkinded() ? UNKINDED_COLOR : kindColor(props.kind))
+  const hidden = () => state.hiddenKinds.includes(props.kind)
+
+  const commitRename = () => {
+    const next = draft().trim()
+    if (next && next !== props.kind) void renameKind(props.kind, next)
+    setRenaming(false)
+  }
 
   return (
-    <div
-      class={`px-3 py-2 cursor-pointer border-l-2 transition-colors ${
-        selected()
-          ? "border-blue-500 bg-blue-50 dark:bg-blue-950/30"
-          : "border-transparent hover:bg-gray-50 dark:hover:bg-gray-900/50"
-      }`}
-      onClick={() => selectAnnotation(selected() ? null : props.annotation.id)}
-    >
-      <div class="flex items-center gap-2">
-        <span class={`text-sm font-bold ${KIND_COLORS[props.annotation.kind]}`}>
-          {KIND_ICONS[props.annotation.kind]}
-        </span>
-        <span class="text-sm font-medium truncate flex-1">{props.annotation.label}</span>
-        <span class={`text-[10px] px-1.5 py-0.5 rounded-full font-medium ${badge().cls}`}>{badge().label}</span>
-      </div>
-      <Show when={props.annotation.description}>
-        <div class="text-xs text-gray-500 dark:text-gray-400 mt-0.5 truncate">{props.annotation.description}</div>
-      </Show>
-      <Show when={selected()}>
-        <div class="flex gap-1 mt-2">
-          <Show when={props.annotation.kind === 'question' && props.annotation.status === 'active'}>
-            <button
-              class="text-[10px] px-2 py-0.5 rounded bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-300 hover:bg-emerald-200 dark:hover:bg-emerald-900/60"
-              onClick={(e) => {
+    <div data-testid={`kind-group-${displayName()}`}>
+      {/* Group header */}
+      <div
+        class="group flex items-center gap-1.5 px-2 py-1 cursor-pointer select-none
+               hover:bg-gray-100 dark:hover:bg-gray-800/60"
+        onClick={() => setCollapsed((c) => !c)}
+      >
+        <span class="text-[9px] text-gray-400 w-2 flex-shrink-0">{collapsed() ? '▸' : '▾'}</span>
+
+        <Show when={!isUnkinded()}>
+          <input
+            type="color"
+            class="w-3 h-3 rounded-full border-none bg-transparent cursor-pointer flex-shrink-0 p-0"
+            value={color()}
+            title="Change colour"
+            data-testid={`kind-color-${props.kind}`}
+            onClick={(e) => e.stopPropagation()}
+            onChange={(e) => void recolorKind(props.kind, e.currentTarget.value)}
+          />
+        </Show>
+        <Show when={isUnkinded()}>
+          <span class="inline-block w-3 h-3 rounded-full flex-shrink-0" style={{ 'background-color': color() }} />
+        </Show>
+
+        <Show
+          when={renaming()}
+          fallback={
+            <span
+              class={`text-xs font-medium flex-1 truncate ${
+                hidden() ? "text-gray-400 line-through" : "text-gray-700 dark:text-gray-200"
+              }`}
+              onDblClick={(e) => {
                 e.stopPropagation()
-                void patchAnnotation(props.annotation.id, { status: 'resolved' })
+                if (isUnkinded()) return
+                setDraft(props.kind)
+                setRenaming(true)
               }}
             >
-              Resolve
-            </button>
-            <button
-              class="text-[10px] px-2 py-0.5 rounded bg-gray-100 dark:bg-gray-800 text-gray-500 hover:bg-gray-200 dark:hover:bg-gray-700"
-              onClick={(e) => {
-                e.stopPropagation()
-                void patchAnnotation(props.annotation.id, { status: 'dismissed' })
-              }}
-            >
-              Dismiss
-            </button>
-          </Show>
+              {displayName()}
+            </span>
+          }
+        >
+          <input
+            class="flex-1 min-w-0 text-xs bg-white dark:bg-gray-800 border border-blue-400 rounded px-1 outline-none"
+            value={draft()}
+            autofocus
+            onClick={(e) => e.stopPropagation()}
+            onInput={(e) => setDraft(e.currentTarget.value)}
+            onBlur={commitRename}
+            onKeyDown={(e) => {
+              e.stopPropagation()
+              if (e.key === 'Enter') commitRename()
+              if (e.key === 'Escape') setRenaming(false)
+            }}
+          />
+        </Show>
+
+        <span class="text-[10px] text-gray-400 flex-shrink-0">{props.annotations.length}</span>
+
+        <div class="hidden group-hover:flex items-center gap-0.5 flex-shrink-0">
           <button
-            class="text-[10px] px-2 py-0.5 rounded bg-red-100 dark:bg-red-900/40 text-red-600 dark:text-red-400 hover:bg-red-200 dark:hover:bg-red-900/60 ml-auto"
+            class="text-[10px] text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 px-0.5"
+            title={hidden() ? 'Show on canvas' : 'Hide from canvas'}
+            data-testid={`kind-visibility-${displayName()}`}
             onClick={(e) => {
               e.stopPropagation()
-              void removeAnnotation(props.annotation.id)
+              toggleKindVisibility(props.kind)
             }}
           >
-            Delete
+            {hidden() ? '◌' : '◉'}
           </button>
+          <Show when={!isUnkinded()}>
+            <button
+              class="text-[10px] text-gray-400 hover:text-red-500 px-0.5"
+              title="Remove kind from registry (annotations keep the name)"
+              onClick={(e) => {
+                e.stopPropagation()
+                void removeKind(props.kind)
+              }}
+            >
+              ✕
+            </button>
+          </Show>
         </div>
+      </div>
+
+      <Show when={!collapsed()}>
+        <For each={props.annotations}>{(ann) => <AnnotationRow annotation={ann} />}</For>
       </Show>
     </div>
   )
 }
 
-// ── Mode Button ──────────────────────────────────────────────────────────────
-
-const ModeButton: Component<{ mode: InteractionMode }> = (props) => {
-  const active = () => interactionMode() === props.mode
-  return (
-    <button
-      class={`text-xs px-2 py-1 rounded font-medium transition-colors ${
-        active()
-          ? "bg-blue-600 text-white"
-          : "bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-700"
-      }`}
-      onClick={() => toggleInteractionMode(props.mode)}
-    >
-      {MODE_LABELS[props.mode]}
-    </button>
-  )
-}
-
-// ── Main Panel ───────────────────────────────────────────────────────────────
+// ── Panel root ───────────────────────────────────────────────────────────────
 
 export const AnnotationPanel: Component = () => {
-  const proposed = createMemo(() => state.annotations.filter((a) => a.status === 'proposed'))
+  const [filter, setFilter] = createSignal('')
 
-  const grouped = createMemo(() => {
-    const byKind: Record<AnnotationKind, Annotation[]> = {
-      boundary: [],
-      path: [],
-      note: [],
-      question: [],
-      projection: []
+  const visible = createMemo(() => state.annotations.filter((a) => a.status !== 'dismissed'))
+
+  /** Group by kind, sorted with named kinds first and unkinded last. */
+  const groups = createMemo(() => {
+    const q = filter().trim().toLowerCase()
+    const matching = q
+      ? visible().filter((a) => a.label.toLowerCase().includes(q) || a.kind.toLowerCase().includes(q))
+      : visible()
+
+    const byKind = new Map<string, Annotation[]>()
+    for (const ann of matching) {
+      const list = byKind.get(ann.kind)
+      if (list) list.push(ann)
+      else byKind.set(ann.kind, [ann])
     }
-    for (const a of state.annotations) {
-      if (a.status === 'proposed') continue // shown in PROPOSED section
-      byKind[a.kind].push(a)
-    }
-    return byKind
+
+    return [...byKind.entries()]
+      .sort(([a], [b]) => {
+        if (a === '') return 1
+        if (b === '') return -1
+        return a.localeCompare(b)
+      })
+      .map(([kind, annotations]) => ({ kind, annotations }))
   })
 
-  const totalCount = () => state.annotations.length
+  const annotating = () => interactionMode() === 'annotate'
 
   return (
-    <div class="h-full flex flex-col bg-white dark:bg-gray-950 border-r border-gray-200 dark:border-gray-800 overflow-hidden">
-      <div class="flex items-center justify-between px-3 py-2 border-b border-gray-200 dark:border-gray-800">
-        <h2 class="text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400">
-          Annotations
-          <Show when={totalCount() > 0}>
-            <span class="ml-1 text-gray-400 dark:text-gray-500">({totalCount()})</span>
-          </Show>
-        </h2>
-        <button class="text-xs text-blue-600 dark:text-blue-400 hover:underline" onClick={() => void loadAnnotations()}>
-          Refresh
+    <div class="flex flex-col h-full text-sm" data-testid="annotation-panel">
+      {/* Header */}
+      <div class="flex items-center gap-2 px-3 py-2 border-b border-gray-200 dark:border-gray-800">
+        <span class="text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">Annotations</span>
+        <span class="text-[10px] text-gray-400">{visible().length}</span>
+        <button
+          class={`ml-auto text-[10px] px-2 py-0.5 rounded font-medium transition-colors ${
+            annotating()
+              ? "bg-blue-600 text-white"
+              : "bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-700"
+          }`}
+          data-testid="annotate-toggle"
+          title="Draw an annotation (A)"
+          onClick={() => toggleInteractionMode('annotate')}
+        >
+          {annotating() ? 'Drawing…' : '✎ Draw'}
         </button>
       </div>
 
-      <div class="flex gap-1 px-3 py-2 border-b border-gray-200 dark:border-gray-800 flex-wrap">
-        <ModeButton mode="boundary" />
-        <ModeButton mode="trace" />
-        <ModeButton mode="note" />
-        <ModeButton mode="question" />
-      </div>
-
-      {/* AI Suggest form */}
       <SuggestForm />
 
-      <div class="flex-1 overflow-y-auto">
-        {/* Proposed section */}
-        <Show when={proposed().length > 0}>
-          <div class="mt-1">
-            <div class="text-[10px] uppercase tracking-wider font-semibold px-3 py-1 text-purple-500 flex items-center gap-1">
-              <span>✦</span> Proposed ({proposed().length})
-            </div>
-            <For each={proposed()}>{(ann) => <ProposedItem annotation={ann} />}</For>
-          </div>
-        </Show>
-
-        <Show when={totalCount() === 0}>
-          <div class="text-xs text-gray-400 dark:text-gray-500 px-3 py-6 text-center">
-            No annotations yet.{' '}
-            <span class="block mt-1">
-              Press <kbd class="px-1 py-0.5 bg-gray-100 dark:bg-gray-800 rounded text-[10px]">B</kbd>{' '}
-              <kbd class="px-1 py-0.5 bg-gray-100 dark:bg-gray-800 rounded text-[10px]">T</kbd>{' '}
-              <kbd class="px-1 py-0.5 bg-gray-100 dark:bg-gray-800 rounded text-[10px]">N</kbd>{' '}
-              <kbd class="px-1 py-0.5 bg-gray-100 dark:bg-gray-800 rounded text-[10px]">Q</kbd> to start.
-            </span>
-          </div>
-        </Show>
-        <For each={['boundary', 'path', 'note', 'question', 'projection'] as AnnotationKind[]}>
-          {(kind) => (
-            <Show when={grouped()[kind].length > 0}>
-              <div class="mt-1">
-                <div class={`text-[10px] uppercase tracking-wider font-semibold px-3 py-1 ${KIND_COLORS[kind]}`}>
-                  {kind === 'path' ? 'Paths' : kind === 'boundary' ? 'Boundaries' : kind + 's'}
-                </div>
-                <For each={grouped()[kind]}>{(ann) => <AnnotationItem annotation={ann} />}</For>
-              </div>
-            </Show>
-          )}
-        </For>
+      {/* Filter */}
+      <div class="px-3 py-1.5 border-b border-gray-200 dark:border-gray-800">
+        <input
+          class="w-full text-xs px-2 py-1 rounded border border-gray-300 dark:border-gray-700 bg-transparent"
+          placeholder="Filter annotations…"
+          value={filter()}
+          data-testid="annotation-filter"
+          onInput={(e) => setFilter(e.currentTarget.value)}
+        />
       </div>
+
+      {/* Hidden-kind notice */}
+      <Show when={state.hiddenKinds.length > 0}>
+        <button
+          class="px-3 py-1 text-[10px] text-left text-amber-600 dark:text-amber-400 hover:underline
+                 border-b border-gray-200 dark:border-gray-800"
+          onClick={() => showAllKinds()}
+        >
+          {state.hiddenKinds.length} kind{state.hiddenKinds.length !== 1 ? 's' : ''} hidden — show all
+        </button>
+      </Show>
+
+      {/* Outline */}
+      <div class="flex-1 overflow-y-auto py-1">
+        <Show
+          when={groups().length > 0}
+          fallback={
+            <div class="px-3 py-6 text-xs text-gray-400 text-center leading-relaxed">
+              <Show when={visible().length === 0} fallback={<>No annotations match the filter.</>}>
+                No annotations yet.
+                <br />
+                <span class="text-[11px]">
+                  Press <kbd class="px-1 rounded bg-gray-100 dark:bg-gray-800">A</kbd> then drag on the canvas.
+                </span>
+              </Show>
+            </div>
+          }
+        >
+          <For each={groups()}>{(g) => <KindGroup kind={g.kind} annotations={g.annotations} />}</For>
+        </Show>
+      </div>
+
+      {/* Error */}
+      <Show when={state.annotationError}>
+        {(msg) => (
+          <div class="px-3 py-1.5 text-[10px] text-red-600 dark:text-red-400 border-t border-gray-200 dark:border-gray-800">
+            {msg()}
+          </div>
+        )}
+      </Show>
     </div>
   )
 }

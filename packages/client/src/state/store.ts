@@ -84,6 +84,8 @@ export {
   patchAnnotation,
   removeAnnotation,
   selectAnnotation,
+  setAnnotationKind,
+  setAnnotationGeometry,
   requestSuggest,
   removeSuggestingId,
   startRefinement,
@@ -92,7 +94,21 @@ export {
   acceptAnnotation,
   dismissAnnotation,
   loadProviders,
-  setSelectedProvider
+  setSelectedProvider,
+  // Kind registry
+  loadKinds,
+  kindColor,
+  renameKind,
+  recolorKind,
+  removeKind,
+  toggleKindVisibility,
+  showAllKinds,
+  UNKINDED_COLOR,
+  // Undo / redo
+  undo,
+  redo,
+  canUndo,
+  canRedo
 } from './annotations.js'
 export type { AnnotationsState } from './annotations.js'
 

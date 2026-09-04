@@ -51,7 +51,7 @@ CodeGraph cannot link `fetch()` calls to route handlers because the URL is a run
 | 1     | ✅ Done | ArchDiff v2 format, semantic identity layer, diff visualization                   |
 | 2     | ✅ Done | Temporal mapper (Git history → per-commit diffs via worktrees, SQLite cache, SSE) |
 | —     | ✅ Done | Three.js WebGL renderer replacing PixiJS (5 draw calls, handles 10k+ nodes)       |
-| 3     | Next    | Annotation surface (boundaries, paths, notes, questions — canvas-native)          |
+| 3     | ✅ Done | Annotation surface — draw-to-annotate, user-defined kinds, AI proposals           |
 | 4     | Planned | Projections (speculative sketching, projected ArchDiffs, git graph integration)   |
 | 5     | Planned | Prospective state engine (projections → CoW graph forks)                          |
 | 6     | Planned | Code synthesis engine (projection → ArchDiff → file changes → commit)             |
@@ -75,8 +75,48 @@ See `~/.sovereign/membranes/personal/plans/graphcoder.md` for the full design.
 
 **Minimal DOM overlays** — hover hit-testing via RBush in world coordinates; expand/collapse button on hovered containers is a positioned HTML `<button>` (`container-expand-btn`) above the canvas.
 
+## Annotation model (schema v2)
+
+Annotations carry two independent axes. Do not conflate them.
+
+- **`shape`** — how it was drawn. Fixed vocabulary: `region | polyline | point`. Drives rendering only.
+- **`kind`** — what it means. A free-form user-defined string; `''` means unkinded. Carries no behaviour.
+
+The user never picks a shape from a menu — the drawing gesture in `GraphCanvas.tsx` decides it:
+
+| Gesture                       | Shape      | Members captured                      |
+| ----------------------------- | ---------- | ------------------------------------- |
+| Drag starting on empty canvas | `region`   | Node centres inside the lasso polygon |
+| Drag starting on a node       | `polyline` | Nodes crossed, **in crossing order**  |
+| Click with no drag            | `point`    | The node under the cursor, if any     |
+
+`members` is a single ordered array of semantic IDs for every shape. **Order is significant for `polyline`** — it is the traversal. There is no parallel `steps`/`stepEdges` structure (v1 had one; v2 collapsed it).
+
+`geometry` holds the drawn stroke in world coordinates: `{ points: [x,y][], anchor: {x,y} }`.
+
+### Kind registry
+
+`.graphcoder/annotation-kinds.json` — `{ name, color, description, createdAt }[]`, committed with the repo. Kinds are created on first use: typing a name that does not exist registers it with a hash-stable palette colour. Names match case-insensitively but keep the case first typed.
+
+- `ensureKind()` runs on every annotation create/patch, so a kind can never be referenced without being registered.
+- `GET /api/annotation-kinds` calls `syncKindsFromAnnotations()`, which registers any kind found on an annotation but missing from the file — this covers hand-edited files and AI-coined kinds.
+- Renaming a kind via `PATCH /api/annotation-kinds/:name` rewrites every annotation using it. Deleting a kind only unregisters it; annotations keep the string and fall back to neutral grey.
+
+### Migration
+
+`normalizeAnnotation()` in `packages/core/src/annotations/store.ts` migrates on read. Anything without a `shape` field is treated as v1: `boundary|projection → region`, `path → polyline` (ordered members taken from `steps[].architectureNodeId`), `note|question → point`. The old kind name survives as the v2 free-form kind, so no meaning is lost. Retired v1 statuses (`draft`, `applied`, `resolved`) collapse to `active`.
+
+### IDE surfaces
+
+- `A` enters draw mode; `Shift+A` toggles the annotation panel; `Esc` cancels.
+- `⌘/Ctrl+K` opens `CommandPalette.tsx` (subsequence fuzzy match over commands, annotations, and kinds).
+- `⌘/Ctrl+Z` / `⇧⌘Z` — undo/redo. The stack lives in `state/annotations.ts`; entries record create/delete/update snapshots and replay through the same API the UI uses.
+- `KindInput.tsx` is the only naming surface — inline at the shape anchor, never a modal.
+
 ## Known gotchas
 
+- **Do not overwrite `.graphcoder/.gitignore`:** `temporal/cache.ts` merges its required rules into the file, appending only what is missing. It previously rewrote the file wholesale, silently deleting user-added rules on every project open.
+- **`loadAllAnnotations` must exclude `*.conversation.json`:** conversation logs live in the same directory as annotations; globbing `*.json` picks them up as malformed annotations.
 - **ESM imports:** Use `.js` extensions in all relative TypeScript imports
 - **Tailwind v4:** Use `@import 'tailwindcss'` not `@tailwind base/components/utilities`
 - **ELK import:** `import ELK from 'elkjs/lib/elk.bundled.js'` (bundled, no web worker)

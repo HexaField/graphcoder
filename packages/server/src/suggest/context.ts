@@ -5,7 +5,6 @@
  * The gathered context gives the AI enough architectural information to
  * reason about the codebase without reading full source files.
  */
-import type { AnnotationKind } from '@graphcoder/core'
 import { nodeSemanticId } from '@graphcoder/core'
 import { loadAllAnnotations } from '@graphcoder/core/annotations/server'
 import { graphService } from '../codegraph/service.js'
@@ -28,7 +27,7 @@ export interface SuggestContext {
   project: string
   prompt: string
   label: string
-  constrainedKind: AnnotationKind | null
+  constrainedKind: string | null
   matchedNodes: ContextNode[]
   callGraph: { edges: Array<{ source: string; target: string; kind: string }> }
   fileTree: string[]
@@ -88,7 +87,7 @@ function scoreNode(node: { name: string; qualifiedName: string; filePath: string
 export function gatherContext(
   prompt: string,
   label: string,
-  constrainedKind: AnnotationKind | null,
+  constrainedKind: string | null,
   depth: number = 3
 ): SuggestContext {
   const projectRoot = graphService.getProjectRoot()

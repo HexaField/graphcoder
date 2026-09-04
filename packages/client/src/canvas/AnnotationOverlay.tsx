@@ -1,7 +1,14 @@
+/**
+ * Annotation overlay.
+ *
+ * Rendering follows SHAPE; colour follows KIND. There is no per-kind render
+ * branch — a user-invented kind draws exactly like any other kind of the
+ * same shape, just in its own colour.
+ */
 import { type Component, createMemo, For, Show } from 'solid-js'
-import type { Annotation } from '@graphcoder/core'
+import type { Annotation, Point } from '@graphcoder/core'
 import type { LayoutNode } from '../layout/elk.js'
-import { state, selectAnnotation } from '../state/store.js'
+import { state, selectAnnotation, kindColor } from '../state/store.js'
 
 export interface AnnotationOverlayProps {
   panX: number
@@ -11,26 +18,17 @@ export interface AnnotationOverlayProps {
   semanticToLayoutId: Map<string, string>
 }
 
-const KIND_COLORS: Record<string, string> = {
-  boundary: '#3b82f6',
-  path: '#f59e0b',
-  note: '#10b981',
-  question: '#ef4444',
-  projection: '#8b5cf6'
-}
-
-const KIND_LABELS: Record<string, string> = {
-  boundary: 'B',
-  path: 'P',
-  note: 'N',
-  question: '?',
-  projection: 'S'
-}
-
+/** Colour used to mark an AI proposal, regardless of kind */
 const AI_BADGE_COLOR = '#9333ea'
+/** Colour used when an annotation's members no longer resolve */
+const STALE_COLOR = '#ef4444'
 
 function isProposed(ann: Annotation): boolean {
   return ann.status === 'proposed'
+}
+
+function isStale(ann: Annotation): boolean {
+  return ann.status === 'stale'
 }
 
 function memberPositions(
@@ -63,201 +61,228 @@ function boundingRect(nodes: LayoutNode[], pad: number): { x: number; y: number;
   return { x: minX - pad, y: minY - pad, w: maxX - minX + pad * 2, h: maxY - minY + pad * 2 }
 }
 
-const BoundaryOverlay: Component<{
-  annotation: Annotation
-  layoutNodes: Map<string, LayoutNode>
-  semanticToLayoutId: Map<string, string>
-}> = (props) => {
-  const positions = createMemo(() =>
-    memberPositions(props.annotation.members ?? [], props.semanticToLayoutId, props.layoutNodes)
-  )
-  const rect = createMemo(() => boundingRect(positions(), 16))
-  const color = () => KIND_COLORS[props.annotation.kind]
-  const proposed = () => isProposed(props.annotation)
-
-  return (
-    <Show when={rect()}>
-      {(r) => (
-        <g opacity={proposed() ? '0.7' : '1'}>
-          <rect
-            x={r().x}
-            y={r().y}
-            width={r().w}
-            height={r().h}
-            fill={color()}
-            fill-opacity="0.06"
-            stroke={color()}
-            stroke-width="2"
-            stroke-dasharray={proposed() ? '3 3' : '6 3'}
-            rx={8}
-            ry={8}
-          />
-          <text x={r().x + 6} y={r().y - 4} fill={color()} font-size="12" font-weight="600">
-            {props.annotation.label}
-          </text>
-          <Show when={proposed()}>
-            <text
-              x={r().x + 6 + props.annotation.label.length * 7 + 8}
-              y={r().y - 4}
-              fill={AI_BADGE_COLOR}
-              font-size="9"
-              font-weight="700"
-              opacity="0.8"
-            >
-              AI
-            </text>
-          </Show>
-        </g>
-      )}
-    </Show>
-  )
+/** Stroke colour: stale overrides kind colour, since staleness is urgent. */
+function strokeColor(ann: Annotation): string {
+  return isStale(ann) ? STALE_COLOR : kindColor(ann.kind)
 }
 
-const PathOverlay: Component<{
+/** Dash pattern encodes status, not kind. */
+function dashArray(ann: Annotation): string | undefined {
+  if (isProposed(ann)) return '5 4'
+  if (isStale(ann)) return '2 3'
+  return undefined
+}
+
+// ── Shape renderers ──────────────────────────────────────────────────────────
+
+const RegionOverlay: Component<{
   annotation: Annotation
   layoutNodes: Map<string, LayoutNode>
   semanticToLayoutId: Map<string, string>
+  onSelect: () => void
 }> = (props) => {
-  const stepCenters = createMemo(() => {
-    if (!props.annotation.steps) return []
-    return props.annotation.steps
-      .map((step) => {
-        if (!step.architectureNodeId) return null
-        const layoutId = props.semanticToLayoutId.get(step.architectureNodeId)
-        if (!layoutId) return null
-        const node = props.layoutNodes.get(layoutId)
-        if (!node) return null
-        return { cx: node.x + node.width / 2, cy: node.y + node.height / 2, label: step.label }
-      })
-      .filter((v): v is { cx: number; cy: number; label: string } => v !== null)
+  const drawn = createMemo(() => props.annotation.geometry?.points ?? [])
+
+  /** Fall back to a bounding box when the outline was not preserved. */
+  const fallbackRect = createMemo(() => {
+    if (drawn().length >= 3) return null
+    const positions = memberPositions(props.annotation.members ?? [], props.semanticToLayoutId, props.layoutNodes)
+    return boundingRect(positions, 16)
   })
 
-  const color = () => KIND_COLORS.path
-  const proposed = () => isProposed(props.annotation)
+  const color = () => strokeColor(props.annotation)
+
+  const labelPos = createMemo(() => {
+    const r = fallbackRect()
+    if (r) return { x: r.x + 6, y: r.y - 6 }
+    const pts = drawn()
+    if (pts.length === 0) return { x: 0, y: 0 }
+    let minX = Infinity
+    let minY = Infinity
+    for (const [x, y] of pts) {
+      if (x < minX) minX = x
+      if (y < minY) minY = y
+    }
+    return { x: minX + 4, y: minY - 6 }
+  })
 
   return (
-    <Show when={stepCenters().length >= 2}>
-      <g opacity={proposed() ? '0.7' : '1'}>
-        <For each={stepCenters().slice(0, -1)}>
-          {(pt, idx) => {
-            const next = () => stepCenters()[idx() + 1]
-            return (
-              <Show when={next()}>
-                {(n) => (
-                  <line
-                    x1={pt.cx}
-                    y1={pt.cy}
-                    x2={n().cx}
-                    y2={n().cy}
-                    stroke={color()}
-                    stroke-width="2.5"
-                    stroke-opacity="0.7"
-                    stroke-dasharray={proposed() ? '4 4' : 'none'}
-                    marker-end="url(#annotation-arrow)"
-                  />
-                )}
-              </Show>
-            )
-          }}
-        </For>
-        <For each={stepCenters()}>
-          {(pt) => (
-            <g>
-              <circle cx={pt.cx} cy={pt.cy} r={6} fill={color()} fill-opacity="0.9" />
-              <text x={pt.cx + 10} y={pt.cy + 4} fill={color()} font-size="11" font-weight="500">
-                {pt.label}
-              </text>
-            </g>
-          )}
-        </For>
-        <Show when={proposed()}>
-          {(() => {
-            const first = stepCenters()[0]
-            if (!first) return null
-            return (
-              <text
-                x={first.cx + 10}
-                y={first.cy - 12}
-                fill={AI_BADGE_COLOR}
-                font-size="9"
-                font-weight="700"
-                opacity="0.8"
-              >
-                AI
-              </text>
-            )
-          })()}
+    <Show when={drawn().length >= 3 || fallbackRect()}>
+      <g
+        opacity={isProposed(props.annotation) ? '0.75' : '1'}
+        style={{ 'pointer-events': 'all', cursor: 'pointer' }}
+        onClick={props.onSelect}
+      >
+        <Show
+          when={drawn().length >= 3}
+          fallback={
+            <Show when={fallbackRect()}>
+              {(r) => (
+                <rect
+                  x={r().x}
+                  y={r().y}
+                  width={r().w}
+                  height={r().h}
+                  fill={color()}
+                  fill-opacity="0.06"
+                  stroke={color()}
+                  stroke-width="2"
+                  stroke-dasharray={dashArray(props.annotation)}
+                  rx={8}
+                  ry={8}
+                />
+              )}
+            </Show>
+          }
+        >
+          <polygon
+            points={drawn()
+              .map(([x, y]) => `${x},${y}`)
+              .join(' ')}
+            fill={color()}
+            fill-opacity="0.07"
+            stroke={color()}
+            stroke-width="2"
+            stroke-dasharray={dashArray(props.annotation)}
+            stroke-linejoin="round"
+          />
         </Show>
+        <AnnotationLabel annotation={props.annotation} x={labelPos().x} y={labelPos().y} color={color()} />
       </g>
     </Show>
   )
 }
 
-const MarkerOverlay: Component<{
+const PolylineOverlay: Component<{
   annotation: Annotation
   layoutNodes: Map<string, LayoutNode>
   semanticToLayoutId: Map<string, string>
+  onSelect: () => void
 }> = (props) => {
-  const position = createMemo(() => {
-    const members = props.annotation.members ?? []
-    if (members.length === 0) {
-      return { cx: props.annotation.anchor?.x ?? 0, cy: props.annotation.anchor?.y ?? 0 }
+  /**
+   * Prefer live node centres so the path tracks relayout. Fall back to the
+   * drawn stroke when members no longer resolve to visible nodes.
+   */
+  const centres = createMemo(() => {
+    const positions = memberPositions(props.annotation.members ?? [], props.semanticToLayoutId, props.layoutNodes)
+    if (positions.length >= 2) {
+      return positions.map((n) => [n.x + n.width / 2, n.y + n.height / 2] as Point)
     }
-    const positions = memberPositions(members, props.semanticToLayoutId, props.layoutNodes)
-    if (positions.length === 0) return null
-    const first = positions[0]
-    return { cx: first.x + first.width + 12, cy: first.y }
+    return props.annotation.geometry?.points ?? []
   })
 
-  const color = () => KIND_COLORS[props.annotation.kind]
-  const label = () => KIND_LABELS[props.annotation.kind]
-  const proposed = () => isProposed(props.annotation)
+  const color = () => strokeColor(props.annotation)
 
   return (
-    <Show when={position()}>
-      {(pos) => (
-        <g
-          style={{ cursor: 'pointer' }}
-          opacity={proposed() ? '0.7' : '1'}
-          onClick={() => selectAnnotation(props.annotation.id)}
-        >
-          <circle
-            cx={pos().cx}
-            cy={pos().cy}
-            r={10}
-            fill={color()}
-            fill-opacity="0.85"
-            stroke={proposed() ? AI_BADGE_COLOR : 'none'}
-            stroke-width={proposed() ? '1.5' : '0'}
-            stroke-dasharray={proposed() ? '2 2' : 'none'}
-          />
-          <text x={pos().cx} y={pos().cy + 4} text-anchor="middle" fill="white" font-size="11" font-weight="700">
-            {label()}
-          </text>
-          <text x={pos().cx + 16} y={pos().cy + 4} fill={color()} font-size="11" font-weight="500">
-            {props.annotation.label}
-          </text>
-          <Show when={proposed()}>
-            <text
-              x={pos().cx + 16 + props.annotation.label.length * 6 + 6}
-              y={pos().cy + 4}
-              fill={AI_BADGE_COLOR}
-              font-size="9"
-              font-weight="700"
-              opacity="0.8"
-            >
-              AI
-            </text>
-          </Show>
-        </g>
-      )}
+    <Show when={centres().length >= 2}>
+      <g
+        opacity={isProposed(props.annotation) ? '0.75' : '1'}
+        style={{ 'pointer-events': 'all', cursor: 'pointer' }}
+        onClick={props.onSelect}
+      >
+        <polyline
+          points={centres()
+            .map(([x, y]) => `${x},${y}`)
+            .join(' ')}
+          fill="none"
+          stroke={color()}
+          stroke-width="2.5"
+          stroke-opacity="0.8"
+          stroke-dasharray={dashArray(props.annotation)}
+          stroke-linejoin="round"
+          stroke-linecap="round"
+          marker-end="url(#annotation-arrow)"
+        />
+        <For each={centres()}>{([x, y]) => <circle cx={x} cy={y} r={5} fill={color()} fill-opacity="0.9" />}</For>
+        <AnnotationLabel
+          annotation={props.annotation}
+          x={(centres()[0]?.[0] ?? 0) + 10}
+          y={(centres()[0]?.[1] ?? 0) - 10}
+          color={color()}
+        />
+      </g>
     </Show>
   )
 }
 
+const PointOverlay: Component<{
+  annotation: Annotation
+  layoutNodes: Map<string, LayoutNode>
+  semanticToLayoutId: Map<string, string>
+  onSelect: () => void
+}> = (props) => {
+  const position = createMemo(() => {
+    // Anchor to a member node when one resolves, so the pin follows relayout
+    const positions = memberPositions(props.annotation.members ?? [], props.semanticToLayoutId, props.layoutNodes)
+    const first = positions[0]
+    if (first) return { cx: first.x + first.width + 12, cy: first.y }
+    const anchor = props.annotation.geometry?.anchor
+    return { cx: anchor?.x ?? 0, cy: anchor?.y ?? 0 }
+  })
+
+  const color = () => strokeColor(props.annotation)
+
+  return (
+    <g style={{ 'pointer-events': 'all', cursor: 'pointer' }} onClick={props.onSelect}>
+      <circle
+        cx={position().cx}
+        cy={position().cy}
+        r={7}
+        fill={color()}
+        fill-opacity={isProposed(props.annotation) ? '0.55' : '0.9'}
+        stroke={isProposed(props.annotation) ? AI_BADGE_COLOR : 'none'}
+        stroke-width={isProposed(props.annotation) ? '1.5' : '0'}
+        stroke-dasharray={isProposed(props.annotation) ? '2 2' : undefined}
+      />
+      <AnnotationLabel annotation={props.annotation} x={position().cx + 12} y={position().cy + 4} color={color()} />
+    </g>
+  )
+}
+
+/** Kind chip + label, shared by every shape. */
+const AnnotationLabel: Component<{
+  annotation: Annotation
+  x: number
+  y: number
+  color: string
+}> = (props) => {
+  const text = () => {
+    const { kind, label } = props.annotation
+    if (kind && label && label.toLowerCase() !== kind.toLowerCase()) return `${kind} · ${label}`
+    return label || kind || 'untitled'
+  }
+
+  return (
+    <>
+      <text x={props.x} y={props.y} fill={props.color} font-size="11" font-weight="600">
+        {text()}
+      </text>
+      <Show when={isProposed(props.annotation)}>
+        <text
+          x={props.x + text().length * 6 + 8}
+          y={props.y}
+          fill={AI_BADGE_COLOR}
+          font-size="9"
+          font-weight="700"
+          opacity="0.85"
+        >
+          AI
+        </text>
+      </Show>
+    </>
+  )
+}
+
+// ── Overlay root ─────────────────────────────────────────────────────────────
+
 export const AnnotationOverlay: Component<AnnotationOverlayProps> = (props) => {
-  const activeAnnotations = createMemo(() =>
-    state.annotations.filter((a) => a.status !== 'dismissed' && a.status !== 'applied')
+  const visibleAnnotations = createMemo(() =>
+    state.annotations.filter((a) => {
+      if (a.status === 'dismissed') return false
+      // Kind visibility toggles come from the outline panel
+      if (a.kind && state.hiddenKinds.includes(a.kind)) return false
+      return true
+    })
   )
 
   return (
@@ -272,40 +297,42 @@ export const AnnotationOverlay: Component<AnnotationOverlayProps> = (props) => {
           markerHeight={6}
           orient="auto-start-reverse"
         >
-          <path d="M 0 0 L 10 5 L 0 10 z" fill={KIND_COLORS.path} />
+          <path d="M 0 0 L 10 5 L 0 10 z" fill="currentColor" />
         </marker>
       </defs>
       <Show when={props.layoutNodes}>
         {(nodes) => (
           <g transform={`translate(${props.panX}, ${props.panY}) scale(${props.zoom})`}>
-            <For each={activeAnnotations()}>
+            <For each={visibleAnnotations()}>
               {(ann) => {
-                switch (ann.kind) {
-                  case 'boundary':
+                const select = () => selectAnnotation(ann.id)
+                switch (ann.shape) {
+                  case 'region':
                     return (
-                      <BoundaryOverlay
+                      <RegionOverlay
                         annotation={ann}
                         layoutNodes={nodes()}
                         semanticToLayoutId={props.semanticToLayoutId}
+                        onSelect={select}
                       />
                     )
-                  case 'path':
+                  case 'polyline':
                     return (
-                      <PathOverlay
+                      <PolylineOverlay
                         annotation={ann}
                         layoutNodes={nodes()}
                         semanticToLayoutId={props.semanticToLayoutId}
+                        onSelect={select}
                       />
                     )
                   default:
                     return (
-                      <g style={{ 'pointer-events': 'all' }}>
-                        <MarkerOverlay
-                          annotation={ann}
-                          layoutNodes={nodes()}
-                          semanticToLayoutId={props.semanticToLayoutId}
-                        />
-                      </g>
+                      <PointOverlay
+                        annotation={ann}
+                        layoutNodes={nodes()}
+                        semanticToLayoutId={props.semanticToLayoutId}
+                        onSelect={select}
+                      />
                     )
                 }
               }}

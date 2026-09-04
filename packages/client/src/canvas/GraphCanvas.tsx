@@ -27,7 +27,7 @@ import {
   Switch,
   Match
 } from 'solid-js'
-import type { FileGroup, GraphNode } from '@graphcoder/core'
+import type { FileGroup, GraphNode, Point } from '@graphcoder/core'
 import { nodeSemanticId } from '@graphcoder/core'
 import { layoutGraph, type LayoutResult } from '../layout/elk.js'
 import {
@@ -39,7 +39,17 @@ import {
   selectNode,
   state
 } from '../state/store.js'
-import { interactionMode, setInteractionMode, MODE_LABELS } from '../state/interaction.js'
+import {
+  interactionMode,
+  setInteractionMode,
+  pendingAnnotation,
+  setPendingAnnotation,
+  clearPendingAnnotation,
+  pointInPolygon,
+  simplifyStroke,
+  centroid
+} from '../state/interaction.js'
+import { KindInput } from '../components/KindInput.js'
 import { resolvedTheme } from '../state/theme.js'
 import type { DiffOverlay, HitResult } from './ThreeRenderer.js'
 import { ThreeRenderer } from './ThreeRenderer.js'
@@ -428,15 +438,22 @@ export const GraphCanvas: Component = () => {
     onCleanup(() => ro.disconnect())
   })
 
-  // ── Pan / zoom ──────────────────────────────────────────────────────────────
+  // ── Pan / zoom / draw ───────────────────────────────────────────────────────
 
-  const [pendingMembers, setPendingMembers] = createSignal<string[]>([])
-  const [pendingLabel, setPendingLabel] = createSignal('')
+  /** Live stroke while the user drags in annotate mode, world coords. */
+  const [stroke, setStroke] = createSignal<Point[]>([])
+  /** Nodes the polyline gesture has passed through, in order. */
+  const [strokeNodes, setStrokeNodes] = createSignal<string[]>([])
 
   let isPanning = false
   let panStart = { x: 0, y: 0 }
   let camAtPanStart = { panX: 0, panY: 0, zoom: 1 }
   let didPan = false
+
+  // Drawing gesture state
+  let isDrawing = false
+  /** True when the drag began on a node — that makes it a polyline, not a lasso. */
+  let drawStartedOnNode = false
 
   const onWheel = (e: WheelEvent) => {
     e.preventDefault()
@@ -453,6 +470,36 @@ export const GraphCanvas: Component = () => {
 
   const onMouseDown = (e: MouseEvent) => {
     if (e.button !== 0) return
+
+    // In annotate mode a left-drag draws instead of panning. Which shape it
+    // produces depends only on where the drag begins — node or empty canvas.
+    // Drawing never depends on the graph having laid out: a user can always
+    // enclose empty space or drop a pin on a blank canvas.
+    if (interactionMode() === 'annotate') {
+      const rect = (e.currentTarget as HTMLElement).getBoundingClientRect()
+      const mx = e.clientX - rect.left
+      const my = e.clientY - rect.top
+      const { panX, panY, zoom } = cam()
+      const wx = (mx - panX) / zoom
+      const wy = (my - panY) / zoom
+
+      // Hit testing only works once the renderer and a layout exist; without
+      // them every gesture simply starts from empty canvas.
+      const hit = r3 && layoutSnap() ? r3.hitTest(mx, my, panX, panY, zoom) : null
+
+      isDrawing = true
+      drawStartedOnNode = hit?.kind === 'node'
+      setStroke([[wx, wy]])
+
+      if (hit?.kind === 'node') {
+        const gn = layoutSnap()?.nodeById.get(hit.id)
+        setStrokeNodes(gn ? [nodeSemanticId(gn)] : [])
+      } else {
+        setStrokeNodes([])
+      }
+      return
+    }
+
     isPanning = true
     didPan = false
     panStart = { x: e.clientX, y: e.clientY }
@@ -465,6 +512,28 @@ export const GraphCanvas: Component = () => {
     const rect = (e.currentTarget as HTMLElement).getBoundingClientRect()
     const mx = e.clientX - rect.left
     const my = e.clientY - rect.top
+
+    // Drawing takes precedence — accumulate the stroke and, for a polyline,
+    // pick up every node the pointer crosses in the order it crosses them.
+    if (isDrawing) {
+      const { panX, panY, zoom } = cam()
+      const wx = (mx - panX) / zoom
+      const wy = (my - panY) / zoom
+      setStroke((prev) => [...prev, [wx, wy] as Point])
+
+      if (drawStartedOnNode && r3) {
+        const hit = r3.hitTest(mx, my, panX, panY, zoom)
+        if (hit?.kind === 'node') {
+          const gn = layoutSnap()?.nodeById.get(hit.id)
+          if (gn) {
+            const semId = nodeSemanticId(gn)
+            setStrokeNodes((prev) => (prev.includes(semId) ? prev : [...prev, semId]))
+          }
+        }
+      }
+      setMousePos({ x: mx, y: my })
+      return
+    }
 
     if (isPanning) {
       const dx = e.clientX - panStart.x
@@ -540,71 +609,110 @@ export const GraphCanvas: Component = () => {
     setTooltipData(null)
   }
 
-  // ── Click: select node, toggle container, or create annotations ────────────
+  // ── Drawing: resolve the gesture into a pending shape ──────────────────────
 
-  const handleAnnotationClick = (hit: HitResult | null, wx: number, wy: number) => {
-    const mode = interactionMode()
-    if (mode === 'select') return false
-
-    if (mode === 'note' || mode === 'question') {
-      const members: string[] = []
-      if (hit?.kind === 'node') {
-        const gn = layoutSnap()?.nodeById.get(hit.id)
-        if (gn) members.push(nodeSemanticId(gn))
-      }
-      const label = mode === 'note' ? 'New note' : 'New question'
-      void addAnnotation(mode, label, members, {
-        anchor: { x: wx, y: wy, memberLayout: null }
-      })
-      setInteractionMode('select')
-      return true
+  /** Node centres in world coords, for lasso capture. */
+  const nodeCentres = (): Array<{ semId: string; x: number; y: number }> => {
+    const snap = layoutSnap()
+    if (!snap) return []
+    const out: Array<{ semId: string; x: number; y: number }> = []
+    for (const [layoutId, ln] of snap.result.nodes) {
+      const gn = snap.nodeById.get(layoutId)
+      if (!gn) continue
+      out.push({ semId: nodeSemanticId(gn), x: ln.x + ln.width / 2, y: ln.y + ln.height / 2 })
     }
-
-    if (mode === 'boundary' || mode === 'trace') {
-      if (hit?.kind === 'node') {
-        const gn = layoutSnap()?.nodeById.get(hit.id)
-        if (gn) {
-          const semId = nodeSemanticId(gn)
-          setPendingMembers((prev) => (prev.includes(semId) ? prev : [...prev, semId]))
-        }
-      }
-      return true
-    }
-
-    return false
+    return out
   }
 
-  const commitPendingAnnotation = () => {
-    const members = pendingMembers()
-    const mode = interactionMode()
-    if (members.length === 0) return
+  /**
+   * Turn the finished gesture into a pending annotation.
+   *
+   * The gesture alone decides the shape — the user never picks one:
+   *   started on a node + moved  → polyline through the nodes crossed
+   *   started on empty + moved   → region enclosing the lassoed nodes
+   *   barely moved               → point
+   */
+  const finishDrawing = () => {
+    const raw = stroke()
+    const simplified = simplifyStroke(raw)
 
-    const label = pendingLabel() || (mode === 'boundary' ? 'New boundary' : 'New path')
-    if (mode === 'boundary') {
-      void addAnnotation('boundary', label, members)
-    } else if (mode === 'trace') {
-      const steps = members.map((semId, i) => ({
-        id: `step-${i}`,
-        label: `Step ${i + 1}`,
-        description: '',
-        architectureNodeId: semId,
-        stepKind: i === 0 ? ('entry' as const) : i === members.length - 1 ? ('exit' as const) : ('process' as const)
-      }))
-      const stepEdges = steps.slice(0, -1).map((s, i) => ({
-        from: s.id,
-        to: steps[i + 1].id,
-        label: null
-      }))
-      void addAnnotation('path', label, members, { steps, stepEdges })
+    // Total travel decides drag vs click, independent of sample count
+    let travel = 0
+    for (let i = 1; i < raw.length; i++) {
+      travel += Math.hypot(raw[i]![0] - raw[i - 1]![0], raw[i]![1] - raw[i - 1]![1])
+    }
+    const isDrag = travel > 8 / cam().zoom
+
+    const last = raw[raw.length - 1] ?? [0, 0]
+
+    if (!isDrag) {
+      // A tap — drop a point where the user clicked
+      setPendingAnnotation({
+        shape: 'point',
+        points: [],
+        anchor: { x: last[0], y: last[1] },
+        members: strokeNodes()
+      })
+    } else if (drawStartedOnNode) {
+      const members = strokeNodes()
+      setPendingAnnotation({
+        shape: 'polyline',
+        points: simplified,
+        anchor: { x: simplified[0]?.[0] ?? last[0], y: simplified[0]?.[1] ?? last[1] },
+        members
+      })
+    } else {
+      // Lasso — everything whose centre falls inside the closed outline
+      const captured = nodeCentres()
+        .filter((n) => pointInPolygon(n.x, n.y, simplified))
+        .map((n) => n.semId)
+      setPendingAnnotation({
+        shape: 'region',
+        points: simplified,
+        anchor: centroid(simplified),
+        members: captured
+      })
     }
 
-    setPendingMembers([])
-    setPendingLabel('')
+    isDrawing = false
+    drawStartedOnNode = false
+    setStroke([])
+    setStrokeNodes([])
+  }
+
+  /** Commit the pending shape under the kind the user typed. */
+  const commitPendingAnnotation = (kind: string, label: string) => {
+    const pending = pendingAnnotation()
+    if (!pending) return
+
+    const trimmedKind = kind.trim()
+    const finalLabel = label.trim() || trimmedKind || 'Untitled'
+
+    void addAnnotation(pending.shape, finalLabel, pending.members, {
+      kind: trimmedKind,
+      geometry: { points: pending.points, anchor: pending.anchor }
+    })
+
+    clearPendingAnnotation()
     setInteractionMode('select')
+  }
+
+  const cancelPendingAnnotation = () => {
+    clearPendingAnnotation()
+    setStroke([])
+    setStrokeNodes([])
+    isDrawing = false
+    drawStartedOnNode = false
   }
 
   const onMouseUp = (e: MouseEvent) => {
     if (e.button !== 0) return
+
+    if (isDrawing) {
+      finishDrawing()
+      return
+    }
+
     const wasPanning = isPanning && didPan
     isPanning = false
     didPan = false
@@ -616,10 +724,6 @@ export const GraphCanvas: Component = () => {
     const my = e.clientY - rect.top
     const { panX, panY, zoom } = cam()
     const hit = r3.hitTest(mx, my, panX, panY, zoom)
-    const wx = (mx - panX) / zoom
-    const wy = (my - panY) / zoom
-
-    if (handleAnnotationClick(hit, wx, wy)) return
 
     if (hit?.kind === 'node') {
       void selectNode(hit.id)
@@ -651,6 +755,72 @@ export const GraphCanvas: Component = () => {
         layoutNodes={layoutSnap()?.result.nodes ?? null}
         semanticToLayoutId={semanticToLayoutId()}
       />
+
+      {/* Live drawing stroke + committed-but-unnamed shape preview */}
+      <Show when={stroke().length > 1 || pendingAnnotation()}>
+        <svg class="absolute inset-0 w-full h-full pointer-events-none" style={{ 'z-index': 25 }}>
+          <g transform={`translate(${cam().panX}, ${cam().panY}) scale(${cam().zoom})`}>
+            {/* In-progress stroke */}
+            <Show when={stroke().length > 1}>
+              <polyline
+                points={stroke()
+                  .map(([x, y]) => `${x},${y}`)
+                  .join(' ')}
+                fill={drawStartedOnNode ? 'none' : 'rgba(59,130,246,0.08)'}
+                stroke="#3b82f6"
+                stroke-width={2 / cam().zoom}
+                stroke-dasharray={`${4 / cam().zoom} ${3 / cam().zoom}`}
+                stroke-linejoin="round"
+                stroke-linecap="round"
+                data-testid="draw-stroke"
+              />
+            </Show>
+
+            {/* Drawn shape awaiting a name */}
+            <Show when={pendingAnnotation()}>
+              {(p) => (
+                <Show
+                  when={p().shape !== 'point'}
+                  fallback={
+                    <circle cx={p().anchor.x} cy={p().anchor.y} r={7 / cam().zoom} fill="#3b82f6" fill-opacity="0.85" />
+                  }
+                >
+                  <polyline
+                    points={p()
+                      .points.map(([x, y]) => `${x},${y}`)
+                      .join(' ')}
+                    fill={p().shape === 'region' ? 'rgba(59,130,246,0.10)' : 'none'}
+                    stroke="#3b82f6"
+                    stroke-width={2.5 / cam().zoom}
+                    stroke-linejoin="round"
+                    stroke-linecap="round"
+                  />
+                </Show>
+              )}
+            </Show>
+          </g>
+        </svg>
+      </Show>
+
+      {/* Inline kind naming — appears at the shape anchor, never a modal */}
+      <Show when={pendingAnnotation()}>
+        {(p) => (
+          <KindInput
+            x={Math.max(
+              8,
+              Math.min(p().anchor.x * cam().zoom + cam().panX + 12, (wrapperRef?.clientWidth ?? 800) - 270)
+            )}
+            y={Math.max(
+              8,
+              Math.min(p().anchor.y * cam().zoom + cam().panY + 12, (wrapperRef?.clientHeight ?? 600) - 230)
+            )}
+            shape={p().shape}
+            memberCount={p().members.length}
+            onCommit={commitPendingAnnotation}
+            onCancel={cancelPendingAnnotation}
+          />
+        )}
+      </Show>
 
       {/* Layout loading spinner */}
       <Show when={isLayouting()}>
@@ -759,45 +929,20 @@ export const GraphCanvas: Component = () => {
         }}
       </Show>
 
-      {/* ── Annotation mode indicator ── */}
-      <Show when={interactionMode() !== 'select'}>
+      {/* ── Annotate mode hint ── */}
+      <Show when={interactionMode() === 'annotate' && !pendingAnnotation()}>
         <div
-          class="absolute bottom-3 left-1/2 -translate-x-1/2 z-40 flex items-center gap-2
-                    bg-gray-900/90 dark:bg-gray-800/90 text-white text-sm px-4 py-2 rounded-lg shadow-lg"
+          class="absolute bottom-3 left-1/2 -translate-x-1/2 z-40 flex items-center gap-3
+                    bg-gray-900/90 dark:bg-gray-800/90 text-white text-xs px-4 py-2 rounded-lg shadow-lg"
+          data-testid="annotate-hint"
         >
-          <span class="font-semibold">{MODE_LABELS[interactionMode()]}</span>
-          <Show when={interactionMode() === 'boundary' || interactionMode() === 'trace'}>
-            <span class="text-gray-400">
-              {pendingMembers().length} node{pendingMembers().length !== 1 ? 's' : ''} selected
-            </span>
-            <Show when={pendingMembers().length >= (interactionMode() === 'trace' ? 2 : 1)}>
-              <input
-                type="text"
-                class="bg-gray-700 text-white text-xs px-2 py-1 rounded w-28"
-                placeholder="Label…"
-                value={pendingLabel()}
-                onInput={(e) => setPendingLabel(e.currentTarget.value)}
-                onClick={(e) => e.stopPropagation()}
-                onMouseDown={(e) => e.stopPropagation()}
-              />
-              <button
-                class="bg-blue-600 hover:bg-blue-500 text-white text-xs px-3 py-1 rounded font-medium"
-                onClick={(e) => {
-                  e.stopPropagation()
-                  commitPendingAnnotation()
-                }}
-                onMouseDown={(e) => e.stopPropagation()}
-              >
-                Create
-              </button>
-            </Show>
-          </Show>
+          <span class="font-semibold">Annotate</span>
+          <span class="text-gray-400">drag empty space to enclose · drag from a node to trace · click to pin</span>
           <button
-            class="text-gray-400 hover:text-white text-xs ml-2"
+            class="text-gray-400 hover:text-white"
             onClick={(e) => {
               e.stopPropagation()
-              setPendingMembers([])
-              setPendingLabel('')
+              cancelPendingAnnotation()
               setInteractionMode('select')
             }}
             onMouseDown={(e) => e.stopPropagation()}

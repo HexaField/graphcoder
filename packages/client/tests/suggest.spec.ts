@@ -41,6 +41,7 @@ async function openProject(page: Page, projectPath = fixturePath): Promise<void>
 /** Poll GET /api/annotations until a proposed annotation appears. */
 async function waitForProposedAnnotation(timeoutMs = 15_000): Promise<{
   id: string
+  shape: string
   kind: string
   label: string
   status: string
@@ -113,7 +114,8 @@ test.describe('AI Suggest pipeline (Phase 3b)', () => {
     const proposed = await waitForProposedAnnotation()
     expect(proposed.status).toBe('proposed')
     expect(proposed.label).toBeTruthy()
-    expect(proposed.kind).toBe('boundary') // test provider always returns boundary
+    expect(proposed.shape).toBe('region') // test provider always returns a region
+    expect(proposed.kind).toBe('module') // free-form kind coined by the provider
     expect(proposed.description).toContain('AI-suggested boundary')
     expect(proposed.reasoning).toContain('Test provider')
   })
@@ -350,6 +352,7 @@ test.describe('AI Suggest pipeline (Phase 3b)', () => {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
+        shape: 'point',
         kind: 'note',
         label: 'Manual Note',
         members: [],
@@ -420,7 +423,7 @@ test.describe('AI Suggest pipeline (Phase 3b)', () => {
     // 2. Wait for proposal
     const proposed = await waitForProposedAnnotation()
     expect(proposed.status).toBe('proposed')
-    expect(proposed.kind).toBe('boundary')
+    expect(proposed.shape).toBe('region')
 
     // 3. Refine
     const refineRes = await fetch(`${SERVER}/api/annotations/${proposed.id}/refine`, {
@@ -448,6 +451,7 @@ test.describe('AI Suggest pipeline (Phase 3b)', () => {
     const final = (await getRes.json()) as {
       id: string
       status: string
+      shape: string
       kind: string
       description: string
       reasoning: string | null
@@ -455,7 +459,7 @@ test.describe('AI Suggest pipeline (Phase 3b)', () => {
     }
 
     expect(final.status).toBe('active')
-    expect(final.kind).toBe('boundary')
+    expect(final.shape).toBe('region')
     expect(final.description).toContain('Refined:')
     expect(final.reasoning).toBeTruthy()
     expect(final.members.length).toBeGreaterThan(0)

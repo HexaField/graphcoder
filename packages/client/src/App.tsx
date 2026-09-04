@@ -17,9 +17,14 @@ import {
   selectNode,
   sendViewRequest,
   state,
-  toggleGitBar
+  toggleGitBar,
+  undo,
+  redo,
+  loadKinds,
+  loadAnnotations
 } from './state/store.js'
-import { MODE_KEYS, setInteractionMode, toggleInteractionMode } from './state/interaction.js'
+import { setInteractionMode, toggleInteractionMode } from './state/interaction.js'
+import { CommandPalette } from './components/CommandPalette.js'
 // Import theme module to ensure the root-level createRoot runs on startup
 import './state/theme.js'
 
@@ -125,6 +130,7 @@ export default function App() {
   const [hierarchyOpen, setHierarchyOpen] = createSignal(!mobileMediaQuery.matches)
   const [filterOpen, setFilterOpen] = createSignal(!mobileMediaQuery.matches)
   const [annotationOpen, setAnnotationOpen] = createSignal(false)
+  const [paletteOpen, setPaletteOpen] = createSignal(false)
 
   // ── Resizable panel widths ─────────────────────────────────────────────────
   const [leftWidth, setLeftWidth] = createSignal(readLayoutSize('leftWidth', 240))
@@ -211,9 +217,25 @@ export default function App() {
     get annotations() {
       return state.annotations
     },
+    get kinds() {
+      return state.kinds
+    },
+    get hiddenKinds() {
+      return state.hiddenKinds
+    },
     selectNode,
-    clearDiff
+    clearDiff,
+    undo,
+    redo
   }
+
+  // Load the kind registry alongside annotations whenever a project opens
+  createEffect(() => {
+    if (state.projectRoot) {
+      void loadKinds()
+      void loadAnnotations()
+    }
+  })
 
   onMount(() => {
     connectWebSocket()
@@ -226,19 +248,33 @@ export default function App() {
 
     // ── Keyboard shortcuts ────────────────────────────────────────────────
     const handleKey = (e: KeyboardEvent) => {
+      const mod = e.metaKey || e.ctrlKey
+
+      // Command palette and undo/redo work even from inside inputs, the way
+      // they do in an IDE. Everything else yields to text entry.
+      if (mod && e.key.toLowerCase() === 'k') {
+        e.preventDefault()
+        setPaletteOpen((v) => !v)
+        return
+      }
+      if (mod && e.key.toLowerCase() === 'z') {
+        e.preventDefault()
+        if (e.shiftKey) void redo()
+        else void undo()
+        return
+      }
+
       // Skip when focus is in a text input / select / textarea.
       const tag = (e.target as HTMLElement).tagName
       if (tag === 'INPUT' || tag === 'SELECT' || tag === 'TEXTAREA') return
 
       const lower = e.key.toLowerCase()
 
+      // A enters draw mode — the primary annotation gesture.
+      // Shift+A toggles the annotation panel.
       if (lower === 'a') {
-        setAnnotationOpen((v) => !v)
-        return
-      }
-
-      if (lower in MODE_KEYS) {
-        toggleInteractionMode(MODE_KEYS[lower])
+        if (e.shiftKey) setAnnotationOpen((v) => !v)
+        else toggleInteractionMode('annotate')
         return
       }
 
@@ -248,6 +284,7 @@ export default function App() {
           if (state.fileNodes.length > 0) void toggleGitBar()
           break
         case 'Escape':
+          setPaletteOpen(false)
           setInteractionMode('select')
           if (hierarchyOpen() && isMobile()) {
             setHierarchyOpen(false)
@@ -415,6 +452,9 @@ export default function App() {
 
       {/* ── Bottom — diff panel (full width, outside middle row) ── */}
       <DiffPanel />
+
+      {/* ── Command palette (⌘K) ── */}
+      <CommandPalette open={paletteOpen()} onClose={() => setPaletteOpen(false)} />
     </div>
   )
 }

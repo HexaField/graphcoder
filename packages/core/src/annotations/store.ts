@@ -1,10 +1,10 @@
-import type { Annotation, AnnotationKind } from './types.js'
+import type { Annotation, AnnotationShape, Geometry, Point } from './types.js'
 import { readFileSync, writeFileSync, readdirSync, existsSync, mkdirSync, statSync, unlinkSync } from 'node:fs'
 import { join } from 'node:path'
 import { randomUUID } from 'node:crypto'
 
 const ANNOTATIONS_DIR = 'annotations'
-const SCHEMA_VERSION = 1
+const SCHEMA_VERSION = 2
 
 function annotationsDir(projectRoot: string): string {
   return join(projectRoot, '.graphcoder', ANNOTATIONS_DIR)
@@ -32,28 +32,24 @@ function canonicalStringify(obj: unknown): string {
 
 /** Create a new annotation with defaults filled in */
 export function createAnnotation(
-  kind: AnnotationKind,
+  shape: AnnotationShape,
   label: string,
   members: string[] = [],
-  opts: Partial<Omit<Annotation, 'id' | 'version' | 'kind' | 'createdAt' | 'updatedAt'>> = {}
+  opts: Partial<Omit<Annotation, 'id' | 'version' | 'shape' | 'createdAt' | 'updatedAt'>> = {}
 ): Annotation {
   const now = new Date().toISOString()
   return {
     id: randomUUID(),
     version: SCHEMA_VERSION,
-    kind,
+    shape,
+    kind: opts.kind ?? '',
     status: opts.status ?? 'active',
     label,
     description: opts.description ?? '',
     members,
-    steps: opts.steps ?? null,
-    stepEdges: opts.stepEdges ?? null,
-    projectedDiff: opts.projectedDiff ?? null,
-    dependencies: opts.dependencies ?? [],
-    resolution: opts.resolution ?? null,
+    geometry: opts.geometry ?? { points: [], anchor: { x: 0, y: 0 } },
     parentId: opts.parentId ?? null,
     childIds: opts.childIds ?? [],
-    anchor: opts.anchor ?? { x: 0, y: 0, memberLayout: null },
     author: opts.author ?? 'human',
     createdAt: now,
     updatedAt: now,
@@ -77,33 +73,103 @@ export function saveAnnotation(projectRoot: string, annotation: Annotation): voi
   writeFileSync(filePath, canonicalStringify(annotation) + '\n', 'utf-8')
 }
 
+// ── Migration ────────────────────────────────────────────────────────────────
+
+/** v1 kind → v2 shape. v1 kinds survive as the v2 free-form kind string. */
+const V1_KIND_TO_SHAPE: Record<string, AnnotationShape> = {
+  boundary: 'region',
+  projection: 'region',
+  path: 'polyline',
+  note: 'point',
+  question: 'point'
+}
+
+/** v1 statuses that no longer exist map onto the v2 set. */
+const V1_STATUS_MAP: Record<string, Annotation['status']> = {
+  draft: 'active',
+  active: 'active',
+  proposed: 'proposed',
+  stale: 'stale',
+  applied: 'active',
+  resolved: 'active',
+  dismissed: 'dismissed'
+}
+
 /**
- * Fill missing fields with safe defaults. Handles annotations persisted
- * before a schema change or hand-edited files with omitted fields.
+ * Migrate a v1 annotation to the v2 model.
+ *
+ * v1 carried the meaning in a fixed `kind` enum and split structure across
+ * `members`/`steps`/`anchor`. v2 puts structure in `shape` + `geometry` and
+ * keeps the old kind name as the user-defined kind, so nothing is lost.
  */
-function normalizeAnnotation(raw: Record<string, unknown>): Annotation {
+function migrateV1(raw: Record<string, unknown>): Record<string, unknown> {
+  const v1Kind = typeof raw.kind === 'string' ? raw.kind : 'note'
+  const shape = V1_KIND_TO_SHAPE[v1Kind] ?? 'point'
+
+  // v1 path annotations held ordered nodes in steps[].architectureNodeId.
+  // Prefer that ordering over the unordered members bag.
+  let members: string[] = Array.isArray(raw.members) ? (raw.members as string[]) : []
+  if (shape === 'polyline' && Array.isArray(raw.steps)) {
+    const stepMembers = (raw.steps as Array<Record<string, unknown>>)
+      .map((s) => s.architectureNodeId)
+      .filter((id): id is string => typeof id === 'string')
+    if (stepMembers.length > 0) members = stepMembers
+  }
+
+  // v1 anchor {x, y, memberLayout:{points}} → v2 geometry {points, anchor}
+  const anchor = raw.anchor as { x?: number; y?: number; memberLayout?: { points?: Point[] } } | undefined
+  const geometry: Geometry = {
+    points: Array.isArray(anchor?.memberLayout?.points) ? anchor.memberLayout.points : [],
+    anchor: { x: anchor?.x ?? 0, y: anchor?.y ?? 0 }
+  }
+
+  const v1Status = typeof raw.status === 'string' ? raw.status : 'active'
+
+  return {
+    ...raw,
+    version: SCHEMA_VERSION,
+    shape,
+    kind: v1Kind,
+    status: V1_STATUS_MAP[v1Status] ?? 'active',
+    members,
+    geometry
+  }
+}
+
+/**
+ * Fill missing fields with safe defaults and migrate older schema versions.
+ * Handles annotations persisted before a schema change and hand-edited files.
+ */
+function normalizeAnnotation(input: Record<string, unknown>): Annotation {
+  // Anything without a v2 shape field came from v1 (or was hand-written)
+  const raw = typeof input.shape === 'string' ? input : migrateV1(input)
+
+  const geometryRaw = raw.geometry as Partial<Geometry> | undefined
+  const anchorRaw = geometryRaw?.anchor as { x?: number; y?: number } | undefined
+
   return {
     id: (raw.id as string) ?? randomUUID(),
     version: (raw.version as number) ?? SCHEMA_VERSION,
-    kind: (raw.kind as Annotation['kind']) ?? 'note',
+    shape: (raw.shape as AnnotationShape) ?? 'point',
+    kind: typeof raw.kind === 'string' ? raw.kind : '',
     status: (raw.status as Annotation['status']) ?? 'active',
     label: (raw.label as string) ?? '',
     description: (raw.description as string) ?? '',
     members: Array.isArray(raw.members) ? (raw.members as string[]) : [],
-    steps: (raw.steps as Annotation['steps']) ?? null,
-    stepEdges: (raw.stepEdges as Annotation['stepEdges']) ?? null,
-    projectedDiff: (raw.projectedDiff as Annotation['projectedDiff']) ?? null,
-    dependencies: Array.isArray(raw.dependencies) ? (raw.dependencies as string[]) : [],
-    resolution: (raw.resolution as string) ?? null,
+    geometry: {
+      points: Array.isArray(geometryRaw?.points) ? (geometryRaw.points as Point[]) : [],
+      anchor: { x: anchorRaw?.x ?? 0, y: anchorRaw?.y ?? 0 }
+    },
     parentId: (raw.parentId as string) ?? null,
     childIds: Array.isArray(raw.childIds) ? (raw.childIds as string[]) : [],
-    anchor: (raw.anchor as Annotation['anchor']) ?? { x: 0, y: 0, memberLayout: null },
     author: (raw.author as Annotation['author']) ?? 'human',
     createdAt: (raw.createdAt as string) ?? new Date().toISOString(),
     updatedAt: (raw.updatedAt as string) ?? new Date().toISOString(),
     reasoning: (raw.reasoning as string) ?? null
   }
 }
+
+// ── Load / delete ────────────────────────────────────────────────────────────
 
 /** Load a single annotation by ID */
 export function loadAnnotation(projectRoot: string, id: string): Annotation | null {
@@ -117,7 +183,7 @@ export function loadAnnotation(projectRoot: string, id: string): Annotation | nu
 export function loadAllAnnotations(projectRoot: string): Annotation[] {
   const dir = annotationsDir(projectRoot)
   if (!existsSync(dir)) return []
-  const files = readdirSync(dir).filter((f) => f.endsWith('.json'))
+  const files = readdirSync(dir).filter((f) => f.endsWith('.json') && !f.endsWith('.conversation.json'))
   const annotations: Annotation[] = []
   for (const file of files) {
     try {

@@ -9,7 +9,11 @@ import {
   loadAllAnnotations,
   deleteAnnotation,
   buildPathFromNodes,
-  loadConversation
+  loadConversation,
+  ensureKind,
+  updateKind,
+  deleteKind,
+  syncKindsFromAnnotations
 } from '@graphcoder/core/annotations/server'
 import { graphService } from '../codegraph/service.js'
 import {
@@ -18,7 +22,12 @@ import {
   broadcastAnnotationRefined,
   broadcastSuggestError
 } from '../ws.js'
-import { createAnnotationSchema, updateAnnotationSchema } from '../schemas/annotations.js'
+import {
+  createAnnotationSchema,
+  updateAnnotationSchema,
+  createKindSchema,
+  updateKindSchema
+} from '../schemas/annotations.js'
 import type { Node } from '@colbymchenry/codegraph'
 
 const router = Router()
@@ -41,6 +50,107 @@ router.get('/suggest/providers', async (_req: Request, res: Response) => {
     res.status(500).json({ error: err instanceof Error ? err.message : 'Discovery failed' })
   }
 })
+
+// ── Kind registry ────────────────────────────────────────────────────────────
+
+// GET /annotation-kinds — list user-defined kinds, reconciled with usage
+router.get('/annotation-kinds', (_req: Request, res: Response) => {
+  const root = getProjectRoot(res)
+  if (!root) return
+
+  try {
+    // Register any kind found on an annotation but missing from the registry,
+    // so hand-edited files and AI-coined kinds still get a stable colour.
+    const used = loadAllAnnotations(root)
+      .map((a) => a.kind)
+      .filter((k) => k.length > 0)
+    const kinds = syncKindsFromAnnotations(root, used)
+    res.json({ kinds })
+  } catch (err) {
+    res.status(500).json({ error: err instanceof Error ? err.message : 'Failed to load kinds' })
+  }
+})
+
+// POST /annotation-kinds — register a kind (idempotent)
+router.post('/annotation-kinds', (req: Request, res: Response) => {
+  const root = getProjectRoot(res)
+  if (!root) return
+
+  const parsed = createKindSchema.safeParse(req.body)
+  if (!parsed.success) {
+    res.status(400).json({ error: parsed.error.message })
+    return
+  }
+
+  try {
+    const kind = ensureKind(root, parsed.data.name, parsed.data.description ?? '')
+    if (!kind) {
+      res.status(400).json({ error: 'Kind name cannot be blank' })
+      return
+    }
+    broadcastAnnotationUpdate()
+    res.status(201).json(kind)
+  } catch (err) {
+    res.status(500).json({ error: err instanceof Error ? err.message : 'Failed to create kind' })
+  }
+})
+
+// PATCH /annotation-kinds/:name — rename, recolour, or describe
+router.patch('/annotation-kinds/:name', (req: Request, res: Response) => {
+  const root = getProjectRoot(res)
+  if (!root) return
+
+  const parsed = updateKindSchema.safeParse(req.body)
+  if (!parsed.success) {
+    res.status(400).json({ error: parsed.error.message })
+    return
+  }
+
+  try {
+    const oldName = req.params.name
+    const updated = updateKind(root, oldName, parsed.data)
+    if (!updated) {
+      res.status(404).json({ error: `Kind "${oldName}" not found, blank, or name already taken` })
+      return
+    }
+
+    // A rename must carry every annotation of that kind with it
+    if (parsed.data.name !== undefined && parsed.data.name !== oldName) {
+      const key = oldName.trim().toLowerCase()
+      for (const ann of loadAllAnnotations(root)) {
+        if (ann.kind.trim().toLowerCase() === key) {
+          ann.kind = updated.name
+          saveAnnotation(root, ann)
+        }
+      }
+    }
+
+    broadcastAnnotationUpdate()
+    res.json(updated)
+  } catch (err) {
+    res.status(500).json({ error: err instanceof Error ? err.message : 'Failed to update kind' })
+  }
+})
+
+// DELETE /annotation-kinds/:name — unregister; annotations keep the string
+router.delete('/annotation-kinds/:name', (req: Request, res: Response) => {
+  const root = getProjectRoot(res)
+  if (!root) return
+
+  try {
+    const found = deleteKind(root, req.params.name)
+    if (!found) {
+      res.status(404).json({ error: `Kind "${req.params.name}" not found` })
+      return
+    }
+    broadcastAnnotationUpdate()
+    res.json({ success: true })
+  } catch (err) {
+    res.status(500).json({ error: err instanceof Error ? err.message : 'Failed to delete kind' })
+  }
+})
+
+// ── Annotations ──────────────────────────────────────────────────────────────
 
 // GET /annotations
 router.get('/annotations', (_req: Request, res: Response) => {
@@ -84,9 +194,11 @@ router.post('/annotations', (req: Request, res: Response) => {
   }
 
   try {
-    const { kind, label, members, ...opts } = parsed.data
-    const annotation = createAnnotation(kind, label, members, opts)
+    const { shape, label, members, ...opts } = parsed.data
+    const annotation = createAnnotation(shape, label, members, opts)
     saveAnnotation(root, annotation)
+    // Typing a new kind name registers it — this is how kinds come into being
+    if (annotation.kind) ensureKind(root, annotation.kind)
     broadcastAnnotationUpdate()
     res.status(201).json(annotation)
   } catch (err) {
@@ -115,6 +227,8 @@ router.patch('/annotations/:id', (req: Request, res: Response) => {
     const updates = parsed.data
     const updated = { ...existing, ...updates }
     saveAnnotation(root, updated)
+    // Re-kinding an annotation registers the new kind
+    if (updates.kind) ensureKind(root, updates.kind)
     broadcastAnnotationUpdate()
     res.json(updated)
   } catch (err) {
@@ -207,16 +321,7 @@ router.get('/annotations/extract-path', (req: Request, res: Response) => {
 
     const pathNodes = pathIds.map((id) => cg.getNode(id)).filter((n): n is Node => n !== null) as unknown as GraphNode[]
 
-    const { edges: allEdges } = graphService.getAllNodesAndEdges()
-    const pathIdSet = new Set(pathIds)
-    const pathEdges = allEdges.filter((e) => {
-      if (!pathIdSet.has(e.source) || !pathIdSet.has(e.target)) return false
-      const si = pathIds.indexOf(e.source)
-      const ti = pathIds.indexOf(e.target)
-      return Math.abs(si - ti) === 1
-    })
-
-    const extracted = buildPathFromNodes(pathNodes, pathEdges)
+    const extracted = buildPathFromNodes(pathNodes)
     res.json({ found: true, path: extracted })
   } catch (err) {
     res.status(500).json({ error: err instanceof Error ? err.message : 'Path extraction failed' })

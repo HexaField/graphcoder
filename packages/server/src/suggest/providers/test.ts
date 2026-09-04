@@ -20,7 +20,8 @@ export class TestProvider implements AIProvider {
     const response: AISuggestResponse = {
       annotations: [
         {
-          kind: 'boundary',
+          shape: 'region',
+          kind: 'module',
           label: context.label,
           description: `AI-suggested boundary for: ${context.prompt}`,
           nodeRefs,
@@ -48,7 +49,8 @@ export class TestProvider implements AIProvider {
     const response: AISuggestResponse = {
       annotations: [
         {
-          kind: 'boundary',
+          shape: 'region',
+          kind: 'module',
           label: context.label,
           description: `Refined: ${req.userMessage}`,
           nodeRefs,
