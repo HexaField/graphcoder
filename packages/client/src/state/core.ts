@@ -9,6 +9,8 @@ import type { HierarchyState } from './hierarchy.js'
 import type { ProjectState } from './project.js'
 import type { SearchState } from './search.js'
 import type { SelectionState } from './selection.js'
+import type { AnnotationsState } from './annotations.js'
+import { annotationsInitial } from './annotations.js'
 import type { TemporalState } from './temporal.js'
 import { temporalInitial } from './temporal.js'
 
@@ -25,7 +27,8 @@ export type AppState = ProjectState &
   DiffState &
   SearchState &
   HierarchyState &
-  TemporalState
+  TemporalState &
+  AnnotationsState
 
 const _saved = loadFilters()
 const _savedHierarchy = loadHierarchy()
@@ -83,5 +86,8 @@ export const [state, setState] = createStore<AppState>({
   expandedGroups: _savedHierarchy.expandedGroups ?? [],
 
   // Temporal (git history bar + commit-range diff)
-  ...temporalInitial
+  ...temporalInitial,
+
+  // Annotations
+  ...annotationsInitial
 })

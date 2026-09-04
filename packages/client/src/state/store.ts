@@ -77,5 +77,22 @@ export {
 } from './temporal.js'
 export type { TemporalRange, TemporalState } from './temporal.js'
 
+// Section: Annotations
+export {
+  addAnnotation,
+  loadAnnotations,
+  patchAnnotation,
+  removeAnnotation,
+  selectAnnotation,
+  requestSuggest,
+  removeSuggestingId,
+  startRefinement,
+  stopRefinement,
+  sendRefinement,
+  acceptAnnotation,
+  dismissAnnotation
+} from './annotations.js'
+export type { AnnotationsState } from './annotations.js'
+
 // Utilities
 export { syncUrlParams } from './url.js'

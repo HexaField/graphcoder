@@ -30,10 +30,20 @@ import {
 import type { FileGroup, GraphNode } from '@graphcoder/core'
 import { nodeSemanticId } from '@graphcoder/core'
 import { layoutGraph, type LayoutResult } from '../layout/elk.js'
-import { addGroupExpanded, clearFocus, collapseGroup, selectNode, state } from '../state/store.js'
+import {
+  addAnnotation,
+  addGroupExpanded,
+  clearFocus,
+  collapseGroup,
+  loadAnnotations,
+  selectNode,
+  state
+} from '../state/store.js'
+import { interactionMode, setInteractionMode, MODE_LABELS } from '../state/interaction.js'
 import { resolvedTheme } from '../state/theme.js'
 import type { DiffOverlay, HitResult } from './ThreeRenderer.js'
 import { ThreeRenderer } from './ThreeRenderer.js'
+import { AnnotationOverlay } from './AnnotationOverlay.js'
 
 /** Layout result paired with the node lookup used to produce it.
  *  Keeping them together prevents rendering with a mismatched (layout, nodeById)
@@ -89,6 +99,14 @@ export const GraphCanvas: Component = () => {
   let pendingAnchor: ContainerAnchor | null = null
 
   // ── Reactive memos ──────────────────────────────────────────────────────────
+
+  const semanticToLayoutId = createMemo(() => {
+    const map = new Map<string, string>()
+    for (const n of state.viewNodes) {
+      map.set(nodeSemanticId(n), n.id)
+    }
+    return map
+  })
 
   const diffOverlay = createMemo((): DiffOverlay => {
     const emptyCS = new Map<string, 'added' | 'removed' | 'modified' | 'mixed'>()
@@ -394,6 +412,7 @@ export const GraphCanvas: Component = () => {
     renderer.render()
 
     setRendererReady(true)
+    void loadAnnotations()
 
     // ── ResizeObserver ──────────────────────────────────────────────────────
     const ro = new ResizeObserver((entries) => {
@@ -410,6 +429,9 @@ export const GraphCanvas: Component = () => {
   })
 
   // ── Pan / zoom ──────────────────────────────────────────────────────────────
+
+  const [pendingMembers, setPendingMembers] = createSignal<string[]>([])
+  const [pendingLabel, setPendingLabel] = createSignal('')
 
   let isPanning = false
   let panStart = { x: 0, y: 0 }
@@ -518,7 +540,68 @@ export const GraphCanvas: Component = () => {
     setTooltipData(null)
   }
 
-  // ── Click: select node or toggle container expand ───────────────────────────
+  // ── Click: select node, toggle container, or create annotations ────────────
+
+  const handleAnnotationClick = (hit: HitResult | null, wx: number, wy: number) => {
+    const mode = interactionMode()
+    if (mode === 'select') return false
+
+    if (mode === 'note' || mode === 'question') {
+      const members: string[] = []
+      if (hit?.kind === 'node') {
+        const gn = layoutSnap()?.nodeById.get(hit.id)
+        if (gn) members.push(nodeSemanticId(gn))
+      }
+      const label = mode === 'note' ? 'New note' : 'New question'
+      void addAnnotation(mode, label, members, {
+        anchor: { x: wx, y: wy, memberLayout: null }
+      })
+      setInteractionMode('select')
+      return true
+    }
+
+    if (mode === 'boundary' || mode === 'trace') {
+      if (hit?.kind === 'node') {
+        const gn = layoutSnap()?.nodeById.get(hit.id)
+        if (gn) {
+          const semId = nodeSemanticId(gn)
+          setPendingMembers((prev) => (prev.includes(semId) ? prev : [...prev, semId]))
+        }
+      }
+      return true
+    }
+
+    return false
+  }
+
+  const commitPendingAnnotation = () => {
+    const members = pendingMembers()
+    const mode = interactionMode()
+    if (members.length === 0) return
+
+    const label = pendingLabel() || (mode === 'boundary' ? 'New boundary' : 'New path')
+    if (mode === 'boundary') {
+      void addAnnotation('boundary', label, members)
+    } else if (mode === 'trace') {
+      const steps = members.map((semId, i) => ({
+        id: `step-${i}`,
+        label: `Step ${i + 1}`,
+        description: '',
+        architectureNodeId: semId,
+        stepKind: i === 0 ? ('entry' as const) : i === members.length - 1 ? ('exit' as const) : ('process' as const)
+      }))
+      const stepEdges = steps.slice(0, -1).map((s, i) => ({
+        from: s.id,
+        to: steps[i + 1].id,
+        label: null
+      }))
+      void addAnnotation('path', label, members, { steps, stepEdges })
+    }
+
+    setPendingMembers([])
+    setPendingLabel('')
+    setInteractionMode('select')
+  }
 
   const onMouseUp = (e: MouseEvent) => {
     if (e.button !== 0) return
@@ -533,12 +616,14 @@ export const GraphCanvas: Component = () => {
     const my = e.clientY - rect.top
     const { panX, panY, zoom } = cam()
     const hit = r3.hitTest(mx, my, panX, panY, zoom)
+    const wx = (mx - panX) / zoom
+    const wy = (my - panY) / zoom
+
+    if (handleAnnotationClick(hit, wx, wy)) return
 
     if (hit?.kind === 'node') {
       void selectNode(hit.id)
     } else {
-      // Containers: expand/collapse is handled exclusively by the HTML button
-      // overlay (below). Clicking the body just clears selection.
       clearFocus()
     }
   }
@@ -558,6 +643,14 @@ export const GraphCanvas: Component = () => {
       onMouseLeave={onMouseLeave}
     >
       <canvas ref={canvasRef} class="w-full h-full block" data-testid="graph-webgl-canvas" />
+
+      <AnnotationOverlay
+        panX={cam().panX}
+        panY={cam().panY}
+        zoom={cam().zoom}
+        layoutNodes={layoutSnap()?.result.nodes ?? null}
+        semanticToLayoutId={semanticToLayoutId()}
+      />
 
       {/* Layout loading spinner */}
       <Show when={isLayouting()}>
@@ -664,6 +757,54 @@ export const GraphCanvas: Component = () => {
             </div>
           )
         }}
+      </Show>
+
+      {/* ── Annotation mode indicator ── */}
+      <Show when={interactionMode() !== 'select'}>
+        <div
+          class="absolute bottom-3 left-1/2 -translate-x-1/2 z-40 flex items-center gap-2
+                    bg-gray-900/90 dark:bg-gray-800/90 text-white text-sm px-4 py-2 rounded-lg shadow-lg"
+        >
+          <span class="font-semibold">{MODE_LABELS[interactionMode()]}</span>
+          <Show when={interactionMode() === 'boundary' || interactionMode() === 'trace'}>
+            <span class="text-gray-400">
+              {pendingMembers().length} node{pendingMembers().length !== 1 ? 's' : ''} selected
+            </span>
+            <Show when={pendingMembers().length >= (interactionMode() === 'trace' ? 2 : 1)}>
+              <input
+                type="text"
+                class="bg-gray-700 text-white text-xs px-2 py-1 rounded w-28"
+                placeholder="Label…"
+                value={pendingLabel()}
+                onInput={(e) => setPendingLabel(e.currentTarget.value)}
+                onClick={(e) => e.stopPropagation()}
+                onMouseDown={(e) => e.stopPropagation()}
+              />
+              <button
+                class="bg-blue-600 hover:bg-blue-500 text-white text-xs px-3 py-1 rounded font-medium"
+                onClick={(e) => {
+                  e.stopPropagation()
+                  commitPendingAnnotation()
+                }}
+                onMouseDown={(e) => e.stopPropagation()}
+              >
+                Create
+              </button>
+            </Show>
+          </Show>
+          <button
+            class="text-gray-400 hover:text-white text-xs ml-2"
+            onClick={(e) => {
+              e.stopPropagation()
+              setPendingMembers([])
+              setPendingLabel('')
+              setInteractionMode('select')
+            }}
+            onMouseDown={(e) => e.stopPropagation()}
+          >
+            Esc
+          </button>
+        </div>
       </Show>
     </div>
   )

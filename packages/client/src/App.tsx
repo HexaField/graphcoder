@@ -1,5 +1,6 @@
 import { createEffect, createSignal, onCleanup, onMount, Show } from 'solid-js'
 import { GraphCanvas } from './canvas/GraphCanvas.js'
+import { AnnotationPanel } from './components/AnnotationPanel.js'
 import { DiffPanel } from './components/DiffPanel.js'
 import { GitGraph } from './components/GitGraph.js'
 import { GraphParamsPanel } from './components/GraphParamsPanel.js'
@@ -18,6 +19,7 @@ import {
   state,
   toggleGitBar
 } from './state/store.js'
+import { MODE_KEYS, setInteractionMode, toggleInteractionMode } from './state/interaction.js'
 // Import theme module to ensure the root-level createRoot runs on startup
 import './state/theme.js'
 
@@ -122,6 +124,7 @@ export default function App() {
   const [isMobile, setIsMobile] = createSignal(mobileMediaQuery.matches)
   const [hierarchyOpen, setHierarchyOpen] = createSignal(!mobileMediaQuery.matches)
   const [filterOpen, setFilterOpen] = createSignal(!mobileMediaQuery.matches)
+  const [annotationOpen, setAnnotationOpen] = createSignal(false)
 
   // ── Resizable panel widths ─────────────────────────────────────────────────
   const [leftWidth, setLeftWidth] = createSignal(readLayoutSize('leftWidth', 240))
@@ -205,6 +208,9 @@ export default function App() {
     get error() {
       return state.error
     },
+    get annotations() {
+      return state.annotations
+    },
     selectNode,
     clearDiff
   }
@@ -224,12 +230,25 @@ export default function App() {
       const tag = (e.target as HTMLElement).tagName
       if (tag === 'INPUT' || tag === 'SELECT' || tag === 'TEXTAREA') return
 
+      const lower = e.key.toLowerCase()
+
+      if (lower === 'a') {
+        setAnnotationOpen((v) => !v)
+        return
+      }
+
+      if (lower in MODE_KEYS) {
+        toggleInteractionMode(MODE_KEYS[lower])
+        return
+      }
+
       switch (e.key) {
         case 'H':
         case 'h':
           if (state.fileNodes.length > 0) void toggleGitBar()
           break
         case 'Escape':
+          setInteractionMode('select')
           if (hierarchyOpen() && isMobile()) {
             setHierarchyOpen(false)
           } else if (filterOpen() && isMobile()) {
@@ -288,15 +307,34 @@ export default function App() {
       <div class="flex flex-1 overflow-hidden min-h-0 relative">
         {/* Left panel — inline on desktop, fixed overlay on mobile */}
         <Show when={!isMobile()}>
-          <Show when={hierarchyOpen()}>
-            <div class="flex-shrink-0 overflow-hidden" style={{ width: `${leftWidth()}px` }}>
-              <HierarchyPanel />
+          <Show when={hierarchyOpen() || annotationOpen()}>
+            <div class="flex-shrink-0 overflow-hidden flex flex-col" style={{ width: `${leftWidth()}px` }}>
+              <Show when={hierarchyOpen()}>
+                <div class={annotationOpen() ? "flex-1 min-h-0 overflow-hidden" : "flex-1 overflow-hidden"}>
+                  <HierarchyPanel />
+                </div>
+              </Show>
+              <Show when={annotationOpen()}>
+                <Show when={hierarchyOpen()}>
+                  <div class="h-px bg-gray-200 dark:bg-gray-700 flex-shrink-0" />
+                </Show>
+                <div class={hierarchyOpen() ? "h-[40%] min-h-[120px] overflow-hidden" : "flex-1 overflow-hidden"}>
+                  <AnnotationPanel />
+                </div>
+              </Show>
             </div>
           </Show>
           <DrawerToggle
             side="left"
-            open={hierarchyOpen()}
-            onToggle={() => setHierarchyOpen((v) => !v)}
+            open={hierarchyOpen() || annotationOpen()}
+            onToggle={() => {
+              if (hierarchyOpen() || annotationOpen()) {
+                setHierarchyOpen(false)
+                setAnnotationOpen(false)
+              } else {
+                setHierarchyOpen(true)
+              }
+            }}
             currentWidth={leftWidth()}
             onResize={setLeftWidth}
           />

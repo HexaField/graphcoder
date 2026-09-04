@@ -87,3 +87,57 @@ export function broadcastGraphUpdate(): void {
     }
   }
 }
+
+/**
+ * Notify all connected clients that annotations changed.
+ * Clients refetch the full annotation list on receipt.
+ */
+export function broadcastAnnotationUpdate(): void {
+  if (!wss) return
+
+  const msg = JSON.stringify({ type: 'annotations_changed' })
+  for (const [client] of clientParams) {
+    if (client.readyState === WebSocket.OPEN) {
+      client.send(msg)
+    }
+  }
+}
+
+/**
+ * Notify clients that an AI annotation proposal has arrived.
+ */
+export function broadcastAnnotationProposed(id: string, label: string): void {
+  if (!wss) return
+  const msg = JSON.stringify({ type: 'annotation_proposed', id, label })
+  for (const [client] of clientParams) {
+    if (client.readyState === WebSocket.OPEN) {
+      client.send(msg)
+    }
+  }
+}
+
+/**
+ * Notify clients that a proposed annotation was refined.
+ */
+export function broadcastAnnotationRefined(id: string): void {
+  if (!wss) return
+  const msg = JSON.stringify({ type: 'annotation_refined', id })
+  for (const [client] of clientParams) {
+    if (client.readyState === WebSocket.OPEN) {
+      client.send(msg)
+    }
+  }
+}
+
+/**
+ * Notify clients that a suggest request failed.
+ */
+export function broadcastSuggestError(requestId: string, error: string): void {
+  if (!wss) return
+  const msg = JSON.stringify({ type: 'suggest_error', requestId, error })
+  for (const [client] of clientParams) {
+    if (client.readyState === WebSocket.OPEN) {
+      client.send(msg)
+    }
+  }
+}

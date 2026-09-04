@@ -2,6 +2,7 @@ import type { FileGroup, GraphEdge, GraphNode, ProjectStats, ViewParams } from '
 import { batch } from 'solid-js'
 import * as api from '../api/graph.js'
 import { state, setState } from './core.js'
+import { loadAnnotations } from './annotations.js'
 import { recomputeDiff } from './diff.js'
 import { loadFilters, loadHierarchy } from './storage.js'
 import { syncUrlParams } from './url.js'
@@ -196,6 +197,8 @@ export function connectWebSocket(): void {
           edges?: GraphEdge[]
           groups?: FileGroup[]
           fileNodes?: GraphNode[]
+          id?: string
+          label?: string
         }
 
         if (data.type === 'view_snapshot') {
@@ -221,6 +224,20 @@ export function connectWebSocket(): void {
             })
             recomputeDiff(data.nodes ?? state.viewNodes, data.edges ?? state.viewEdges)
           }
+        }
+
+        if (data.type === 'annotations_changed') {
+          void loadAnnotations()
+        }
+
+        if (data.type === 'annotation_proposed') {
+          // A new AI proposal arrived — reload annotations
+          void loadAnnotations()
+        }
+
+        if (data.type === 'annotation_refined') {
+          // A proposal was refined — reload annotations
+          void loadAnnotations()
         }
 
         if (data.type === 'hierarchy_snapshot') {

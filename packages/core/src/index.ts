@@ -153,6 +153,25 @@ export interface SearchResultItem {
 /** Layout flow direction for the canvas. LR = left-to-right, TB = top-to-bottom. */
 export type GraphDirection = 'LR' | 'TB'
 
+// Annotations — types only (store/resolve/extract use node:fs/node:crypto, server-only)
+export type {
+  Annotation,
+  AnnotationKind,
+  AnnotationStatus,
+  PathStep,
+  StepEdge,
+  StepKind,
+  AnnotationAnchor,
+  ConversationTurn,
+  ConversationLog,
+  NodeRef,
+  NodeRefResolution,
+  AISuggestResponse,
+  AISuggestedAnnotation
+} from './annotations/types.js'
+export type { ResolutionResult } from './annotations/resolve.js'
+export type { ExtractedPath } from './annotations/extract.js'
+
 export { buildDiffIdMap, normalizeSignature, nodeSemanticId, semanticId } from './identity.js'
 export type { FileGroup, ViewParams, ViewResult } from './view.js'
 export { computeView, DEFAULT_VIEW_PARAMS, globToRegex } from './view.js'

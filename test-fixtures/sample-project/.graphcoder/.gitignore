@@ -1,4 +1,7 @@
-# GraphCoder data files — local to each machine, not for committing.
-# Ignore everything in .graphcoder/ except this file itself.
-*
-!.gitignore
+# GraphCoder — SQLite caches stay local, annotations get committed.
+temporal.sqlite
+temporal.sqlite-wal
+temporal.sqlite-shm
+
+# Test fixture — annotations created by e2e tests are transient.
+annotations/
