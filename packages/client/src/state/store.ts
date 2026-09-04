@@ -58,6 +58,7 @@ export {
   collapseGroup,
   expandAllGroups,
   setHiddenPaths,
+  showHierarchySubtree,
   toggleGroupExpanded,
   toggleHierarchyHidden
 } from './hierarchy.js'

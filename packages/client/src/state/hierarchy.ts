@@ -44,6 +44,27 @@ export function setHiddenPaths(paths: string[]): void {
   persist()
 }
 
+/**
+ * Make a path and everything beneath it visible.
+ *
+ * Visibility cascades by prefix, so three groups of keys have to go:
+ *   - the key itself
+ *   - every descendant hidden in its own right
+ *   - every ancestor, whose hidden state would otherwise keep cascading down
+ *     over the top of the subtree we just revealed
+ *
+ * Dropping an ancestor also reveals that ancestor's other branches, since the
+ * cascade offers no way to hide a parent while showing one child. This mirrors
+ * collapseGroup, which accepts the same trade-off in the other direction.
+ */
+export function showHierarchySubtree(key: string): void {
+  setState('hiddenPaths', (prev) => {
+    const prefix = key + '/'
+    return prev.filter((k) => k !== key && !k.startsWith(prefix) && !key.startsWith(k + '/'))
+  })
+  persist()
+}
+
 /** Remove all hierarchy visibility overrides. */
 export function clearHierarchyHidden(): void {
   setState('hiddenPaths', [])

@@ -913,6 +913,79 @@ test.describe('Hierarchy — Show all children', () => {
     await expect(page.locator('[data-nodeid="src/core/engine/internals/rotor.ts"]')).toBeVisible()
   })
 
+  test('unhides the whole subtree, not just expands it', async ({ page }) => {
+    await page.goto('/')
+    await openProjectPath(page, fixtureNested)
+
+    // Hide everything, then ask for one subtree back
+    await page.locator('button', { hasText: 'hide all' }).click()
+    await expect
+      .poll(async () => page.evaluate(() => (window as any).__graphcoder.hiddenPaths.length))
+      .toBeGreaterThan(0)
+
+    await chooseMenuItem(page, 'src', 'Show all children')
+
+    // Nothing at or beneath src may remain hidden — an expanded but dimmed
+    // tree over an empty canvas was the original complaint.
+    const hidden = await page.evaluate(() => (window as any).__graphcoder.hiddenPaths as string[])
+    for (const key of hidden) {
+      expect(key === 'src' || key.startsWith('src/'), `"${key}" should not still be hidden`).toBe(false)
+    }
+
+    // The graph must actually have content again
+    await page.waitForFunction(
+      () => {
+        const gc = (window as any).__graphcoder
+        return gc.viewNodes.length > 0 || gc.viewGroups.length > 0
+      },
+      { timeout: 30_000 }
+    )
+  })
+
+  test('a hidden nested folder becomes visible, not merely unfolded', async ({ page }) => {
+    await page.goto('/')
+    await openProjectPath(page, fixtureNested)
+
+    // Reveal the tree, then hide one deep branch on its own
+    await chooseMenuItem(page, 'src', 'Show all children')
+    await expect(page.locator('[data-nodeid="src/core/engine"]')).toBeVisible()
+
+    await chooseMenuItem(page, 'src/core/engine', 'Hide from graph')
+    await expect
+      .poll(async () =>
+        page.evaluate(() => ((window as any).__graphcoder.hiddenPaths as string[]).includes('src/core/engine'))
+      )
+      .toBe(true)
+
+    // Asking for that branch back must clear it and everything under it
+    await chooseMenuItem(page, 'src/core/engine', 'Show all children')
+
+    const hidden = await page.evaluate(() => (window as any).__graphcoder.hiddenPaths as string[])
+    expect(hidden).not.toContain('src/core/engine')
+    expect(hidden.some((k) => k.startsWith('src/core/engine/'))).toBe(false)
+  })
+
+  test('a hidden ancestor cannot keep the chosen subtree invisible', async ({ page }) => {
+    await page.goto('/')
+    await openProjectPath(page, fixtureNested)
+
+    await chooseMenuItem(page, 'src', 'Show all children')
+    await expect(page.locator('[data-nodeid="src/core"]')).toBeVisible()
+
+    // Hide the parent — the cascade now covers everything below it
+    await chooseMenuItem(page, 'src', 'Hide from graph')
+    await expect
+      .poll(async () => page.evaluate(() => ((window as any).__graphcoder.hiddenPaths as string[]).includes('src')))
+      .toBe(true)
+
+    // Showing a descendant has to lift the ancestor too, or nothing appears
+    await chooseMenuItem(page, 'src/core', 'Show all children')
+
+    const hidden = await page.evaluate(() => (window as any).__graphcoder.hiddenPaths as string[])
+    expect(hidden).not.toContain('src')
+    expect(hidden).not.toContain('src/core')
+  })
+
   test('graph groups expand alongside the sidebar', async ({ page }) => {
     await page.goto('/')
     await openProjectPath(page, fixtureNested)

@@ -7,6 +7,7 @@ import {
   globToRegex,
   setExcludePatterns,
   setHiddenPaths,
+  showHierarchySubtree,
   state,
   toggleGroupExpanded,
   toggleHierarchyHidden
@@ -657,23 +658,32 @@ export const HierarchyPanel: Component = () => {
   }
 
   /**
-   * "Show all children" — reveal everything beneath a path on both surfaces.
+   * "Show all children" — reveal everything beneath a path.
    *
-   * The sidebar tree and the graph keep separate expansion state, and this
-   * action has to move both: expanding graph groups while leaving the tree
-   * collapsed looks like nothing happened in the panel the menu came from.
+   * Three independent pieces of state gate what the user actually sees, and
+   * the action is only complete when all three move together:
    *
-   * Sidebar expansion must be recursive — every nested directory, not just
-   * the one clicked. The graph side needs only the single prefix, since the
-   * server prefix-matches expandedGroups against each file path.
+   *   hiddenPaths     whether the subtree is visible at all. Cascades by
+   *                   prefix, so a hidden ancestor keeps children invisible
+   *                   however they are expanded.
+   *   expandedSet     which sidebar rows are unfolded. Must be applied to
+   *                   every nested directory, not just the one clicked.
+   *   expandedGroups  whether graph containers show their symbols. The
+   *                   server prefix-matches this, so one entry suffices.
+   *
+   * Unhiding comes first: expanding rows while the subtree stays hidden just
+   * produces a fully unfolded tree of dimmed rows over an empty canvas.
    */
   function showAllChildren(path: string): void {
+    showHierarchySubtree(path)
+
     const keys = collectSubtreeKeys(tree(), path)
     setExpandedSet((prev) => {
       const next = new Set(prev)
       for (const key of keys) next.add(key)
       return next
     })
+
     addGroupExpanded(path)
   }
 

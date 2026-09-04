@@ -187,6 +187,9 @@ export default function App() {
     get expandedGroups() {
       return state.expandedGroups
     },
+    get hiddenPaths() {
+      return state.hiddenPaths
+    },
     get savedView() {
       return state.savedView
     },
