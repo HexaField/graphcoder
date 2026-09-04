@@ -47,6 +47,42 @@ export function clearPendingAnnotation(): void {
   setPendingDrawSignal(null)
 }
 
+/**
+ * True while the mouse is down and a stroke is being drawn.
+ *
+ * The canvas keeps its own non-reactive flag for the per-mousemove hot path;
+ * this mirrors it so the keyboard layer can tell "cancel the draw" apart from
+ * "leave the tool" without reaching into the canvas component.
+ */
+const [drawing, setDrawingSignal] = createSignal(false)
+
+export const isDrawingActive = drawing
+
+export function setDrawingActive(active: boolean): void {
+  setDrawingSignal(active)
+}
+
+/** True when Escape should abort a draw rather than exit annotate mode. */
+export function hasDrawInProgress(): boolean {
+  return drawing() || pendingDraw() !== null
+}
+
+/**
+ * Discarding a draw needs canvas-local state (the abort flag that swallows the
+ * trailing mouseup), so GraphCanvas registers the real implementation here and
+ * the keyboard layer calls it. One registered handler keeps Escape a single
+ * decision rather than a race between two document listeners.
+ */
+let drawCanceller: (() => void) | null = null
+
+export function registerDrawCanceller(fn: (() => void) | null): void {
+  drawCanceller = fn
+}
+
+export function cancelDraw(): void {
+  drawCanceller?.()
+}
+
 // ── Geometry helpers ─────────────────────────────────────────────────────────
 
 /**

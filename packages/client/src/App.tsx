@@ -23,7 +23,7 @@ import {
   loadKinds,
   loadAnnotations
 } from './state/store.js'
-import { setInteractionMode, toggleInteractionMode } from './state/interaction.js'
+import { cancelDraw, hasDrawInProgress, setInteractionMode, toggleInteractionMode } from './state/interaction.js'
 import { CommandPalette } from './components/CommandPalette.js'
 // Import theme module to ensure the root-level createRoot runs on startup
 import './state/theme.js'
@@ -285,6 +285,14 @@ export default function App() {
           break
         case 'Escape':
           setPaletteOpen(false)
+          // Escape is two-stage while annotating: the first press throws away
+          // the current shape but keeps the tool active so the user can redraw
+          // straight away. Only a press with nothing in progress leaves the
+          // tool. GraphCanvas does the actual discarding.
+          if (hasDrawInProgress()) {
+            cancelDraw()
+            break
+          }
           setInteractionMode('select')
           if (hierarchyOpen() && isMobile()) {
             setHierarchyOpen(false)

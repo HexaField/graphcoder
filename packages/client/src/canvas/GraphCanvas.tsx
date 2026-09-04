@@ -47,7 +47,9 @@ import {
   clearPendingAnnotation,
   pointInPolygon,
   simplifyStroke,
-  centroid
+  centroid,
+  setDrawingActive,
+  registerDrawCanceller
 } from '../state/interaction.js'
 import { KindInput } from '../components/KindInput.js'
 import { resolvedTheme } from '../state/theme.js'
@@ -435,7 +437,15 @@ export const GraphCanvas: Component = () => {
       }
     })
     if (wrapperRef) ro.observe(wrapperRef)
-    onCleanup(() => ro.disconnect())
+
+    // Discarding a draw needs the canvas-local abort flag, so hand the
+    // keyboard layer a way to reach it. App.tsx owns the Escape decision.
+    registerDrawCanceller(cancelPendingAnnotation)
+
+    onCleanup(() => {
+      ro.disconnect()
+      registerDrawCanceller(null)
+    })
   })
 
   // ── Pan / zoom / draw ───────────────────────────────────────────────────────
@@ -454,6 +464,8 @@ export const GraphCanvas: Component = () => {
   let isDrawing = false
   /** True when the drag began on a node — that makes it a polyline, not a lasso. */
   let drawStartedOnNode = false
+  /** Set when Escape kills a drag, so the trailing mouseup gets ignored. */
+  let drawAborted = false
 
   const onWheel = (e: WheelEvent) => {
     e.preventDefault()
@@ -488,6 +500,7 @@ export const GraphCanvas: Component = () => {
       const hit = r3 && layoutSnap() ? r3.hitTest(mx, my, panX, panY, zoom) : null
 
       isDrawing = true
+      setDrawingActive(true)
       drawStartedOnNode = hit?.kind === 'node'
       setStroke([[wx, wy]])
 
@@ -675,6 +688,7 @@ export const GraphCanvas: Component = () => {
     }
 
     isDrawing = false
+    setDrawingActive(false)
     drawStartedOnNode = false
     setStroke([])
     setStrokeNodes([])
@@ -697,16 +711,31 @@ export const GraphCanvas: Component = () => {
     setInteractionMode('select')
   }
 
+  /**
+   * Discard everything about the current draw — the in-progress stroke and
+   * any shape already drawn but not yet named.
+   *
+   * When called mid-drag the mouse button is still down, so the pending
+   * mouseup must not be read as a click on whatever lies underneath.
+   */
   const cancelPendingAnnotation = () => {
+    if (isDrawing) drawAborted = true
     clearPendingAnnotation()
     setStroke([])
     setStrokeNodes([])
     isDrawing = false
+    setDrawingActive(false)
     drawStartedOnNode = false
   }
 
   const onMouseUp = (e: MouseEvent) => {
     if (e.button !== 0) return
+
+    // Swallow the release that ends an aborted drag
+    if (drawAborted) {
+      drawAborted = false
+      return
+    }
 
     if (isDrawing) {
       finishDrawing()

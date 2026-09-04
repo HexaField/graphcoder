@@ -166,6 +166,104 @@ test.describe('Drawing gestures decide the shape', () => {
     expect(ann.shape).toBe('point')
   })
 
+  test('Escape mid-drag aborts the stroke without creating anything', async ({ page }) => {
+    await page.keyboard.press('a')
+    await expect(page.getByTestId('annotate-hint')).toBeVisible()
+
+    const box = await page.getByTestId('graph-canvas').boundingBox()
+    expect(box).toBeTruthy()
+    if (!box) return
+
+    const x0 = box.x + box.width * 0.08
+    const y0 = box.y + box.height * 0.08
+    const size = Math.min(box.width, box.height) * 0.2
+
+    // Begin a lasso and get far enough in that a stroke is live
+    await page.mouse.move(x0, y0)
+    await page.mouse.down()
+    await page.mouse.move(x0 + size, y0, { steps: 8 })
+    await page.mouse.move(x0 + size, y0 + size, { steps: 8 })
+    await expect(page.getByTestId('draw-stroke')).toBeVisible()
+
+    // Escape while the button is still down
+    await page.keyboard.press('Escape')
+    await expect(page.getByTestId('draw-stroke')).not.toBeVisible()
+
+    // Releasing must not commit the abandoned shape
+    await page.mouse.up()
+    await expect(page.getByTestId('kind-input')).not.toBeVisible()
+    expect(await getAnnotations()).toHaveLength(0)
+
+    // The tool stays active so the user can immediately redraw
+    await expect(page.getByTestId('annotate-hint')).toBeVisible()
+  })
+
+  test('Escape mid-drag does not select the node underneath', async ({ page }) => {
+    // Start a drag on a node, abort it, and confirm the trailing mouseup is
+    // swallowed rather than read as a click that selects that node.
+    await page.keyboard.press('a')
+
+    const box = await page.getByTestId('graph-canvas').boundingBox()
+    if (!box) return
+
+    await page.mouse.move(box.x + box.width * 0.5, box.y + box.height * 0.5)
+    await page.mouse.down()
+    await page.mouse.move(box.x + box.width * 0.55, box.y + box.height * 0.55, { steps: 6 })
+    await page.keyboard.press('Escape')
+    await page.mouse.up()
+
+    // The abandoned gesture must not resolve into a shape awaiting a name
+    await expect(page.getByTestId('kind-input')).not.toBeVisible()
+
+    const selected = await page.evaluate(() => (window as any).__graphcoder.selectedNodeId)
+    expect(selected).toBeNull()
+    expect(await getAnnotations()).toHaveLength(0)
+  })
+
+  test('Escape discards a drawn shape when focus sits outside the kind input', async ({ page }) => {
+    await page.keyboard.press('a')
+
+    const box = await page.getByTestId('graph-canvas').boundingBox()
+    if (!box) return
+
+    await page.mouse.move(box.x + box.width * 0.12, box.y + box.height * 0.72)
+    await page.mouse.down()
+    await page.mouse.up()
+
+    await expect(page.getByTestId('kind-input')).toBeVisible()
+
+    // Move focus off the input, then press Escape globally
+    await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur())
+    await page.keyboard.press('Escape')
+
+    // The input must not be left orphaned on screen
+    await expect(page.getByTestId('kind-input')).not.toBeVisible()
+    expect(await getAnnotations()).toHaveLength(0)
+  })
+
+  test('Escape is two-stage: first cancels the shape, second leaves the tool', async ({ page }) => {
+    await page.keyboard.press('a')
+    await expect(page.getByTestId('annotate-hint')).toBeVisible()
+
+    const box = await page.getByTestId('graph-canvas').boundingBox()
+    if (!box) return
+
+    await page.mouse.move(box.x + box.width * 0.12, box.y + box.height * 0.68)
+    await page.mouse.down()
+    await page.mouse.up()
+    await expect(page.getByTestId('kind-input')).toBeVisible()
+
+    // First Escape — discards the shape, keeps the tool
+    await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur())
+    await page.keyboard.press('Escape')
+    await expect(page.getByTestId('kind-input')).not.toBeVisible()
+    await expect(page.getByTestId('annotate-hint')).toBeVisible()
+
+    // Second Escape — leaves the tool
+    await page.keyboard.press('Escape')
+    await expect(page.getByTestId('annotate-hint')).not.toBeVisible()
+  })
+
   test('Escape cancels a drawn shape before it is named', async ({ page }) => {
     await page.keyboard.press('a')
 
