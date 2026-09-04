@@ -834,8 +834,11 @@ export const HierarchyPanel: Component = () => {
         )}
       </Show>
 
+      {/* h-full + min-h-0 bound this to the parent's height. Without them the
+          panel sizes to its content, the tree's flex-1 resolves against that
+          unbounded height, and a long file list is clipped instead of scrolled. */}
       <div
-        class="w-full bg-gray-50 dark:bg-gray-900 border-r border-gray-200 dark:border-gray-700
+        class="w-full h-full min-h-0 bg-gray-50 dark:bg-gray-900 border-r border-gray-200 dark:border-gray-700
           flex flex-col overflow-hidden"
         data-testid="hierarchy-panel"
       >

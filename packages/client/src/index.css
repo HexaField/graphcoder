@@ -38,4 +38,8 @@ body,
 #root {
   height: 100%;
   margin: 0;
+  /* The app owns its own scrolling: the shell is a fixed-height frame and
+     each panel scrolls internally. Without this, any panel that outgrows
+     the viewport drags the entire page along with it. */
+  overflow: hidden;
 }

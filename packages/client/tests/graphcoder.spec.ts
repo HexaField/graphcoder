@@ -1003,3 +1003,116 @@ test.describe('Hierarchy — Show all children', () => {
     await page.waitForFunction(() => (window as any).__graphcoder.viewNodes.length > 0, { timeout: 30_000 })
   })
 })
+
+// ---------------------------------------------------------------------------
+// Layout — the shell is a fixed frame; panels scroll internally
+//
+// Both side panels used to size themselves to their content rather than to
+// their container. A panel taller than the viewport was then clipped by an
+// ancestor's overflow-hidden instead of scrolling, so long file trees and the
+// bottom of the filter list were simply unreachable.
+// ---------------------------------------------------------------------------
+
+test.describe('Layout — page fixed, panels scroll', () => {
+  test.beforeEach(async () => {
+    test.setTimeout(180_000)
+    await closeServerProject()
+  })
+
+  /** Fully unfold the tree so the explorer is taller than a short viewport. */
+  async function expandWholeTree(page: Page): Promise<void> {
+    const first = await page
+      .locator('[data-testid="hierarchy-panel"] [data-nodeid]')
+      .first()
+      .getAttribute('data-nodeid')
+    if (!first) return
+    await page.locator(`[data-nodeid="${first}"]`).click({ button: 'right' })
+    await page.waitForSelector('[data-ctx-menu]', { timeout: 5_000 })
+    const item = page.locator('[data-ctx-menu] button', { hasText: 'Show all children' })
+    if (await item.count()) await item.click()
+    await page.waitForTimeout(500)
+  }
+
+  test('the shell is pinned so the page cannot scroll', async ({ page }) => {
+    await page.setViewportSize({ width: 1100, height: 300 })
+    await page.goto('/')
+    await openProjectPath(page, fixtureNested)
+    await expandWholeTree(page)
+
+    // The shell explicitly opts out of page scrolling. Asserting the computed
+    // style rather than just the absence of overflow matters: h-screen plus
+    // the middle row's overflow-hidden already keep the document at viewport
+    // height in Chromium, so a scrollHeight check alone passes either way and
+    // would prove nothing.
+    const overflow = await page.evaluate(() => ({
+      html: getComputedStyle(document.documentElement).overflowY,
+      body: getComputedStyle(document.body).overflowY,
+      root: getComputedStyle(document.getElementById('root')!).overflowY
+    }))
+    expect(overflow.html).toBe('hidden')
+    expect(overflow.body).toBe('hidden')
+    expect(overflow.root).toBe('hidden')
+
+    // And the page genuinely does not move under a wheel gesture
+    await page.mouse.move(550, 150)
+    await page.mouse.wheel(0, 800)
+    expect(await page.evaluate(() => window.scrollY)).toBe(0)
+    expect(
+      await page.evaluate(() => document.documentElement.scrollHeight - document.documentElement.clientHeight)
+    ).toBeLessThanOrEqual(0)
+  })
+
+  test('the explorer scrolls its own content', async ({ page }) => {
+    await page.setViewportSize({ width: 1100, height: 300 })
+    await page.goto('/')
+    await openProjectPath(page, fixtureNested)
+    await expandWholeTree(page)
+
+    // The tree must be bounded by the panel, with real overflow to scroll
+    const before = await page.evaluate(() => {
+      const tree = document.querySelector('[data-testid="hierarchy-panel"] .overflow-y-auto')
+      if (!tree) return null
+      return { over: tree.scrollHeight - tree.clientHeight, top: tree.scrollTop }
+    })
+    expect(before).not.toBeNull()
+    expect(before!.over).toBeGreaterThan(0)
+    expect(before!.top).toBe(0)
+
+    const panel = page.getByTestId('hierarchy-panel')
+    const box = await panel.boundingBox()
+    expect(box).toBeTruthy()
+    if (!box) return
+    await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2)
+    await page.mouse.wheel(0, 400)
+    await page.waitForTimeout(300)
+
+    const after = await page.evaluate(
+      () => document.querySelector('[data-testid="hierarchy-panel"] .overflow-y-auto')!.scrollTop
+    )
+    expect(after).toBeGreaterThan(0)
+  })
+
+  test('the graph parameters panel scrolls its own content', async ({ page }) => {
+    await page.setViewportSize({ width: 1100, height: 400 })
+    await page.goto('/')
+    await openProjectPath(page, fixtureNested)
+
+    // The kind/link filter list is long enough to overflow any normal viewport
+    const over = await page.evaluate(() => {
+      const gp = document.querySelector('[data-testid="graph-params-panel"]')
+      return gp ? gp.scrollHeight - gp.clientHeight : -1
+    })
+    expect(over).toBeGreaterThan(0)
+
+    const panel = page.getByTestId('graph-params-panel')
+    const box = await panel.boundingBox()
+    expect(box).toBeTruthy()
+    if (!box) return
+    await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2)
+    await page.mouse.wheel(0, 400)
+    await page.waitForTimeout(300)
+
+    const top = await page.evaluate(() => document.querySelector('[data-testid="graph-params-panel"]')!.scrollTop)
+    expect(top).toBeGreaterThan(0)
+  })
+})

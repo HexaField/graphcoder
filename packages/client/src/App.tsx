@@ -358,7 +358,7 @@ export default function App() {
           <Show when={hierarchyOpen() || annotationOpen()}>
             <div class="flex-shrink-0 overflow-hidden flex flex-col" style={{ width: `${leftWidth()}px` }}>
               <Show when={hierarchyOpen()}>
-                <div class={annotationOpen() ? "flex-1 min-h-0 overflow-hidden" : "flex-1 overflow-hidden"}>
+                <div class="flex-1 min-h-0 overflow-hidden">
                   <HierarchyPanel />
                 </div>
               </Show>

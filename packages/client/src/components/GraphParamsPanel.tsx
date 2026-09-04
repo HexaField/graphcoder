@@ -104,7 +104,7 @@ export const GraphParamsPanel: Component = () => {
 
   return (
     <div
-      class="w-full bg-gray-50 dark:bg-gray-900 border-l border-gray-200 dark:border-gray-700 flex flex-col overflow-y-auto"
+      class="w-full h-full min-h-0 bg-gray-50 dark:bg-gray-900 border-l border-gray-200 dark:border-gray-700 flex flex-col overflow-y-auto"
       data-testid="graph-params-panel"
     >
       {/* ── Header ── */}
