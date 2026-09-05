@@ -81,12 +81,16 @@ export async function openProject(projectRoot: string): Promise<void> {
  *
  * When both `base` and `target` appear in the URL, the git graph panel
  * opens automatically and a temporal diff starts after the project loads.
+ *
+ * When `prBase` and `prTip` appear, the PR stack loads automatically.
  */
 export async function initFromUrl(): Promise<void> {
   const params = new URLSearchParams(window.location.search)
   const projectParam = params.get('project')
   const baseParam = params.get('base')
   const targetParam = params.get('target')
+  const prBaseParam = params.get('prBase')
+  const prTipParam = params.get('prTip')
 
   if (projectParam) {
     await openProject(projectParam)
@@ -120,6 +124,12 @@ export async function initFromUrl(): Promise<void> {
     const { loadGitGraph, runTemporalDiff } = await import('./temporal.js')
     await loadGitGraph()
     await runTemporalDiff()
+  }
+
+  // Restore PR stack from URL.
+  if (prBaseParam && prTipParam && state.projectRoot) {
+    const { loadPrStack } = await import('./pr-stack.js')
+    await loadPrStack(prBaseParam, prTipParam)
   }
 }
 

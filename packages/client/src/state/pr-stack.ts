@@ -8,6 +8,7 @@ import { setState, state } from './core.js'
 import { fetchPrStack, importPrStack } from '../api/git.js'
 import type { PrInfo } from '../api/git.js'
 import { loadAnnotations } from './annotations.js'
+import { syncUrlParams } from './url.js'
 
 export type { PrInfo } from '../api/git.js'
 
@@ -34,6 +35,7 @@ export async function loadPrStack(base: string, tip: string): Promise<void> {
   try {
     const result = await fetchPrStack(base, tip)
     setState('prStack', { prs: result.prs, loading: false, activePrIndex: 0 })
+    syncUrlParams()
   } catch (err) {
     setState('prStack', {
       loading: false,
@@ -74,4 +76,5 @@ export function prevPr(): void {
 
 export function clearPrStack(): void {
   setState('prStack', prStackInitial)
+  syncUrlParams()
 }
