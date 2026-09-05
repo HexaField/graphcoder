@@ -74,6 +74,7 @@ export const [state, setState] = createStore<AppState>({
   groupByPackage: _saved.groupByPackage ?? false,
   focusedNodeId: null,
   graphDirection: _saved.graphDirection ?? 'TB',
+  scopeFiles: [],
 
   // Diff
   baseSnapshot: null,

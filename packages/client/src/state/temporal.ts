@@ -511,7 +511,8 @@ export async function runTemporalDiff(): Promise<void> {
       groupByContract: state.groupByContract,
       groupByPackage: state.groupByPackage,
       expandedGroups: state.expandedGroups,
-      focusedNodeId: state.focusedNodeId
+      focusedNodeId: state.focusedNodeId,
+      scopeFiles: state.scopeFiles
     }
     const filtered = computeView(dv.nodes, dv.edges, viewParams)
 

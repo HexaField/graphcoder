@@ -22,6 +22,8 @@ export interface FiltersState {
   focusedNodeId: string | null
   /** ELK layout flow direction. LR = left-to-right, TB = top-to-bottom. */
   graphDirection: GraphDirection
+  /** When non-empty, only nodes in these files appear. Set by the PR stack. */
+  scopeFiles: string[]
 }
 
 function persist(): void {

@@ -1,8 +1,10 @@
 /**
  * PR Stack state — manages a stacked PR chain for layered code review.
  *
- * When active, the PR stack colours nodes by which PR introduced them and
- * lets the user step through the stack with keyboard navigation.
+ * When active, the PR stack:
+ *   - scopes the graph to only files touched by the stack (scopeFiles)
+ *   - auto-imports PR annotations so the sidebar populates immediately
+ *   - lets the user step through the stack with ← → keyboard navigation
  */
 import { setState, state } from './core.js'
 import { fetchPrStack, importPrStack } from '../api/git.js'
@@ -30,12 +32,28 @@ export const prStackInitial: PrStackState = {
   error: null
 }
 
+/** Collect all unique file paths across every PR in the stack. */
+function collectScopeFiles(prs: PrInfo[]): string[] {
+  const set = new Set<string>()
+  for (const pr of prs) {
+    for (const f of pr.files) set.add(f)
+  }
+  return [...set]
+}
+
 export async function loadPrStack(base: string, tip: string): Promise<void> {
   setState('prStack', { loading: true, error: null, baseRef: base, tipRef: tip })
   try {
     const result = await fetchPrStack(base, tip)
     setState('prStack', { prs: result.prs, loading: false, activePrIndex: 0 })
+
+    // Scope the graph to only files the PR stack touches.
+    setState('scopeFiles', collectScopeFiles(result.prs))
+
     syncUrlParams()
+
+    // Auto-import annotations so the sidebar populates without a manual click.
+    await importPrAnnotations()
   } catch (err) {
     setState('prStack', {
       loading: false,
@@ -76,5 +94,7 @@ export function prevPr(): void {
 
 export function clearPrStack(): void {
   setState('prStack', prStackInitial)
+  // Remove the scope filter so the full graph returns.
+  setState('scopeFiles', [])
   syncUrlParams()
 }

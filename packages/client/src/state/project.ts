@@ -194,7 +194,8 @@ export function connectWebSocket(): void {
             groupByContract: state.groupByContract,
             groupByPackage: state.groupByPackage,
             expandedGroups: state.expandedGroups,
-            focusedNodeId: state.focusedNodeId
+            focusedNodeId: state.focusedNodeId,
+            scopeFiles: state.scopeFiles
           } satisfies ViewParams
         })
       )

@@ -136,6 +136,41 @@ describe('Phase 1c — excludePatterns filtering', () => {
   })
 })
 
+// ── Phase 1d: scopeFiles whitelist ──────────────────────────────────────────────
+
+describe('Phase 1d — scopeFiles whitelist', () => {
+  it('returns all nodes when scopeFiles is empty', () => {
+    const nodes = [node('a', 'function', { filePath: 'src/auth.ts' }), node('b', 'function', { filePath: 'src/db.ts' })]
+    const { nodes: out } = computeView(nodes, [], { ...FLAT_PARAMS, scopeFiles: [] })
+    expect(out.map((n) => n.id)).toEqual(expect.arrayContaining(['a', 'b']))
+  })
+
+  it('keeps only nodes whose filePath appears in scopeFiles', () => {
+    const nodes = [
+      node('a', 'function', { filePath: 'src/auth.ts' }),
+      node('b', 'function', { filePath: 'src/db.ts' }),
+      node('c', 'function', { filePath: 'src/utils.ts' })
+    ]
+    const { nodes: out } = computeView(nodes, [], {
+      ...FLAT_PARAMS,
+      scopeFiles: ['src/auth.ts', 'src/utils.ts']
+    })
+    expect(out.map((n) => n.id)).toContain('a')
+    expect(out.map((n) => n.id)).not.toContain('b')
+    expect(out.map((n) => n.id)).toContain('c')
+  })
+
+  it('drops edges whose endpoints fall outside the scope', () => {
+    const nodes = [node('a', 'function', { filePath: 'src/auth.ts' }), node('b', 'function', { filePath: 'src/db.ts' })]
+    const edges = [edge('a', 'b')]
+    const { edges: out } = computeView(nodes, edges, {
+      ...FLAT_PARAMS,
+      scopeFiles: ['src/auth.ts']
+    })
+    expect(out).toHaveLength(0)
+  })
+})
+
 // ── Phase 2: import elevation ──────────────────────────────────────────────────
 
 describe('Phase 2 — import node elevation', () => {

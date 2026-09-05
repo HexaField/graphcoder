@@ -82,6 +82,12 @@ export interface ViewParams {
   /** File paths / dir prefixes whose groups show children expanded in ELK layout. */
   expandedGroups: string[]
   focusedNodeId: string | null
+  /**
+   * When non-empty, only nodes whose filePath appears in this set pass the
+   * filter. Acts as a whitelist — everything outside the set gets excluded
+   * before layout. Used by the PR stack to scope the graph to touched files.
+   */
+  scopeFiles: string[]
 }
 
 /** Default params sent to the server before the client has loaded any local prefs. */
@@ -98,7 +104,8 @@ export const DEFAULT_VIEW_PARAMS: ViewParams = {
   groupByContract: false,
   groupByPackage: false,
   expandedGroups: [],
-  focusedNodeId: null
+  focusedNodeId: null,
+  scopeFiles: []
 }
 
 // ── ViewResult ────────────────────────────────────────────────────────────────
@@ -258,7 +265,8 @@ export function computeView(allNodes: GraphNode[], allEdges: GraphEdge[], params
     groupByContract,
     groupByPackage,
     expandedGroups,
-    focusedNodeId
+    focusedNodeId,
+    scopeFiles
   } = params
 
   // Always collect file nodes for the hierarchy panel — independent of view params.
@@ -297,6 +305,16 @@ export function computeView(allNodes: GraphNode[], allEdges: GraphEdge[], params
       })
       nodeIds = new Set(nodes.map((n) => n.id))
     }
+  }
+
+  // scopeFiles whitelist — when non-empty, only nodes in these files survive.
+  if (scopeFiles.length > 0) {
+    const scopeSet = new Set(scopeFiles)
+    nodes = nodes.filter((n) => {
+      const fp = n.filePath ?? ''
+      return scopeSet.has(fp)
+    })
+    nodeIds = new Set(nodes.map((n) => n.id))
   }
 
   // ── Phase 2: import node elevation ───────────────────────────────────────

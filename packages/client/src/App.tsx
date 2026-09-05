@@ -166,7 +166,8 @@ export default function App() {
       groupByContract: state.groupByContract,
       groupByPackage: state.groupByPackage,
       expandedGroups: state.expandedGroups,
-      focusedNodeId: state.focusedNodeId
+      focusedNodeId: state.focusedNodeId,
+      scopeFiles: state.scopeFiles
     }
     // Re-filter the diff view when a temporal diff occupies the display.
     // No-ops when no raw diff data exists (no diff active).
