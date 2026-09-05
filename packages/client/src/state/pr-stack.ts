@@ -4,7 +4,8 @@
  * When active, the PR stack:
  *   - scopes the graph to only files touched by the stack (scopeFiles)
  *   - auto-imports PR annotations so the sidebar populates immediately
- *   - lets the user step through the stack with ← → keyboard navigation
+ *   - clicking a PR triggers a temporal diff for that PR's commit range
+ *   - ← → keyboard navigation steps through PRs, each triggering a diff
  */
 import { setState, state } from './core.js'
 import { fetchPrStack, importPrStack } from '../api/git.js'
@@ -54,6 +55,11 @@ export async function loadPrStack(base: string, tip: string): Promise<void> {
 
     // Auto-import annotations so the sidebar populates without a manual click.
     await importPrAnnotations()
+
+    // Trigger the diff for the first PR.
+    if (result.prs.length > 0) {
+      await triggerDiffForPr(result.prs[0])
+    }
   } catch (err) {
     setState('prStack', {
       loading: false,
@@ -78,18 +84,29 @@ export async function importPrAnnotations(): Promise<void> {
   }
 }
 
-export function setActivePr(index: number): void {
+/** Set the temporal diff refs and run the diff for a given PR. */
+async function triggerDiffForPr(pr: PrInfo): Promise<void> {
+  setState('baseRef', pr.baseCommitHash)
+  setState('targetRef', pr.commitHash)
+  const { runTemporalDiff } = await import('./temporal.js')
+  await runTemporalDiff()
+}
+
+export async function setActivePr(index: number): Promise<void> {
+  const prs = state.prStack.prs
+  if (index < 0 || index >= prs.length) return
   setState('prStack', 'activePrIndex', index)
+  await triggerDiffForPr(prs[index])
 }
 
-export function nextPr(): void {
+export async function nextPr(): Promise<void> {
   const { activePrIndex, prs } = state.prStack
-  if (activePrIndex < prs.length - 1) setActivePr(activePrIndex + 1)
+  if (activePrIndex < prs.length - 1) await setActivePr(activePrIndex + 1)
 }
 
-export function prevPr(): void {
+export async function prevPr(): Promise<void> {
   const { activePrIndex } = state.prStack
-  if (activePrIndex > 0) setActivePr(activePrIndex - 1)
+  if (activePrIndex > 0) await setActivePr(activePrIndex - 1)
 }
 
 export function clearPrStack(): void {

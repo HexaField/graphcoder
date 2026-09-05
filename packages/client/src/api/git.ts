@@ -169,7 +169,10 @@ export interface PrInfo {
   index: number
   branch: string
   title: string
+  /** Tip commit of this PR. */
   commitHash: string
+  /** Base commit for diffing — the previous branch tip, or the stack base ref. */
+  baseCommitHash: string
   parentBranch: string
   files: string[]
   stats: { additions: number; deletions: number }

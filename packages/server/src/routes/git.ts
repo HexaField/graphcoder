@@ -166,29 +166,102 @@ interface PrSlice {
   index: number
   branch: string
   title: string
+  /** Tip commit of this PR (the branch tip). */
   commitHash: string
+  /** Base commit for diffing — the previous branch tip, or the stack base ref. */
+  baseCommitHash: string
   parentBranch: string
   files: string[]
   stats: { additions: number; deletions: number }
 }
 
+/**
+ * Discover a stacked PR chain by finding branch tips between base..tip.
+ *
+ * 1. List all local branches whose tip commit lives on the base..tip path.
+ * 2. Sort them topologically (by their position in the commit walk).
+ * 3. Each PR spans from the previous branch tip to its own tip.
+ *
+ * Falls back to per-commit slices when no intermediate branches exist
+ * (e.g. a single branch with multiple commits).
+ */
 async function discoverPrStack(projectRoot: string, base: string, tip: string): Promise<PrSlice[]> {
   const git = simpleGit(projectRoot)
+
+  // Resolve base and tip to full hashes.
+  const baseHash = (await git.revparse([base])).trim()
+  const tipHash = (await git.revparse([tip])).trim()
+
+  // Get every commit hash on the base..tip path (oldest first).
   const logResult = await git.log({ from: base, to: tip })
-  const commits = [...logResult.all].reverse() // oldest first
+  const allCommits = [...logResult.all].reverse()
+  const commitOrder = new Map<string, number>()
+  for (let i = 0; i < allCommits.length; i++) {
+    commitOrder.set(allCommits[i].hash, i)
+  }
+
+  // List all local branches and find those whose tip sits on this path.
+  const branchResult = await git.branch(['-l', '--format=%(refname:short) %(objectname)'])
+  const stackBranches: Array<{ name: string; hash: string; order: number }> = []
+
+  for (const line of branchResult.all) {
+    // git.branch with --format returns names in .all; raw output has "name hash" lines
+    // Use branchResult.branches which maps name → { commit }
+    const info = branchResult.branches[line]
+    if (!info) continue
+    const order = commitOrder.get(info.commit)
+    if (order !== undefined) {
+      stackBranches.push({ name: info.label ?? line, hash: info.commit, order })
+    }
+  }
+
+  // Also include tip branch if not already matched (e.g. detached HEAD pointing at tip).
+  if (!stackBranches.some((b) => b.hash === tipHash) && commitOrder.has(tipHash)) {
+    stackBranches.push({ name: tip, hash: tipHash, order: commitOrder.get(tipHash)! })
+  }
+
+  // Sort by topological position (earliest first).
+  stackBranches.sort((a, b) => a.order - b.order)
+
+  // Deduplicate branches pointing at the same commit (keep first name).
+  const seen = new Set<string>()
+  const dedupedBranches = stackBranches.filter((b) => {
+    if (seen.has(b.hash)) return false
+    seen.add(b.hash)
+    return true
+  })
+
+  // Build slices. Each PR = diff from previous branch tip to this branch tip.
+  // Fall back to per-commit slices when no intermediate branches found.
+  const boundaries =
+    dedupedBranches.length > 0
+      ? dedupedBranches
+      : allCommits.map((c, i) => ({
+          name: '',
+          hash: c.hash,
+          order: i
+        }))
 
   const slices: PrSlice[] = []
-  for (let i = 0; i < commits.length; i++) {
-    const commit = commits[i]
-    const parentRef = i === 0 ? base : commits[i - 1].hash
-    const diffSummary = await git.diffSummary([`${parentRef}..${commit.hash}`])
+  for (let i = 0; i < boundaries.length; i++) {
+    const boundary = boundaries[i]
+    const prevHash = i === 0 ? baseHash : boundaries[i - 1].hash
+    const prevName = i === 0 ? base : boundaries[i - 1].name
+
+    // Title: first commit message in this PR's range.
+    const rangeLog = await git.log({ from: prevHash, to: boundary.hash })
+    const firstCommit = rangeLog.all.length > 0 ? rangeLog.all[rangeLog.all.length - 1] : null
+    const title = firstCommit?.message ?? boundary.name
+
+    const diffSummary = await git.diffSummary([`${prevHash}..${boundary.hash}`])
 
     slices.push({
       index: i + 1,
-      branch: '', // can't reliably derive branch name from commit alone
-      title: commit.message,
-      commitHash: commit.hash,
-      parentBranch: i === 0 ? base : commits[i - 1].hash.slice(0, 8),
+      branch: boundary.name,
+      title,
+      commitHash: boundary.hash,
+      baseCommitHash: prevHash,
+      parentBranch: prevName,
       files: diffSummary.files.map((f) => f.file),
       stats: {
         additions: diffSummary.insertions,
