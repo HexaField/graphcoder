@@ -67,6 +67,7 @@ CodeGraph cannot link `fetch()` calls to route handlers because the URL is a run
 | 2     | ✅ Done | Temporal mapper (Git history → per-commit diffs via worktrees, SQLite cache, SSE) |
 | —     | ✅ Done | Three.js WebGL renderer replacing PixiJS (5 draw calls, handles 10k+ nodes)       |
 | 3     | ✅ Done | Annotation surface — draw-to-annotate, user-defined kinds, AI proposals           |
+| 3c    | ✅ Done | Consumer tooling — CLI, MCP server, PR stack UI                                   |
 | 4     | Planned | Projections (speculative sketching, projected ArchDiffs, git graph integration)   |
 | 5     | Planned | Prospective state engine (projections → CoW graph forks)                          |
 | 6     | Planned | Code synthesis engine (projection → ArchDiff → file changes → commit)             |
@@ -127,6 +128,34 @@ The user never picks a shape from a menu — the drawing gesture in `GraphCanvas
 - `⌘/Ctrl+K` opens `CommandPalette.tsx` (subsequence fuzzy match over commands, annotations, and kinds).
 - `⌘/Ctrl+Z` / `⇧⌘Z` — undo/redo. The stack lives in `state/annotations.ts`; entries record create/delete/update snapshots and replay through the same API the UI uses.
 - `KindInput.tsx` is the only naming surface — inline at the shape anchor, never a modal.
+
+## CLI (`@graphcoder/cli`)
+
+`packages/cli/` — standalone CLI for CI and agent use. Commands:
+
+```bash
+graphcoder check [path]          # annotation health — reports stale member references
+graphcoder digest [path] --json  # structured annotation digest grouped by kind
+graphcoder import-prs --base dev --tip feature-branch  # import PR stack as proposed annotations
+```
+
+Exit codes: 0 = success, 1 = issues found, 2 = error. Requires `.graphcoder/` (CodeGraph index) in the project.
+
+## MCP server (`@graphcoder/mcp`)
+
+`packages/mcp/` — wraps CLI commands as MCP tools over stdio transport.
+
+Tools: `graphcoder_check`, `graphcoder_digest`, `graphcoder_import_prs`. Each takes `projectRoot` (absolute path). The import tool also takes `base` and `tip` git refs.
+
+Run with `node packages/mcp/dist/index.js` or register in MCP config as `graphcoder-mcp`.
+
+## PR stack UI
+
+`PrStackBar` — horizontal bar below the canvas showing stacked PRs as coloured segments. Click a segment to select that PR. `← →` keys step through the stack. "Import" button converts the stack into proposed annotations with `kind=pr`.
+
+`NodeAnnotations` — reverse-navigation panel below the NodeInspector. When a node gets selected, shows all annotations whose `members` array contains that node's semantic ID. Click an annotation to select it on the canvas.
+
+`state/pr-stack.ts` — nested state slice under `state.prStack`. Uses `fetchPrStack` / `importPrStack` API wrappers in `api/git.ts` which hit `GET /api/git/pr-stack` and `POST /api/git/pr-stack/import`.
 
 ## Known gotchas
 
