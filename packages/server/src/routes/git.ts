@@ -193,25 +193,36 @@ async function discoverPrStack(projectRoot: string, base: string, tip: string): 
   const tipHash = (await git.revparse([tip])).trim()
 
   // Get every commit hash on the base..tip path (oldest first).
-  const logResult = await git.log({ from: base, to: tip })
-  const allCommits = [...logResult.all].reverse()
+  // NOTE: simple-git's log({ from, to }) does NOT produce the same result as
+  // `git log base..tip` — it includes merge-commit ancestors and side branches.
+  // Use git.raw() with the two-dot range to get the correct set.
+  const rawLog = await git.raw(['log', '--format=%H', `${baseHash}..${tipHash}`])
+  const commitHashes = rawLog
+    .trim()
+    .split('\n')
+    .filter((h) => h.length > 0)
+    .reverse() // oldest first
   const commitOrder = new Map<string, number>()
-  for (let i = 0; i < allCommits.length; i++) {
-    commitOrder.set(allCommits[i].hash, i)
+  for (let i = 0; i < commitHashes.length; i++) {
+    commitOrder.set(commitHashes[i], i)
   }
 
   // List all local branches and find those whose tip sits on this path.
-  const branchResult = await git.branch(['-l', '--format=%(refname:short) %(objectname)'])
+  // NOTE: simple-git's branch() has its own parser that chokes on --format.
+  // Use git.raw() and parse the "name hash" lines ourselves.
+  const rawBranches = await git.raw(['branch', '-l', '--format=%(refname:short) %(objectname)'])
   const stackBranches: Array<{ name: string; hash: string; order: number }> = []
 
-  for (const line of branchResult.all) {
-    // git.branch with --format returns names in .all; raw output has "name hash" lines
-    // Use branchResult.branches which maps name → { commit }
-    const info = branchResult.branches[line]
-    if (!info) continue
-    const order = commitOrder.get(info.commit)
+  for (const line of rawBranches.split('\n')) {
+    const trimmed = line.trim()
+    if (!trimmed) continue
+    const spaceIdx = trimmed.lastIndexOf(' ')
+    if (spaceIdx < 0) continue
+    const name = trimmed.slice(0, spaceIdx)
+    const hash = trimmed.slice(spaceIdx + 1)
+    const order = commitOrder.get(hash)
     if (order !== undefined) {
-      stackBranches.push({ name: info.label ?? line, hash: info.commit, order })
+      stackBranches.push({ name, hash, order })
     }
   }
 
@@ -236,9 +247,9 @@ async function discoverPrStack(projectRoot: string, base: string, tip: string): 
   const boundaries =
     dedupedBranches.length > 0
       ? dedupedBranches
-      : allCommits.map((c, i) => ({
+      : commitHashes.map((hash, i) => ({
           name: '',
-          hash: c.hash,
+          hash,
           order: i
         }))
 
@@ -248,10 +259,10 @@ async function discoverPrStack(projectRoot: string, base: string, tip: string): 
     const prevHash = i === 0 ? baseHash : boundaries[i - 1].hash
     const prevName = i === 0 ? base : boundaries[i - 1].name
 
-    // Title: first commit message in this PR's range.
-    const rangeLog = await git.log({ from: prevHash, to: boundary.hash })
-    const firstCommit = rangeLog.all.length > 0 ? rangeLog.all[rangeLog.all.length - 1] : null
-    const title = firstCommit?.message ?? boundary.name
+    // Title: first commit message in this PR's range (oldest commit).
+    const rawRangeLog = await git.raw(['log', '--format=%s', '--reverse', `${prevHash}..${boundary.hash}`])
+    const firstMessage = rawRangeLog.trim().split('\n')[0] ?? ''
+    const title = firstMessage || boundary.name
 
     const diffSummary = await git.diffSummary([`${prevHash}..${boundary.hash}`])
 
