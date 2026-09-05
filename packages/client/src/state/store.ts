@@ -113,5 +113,9 @@ export {
 } from './annotations.js'
 export type { AnnotationsState } from './annotations.js'
 
+// Section: PR Stack
+export { loadPrStack, importPrAnnotations, setActivePr, nextPr, prevPr, clearPrStack } from './pr-stack.js'
+export type { PrInfo, PrStackState } from './pr-stack.js'
+
 // Utilities
 export { syncUrlParams } from './url.js'

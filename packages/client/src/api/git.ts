@@ -4,7 +4,7 @@
  * `computeDiff` uses SSE (fetch + ReadableStream) so the caller can receive
  * granular progress messages while snapshot indexing runs on the server.
  */
-import type { ArchDiff, GraphSnapshot } from '@graphcoder/core'
+import type { ArchDiff, Annotation, GraphSnapshot } from '@graphcoder/core'
 import { API_BASE as API } from '../config.js'
 
 export interface CommitInfo {
@@ -161,4 +161,43 @@ export async function computeDiff(
       })
       .catch(reject)
   })
+}
+
+// ── PR Stack ─────────────────────────────────────────────────────────────────
+
+export interface PrInfo {
+  index: number
+  branch: string
+  title: string
+  commitHash: string
+  parentBranch: string
+  files: string[]
+  stats: { additions: number; deletions: number }
+  memberIds: string[]
+}
+
+export interface PrStackResult {
+  prs: PrInfo[]
+}
+
+export interface PrImportResult {
+  created: number
+  annotations: Annotation[]
+}
+
+export async function fetchPrStack(base: string, tip: string): Promise<PrStackResult> {
+  const params = new URLSearchParams({ base, tip })
+  const res = await fetch(`${API}/api/git/pr-stack?${params}`)
+  if (!res.ok) throw new Error(`GET /git/pr-stack ${res.status}`)
+  return res.json() as Promise<PrStackResult>
+}
+
+export async function importPrStack(base: string, tip: string): Promise<PrImportResult> {
+  const res = await fetch(`${API}/api/git/pr-stack/import`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ base, tip })
+  })
+  if (!res.ok) throw new Error(`POST /git/pr-stack/import ${res.status}`)
+  return res.json() as Promise<PrImportResult>
 }

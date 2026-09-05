@@ -1,0 +1,20 @@
+{
+  "name": "@graphcoder/mcp",
+  "version": "1.0.0",
+  "bin": {
+    "graphcoder-mcp": "dist/index.js"
+  },
+  "type": "module",
+  "scripts": {
+    "build": "tsdown",
+    "check": "tsc --noEmit",
+    "dev": "tsx src/index.ts"
+  },
+  "dependencies": {
+    "@colbymchenry/codegraph": "^1.5.0",
+    "@graphcoder/core": "workspace:*",
+    "@modelcontextprotocol/sdk": "^1.12.1",
+    "simple-git": "^3.36.0",
+    "zod": "^3.25.67"
+  }
+}

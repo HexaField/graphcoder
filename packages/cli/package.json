@@ -1,0 +1,22 @@
+{
+  "name": "@graphcoder/cli",
+  "version": "1.0.0",
+  "bin": {
+    "graphcoder": "dist/index.js"
+  },
+  "type": "module",
+  "scripts": {
+    "build": "tsdown",
+    "check": "tsc --noEmit",
+    "dev": "tsx src/index.ts"
+  },
+  "dependencies": {
+    "@colbymchenry/codegraph": "^1.5.0",
+    "@graphcoder/core": "workspace:*",
+    "chalk": "^5.4.1",
+    "simple-git": "^3.36.0"
+  },
+  "devDependencies": {
+    "tsdown": "0.22.1"
+  }
+}

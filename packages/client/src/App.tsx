@@ -5,7 +5,9 @@ import { DiffPanel } from './components/DiffPanel.js'
 import { GitGraph } from './components/GitGraph.js'
 import { GraphParamsPanel } from './components/GraphParamsPanel.js'
 import { HierarchyPanel } from './components/HierarchyPanel.js'
+import { NodeAnnotations } from './components/NodeAnnotations.js'
 import { NodeInspector } from './components/NodeInspector.js'
+import { PrStackBar } from './components/PrStackBar.js'
 import { readLayoutSize, saveLayoutSize } from './components/ResizeHandle.js'
 import { Toolbar } from './components/Toolbar.js'
 import type { ViewParams } from '@graphcoder/core'
@@ -13,6 +15,8 @@ import {
   clearDiff,
   connectWebSocket,
   initFromUrl,
+  nextPr,
+  prevPr,
   refilterDiffView,
   selectNode,
   sendViewRequest,
@@ -282,6 +286,18 @@ export default function App() {
       }
 
       switch (e.key) {
+        case 'ArrowLeft':
+          if (state.prStack.prs.length > 0) {
+            prevPr()
+            e.preventDefault()
+          }
+          break
+        case 'ArrowRight':
+          if (state.prStack.prs.length > 0) {
+            nextPr()
+            e.preventDefault()
+          }
+          break
         case 'H':
         case 'h':
           if (state.fileNodes.length > 0) void toggleGitBar()
@@ -396,11 +412,13 @@ export default function App() {
           </div>
         </Show>
 
-        {/* Centre column — canvas + node inspector at the bottom */}
+        {/* Centre column — canvas + PR bar + node inspector at the bottom */}
         <div class="flex flex-col flex-1 overflow-hidden min-h-0">
           <GraphCanvas />
+          <PrStackBar />
           <Show when={state.selectedNodeId}>
             <NodeInspector />
+            <NodeAnnotations />
           </Show>
         </div>
 
