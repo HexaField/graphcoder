@@ -442,6 +442,55 @@ function buildDiffView(
 }
 
 /**
+ * Filter diff view to only changed nodes + their containment ancestors.
+ *
+ * Without this, a 27-file PR shows ALL 1100+ nodes in the touched files even
+ * though only ~40 actually changed.  The layout algorithm breaks down at that
+ * scale and produces an unreadable graph.
+ *
+ * The filter keeps:
+ *   1. Every node that has a diff status (added / removed / modified / moved).
+ *   2. Containment ancestors — walking `contains` edges upward so file and
+ *      class groups stay intact for ELK compound layout.
+ * Everything else (unchanged sibling functions, unaffected fields, etc.) gets
+ * dropped.  Edges survive only when both endpoints remain.
+ */
+function filterToDiffRelevant(
+  nodes: GraphNode[],
+  edges: GraphEdge[],
+  nodeStatus: Map<string, string>
+): { nodes: GraphNode[]; edges: GraphEdge[] } {
+  if (!nodeStatus || nodeStatus.size === 0) return { nodes, edges }
+
+  // 1. Seed with all nodes that carry a diff status.
+  const keepIds = new Set<string>()
+  for (const [id] of nodeStatus) keepIds.add(id)
+
+  // 2. Build child → parent map from `contains` edges, then walk every
+  //    changed node upward so its file / class / module container survives.
+  const parentOf = new Map<string, string>()
+  for (const e of edges) {
+    if (e.kind === 'contains') parentOf.set(e.target, e.source)
+  }
+  const walked = new Set<string>()
+  for (const id of [...keepIds]) {
+    let cur = id
+    while (parentOf.has(cur) && !walked.has(cur)) {
+      walked.add(cur)
+      const parent = parentOf.get(cur)!
+      keepIds.add(parent)
+      cur = parent
+    }
+  }
+
+  // 3. Filter — only nodes in the keep set, only edges whose BOTH endpoints remain.
+  return {
+    nodes: nodes.filter((n) => keepIds.has(n.id)),
+    edges: edges.filter((e) => keepIds.has(e.source) && keepIds.has(e.target))
+  }
+}
+
+/**
  * Run the temporal diff between baseRef and targetRef.
  *
  * Fetches both snapshots from the server, computes (or retrieves cached) the
@@ -498,6 +547,11 @@ export async function runTemporalDiff(): Promise<void> {
     // Store unfiltered diff data so filter changes can re-apply computeView.
     setState('rawDiffView', { nodes: dv.nodes, edges: dv.edges, fileNodes: dv.fileNodes })
 
+    // Narrow to only changed nodes + their containment ancestors.
+    // This reduces e.g. 1116 nodes (all symbols in 27 touched files) to ~60
+    // (only the symbols that actually changed), producing a readable graph.
+    const relevant = filterToDiffRelevant(dv.nodes, dv.edges, dv.nodeStatus)
+
     // Apply current filter/collapse state to the diff view — same pipeline the
     // server uses for the live graph, so hidden kinds, paths, grouping, and
     // collapse all take effect.
@@ -514,7 +568,7 @@ export async function runTemporalDiff(): Promise<void> {
       focusedNodeId: state.focusedNodeId,
       scopeFiles: state.scopeFiles
     }
-    const filtered = computeView(dv.nodes, dv.edges, viewParams)
+    const filtered = computeView(relevant.nodes, relevant.edges, viewParams)
 
     setState('viewNodes', filtered.nodes)
     setState('viewEdges', filtered.edges)
@@ -550,7 +604,10 @@ export async function runTemporalDiff(): Promise<void> {
 export function refilterDiffView(params: ViewParams): void {
   const raw = state.rawDiffView
   if (!raw) return
-  const filtered = computeView(raw.nodes, raw.edges, params)
+  // Narrow to changed nodes + ancestors before applying view filters.
+  const statusMap = state.diffStatusMap
+  const { nodes, edges } = statusMap ? filterToDiffRelevant(raw.nodes, raw.edges, statusMap) : raw
+  const filtered = computeView(nodes, edges, params)
   setState('viewNodes', filtered.nodes)
   setState('viewEdges', filtered.edges)
   setState('viewGroups', filtered.groups)
