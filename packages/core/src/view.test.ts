@@ -169,6 +169,33 @@ describe('Phase 1d — scopeFiles whitelist', () => {
     })
     expect(out).toHaveLength(0)
   })
+
+  it('bypasses hiddenPaths when scopeFiles provides the whitelist', () => {
+    const nodes = [node('a', 'function', { filePath: 'src/auth.ts' }), node('b', 'function', { filePath: 'src/db.ts' })]
+    // hiddenPaths would normally hide src/auth.ts, but scopeFiles overrides.
+    const { nodes: out } = computeView(nodes, [], {
+      ...FLAT_PARAMS,
+      hiddenPaths: ['src/auth.ts'],
+      scopeFiles: ['src/auth.ts']
+    })
+    expect(out.map((n) => n.id)).toContain('a')
+    expect(out.map((n) => n.id)).not.toContain('b')
+  })
+
+  it('bypasses excludePatterns when scopeFiles provides the whitelist', () => {
+    const nodes = [
+      node('a', 'function', { filePath: 'src/auth.test.ts' }),
+      node('b', 'function', { filePath: 'src/db.ts' })
+    ]
+    // excludePatterns would normally hide *.test.ts, but scopeFiles overrides.
+    const { nodes: out } = computeView(nodes, [], {
+      ...FLAT_PARAMS,
+      excludePatterns: '*.test.ts',
+      scopeFiles: ['src/auth.test.ts']
+    })
+    expect(out.map((n) => n.id)).toContain('a')
+    expect(out.map((n) => n.id)).not.toContain('b')
+  })
 })
 
 // ── Phase 2: import elevation ──────────────────────────────────────────────────
@@ -663,6 +690,63 @@ describe('Phase 7 — multi-parent containment guard', () => {
 
     const groupsWithMethod = groups.filter((g) => g.childIds.includes('method'))
     expect(groupsWithMethod).toHaveLength(1)
+  })
+})
+
+// ── Cycle guard in collectDescendants ─────────────────────────────────────────
+
+describe('cycle guard in diff views', () => {
+  it('does not stack-overflow when contains edges form a cycle', () => {
+    // Diff views merge contains edges from both snapshots, which can create
+    // cycles (A contains B, B contains A). computeView must handle this
+    // gracefully instead of recursing infinitely.
+    const fileA = node('fileA', 'file', { filePath: 'a.ts' })
+    const fileB = node('fileB', 'file', { filePath: 'b.ts' })
+    const fnA = node('fnA', 'function', { filePath: 'a.ts' })
+    const fnB = node('fnB', 'function', { filePath: 'b.ts' })
+
+    const edges: GraphEdge[] = [
+      // Normal containment
+      { source: 'fileA', target: 'fnA', kind: 'contains' },
+      { source: 'fileB', target: 'fnB', kind: 'contains' },
+      // Cycle: fileA contains fnB and fileB contains fnA (from merged snapshots)
+      { source: 'fileA', target: 'fnB', kind: 'contains' },
+      { source: 'fileB', target: 'fnA', kind: 'contains' }
+    ]
+
+    // Should not throw "Maximum call stack size exceeded"
+    const result = computeView([fileA, fileB, fnA, fnB], edges, {
+      ...DEFAULT_VIEW_PARAMS,
+      groupByFile: true,
+      expandedGroups: ['a.ts', 'b.ts']
+    })
+
+    // Both functions should appear in groups (first-claim wins, so one group
+    // claims both and the other may have none — the key assertion is no crash).
+    expect(result.groups.length).toBeGreaterThan(0)
+    const allChildIds = result.groups.flatMap((g) => g.childIds)
+    expect(allChildIds.length).toBeGreaterThanOrEqual(2)
+  })
+
+  it('handles self-referencing contains edges without overflow', () => {
+    const file = node('file1', 'file', { filePath: 'mod.rs' })
+    const fn1 = node('fn1', 'function', { filePath: 'mod.rs' })
+
+    const edges: GraphEdge[] = [
+      { source: 'file1', target: 'fn1', kind: 'contains' },
+      // Pathological: node contains itself (from snapshot merge collision)
+      { source: 'fn1', target: 'fn1', kind: 'contains' }
+    ]
+
+    // Expand the group so childIds are populated (collapsed groups have [])
+    const result = computeView([file, fn1], edges, {
+      ...DEFAULT_VIEW_PARAMS,
+      groupByFile: true,
+      expandedGroups: ['mod.rs']
+    })
+
+    expect(result.groups).toHaveLength(1)
+    expect(result.groups[0].childIds).toContain('fn1')
   })
 })
 

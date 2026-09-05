@@ -233,6 +233,7 @@ function isGroupExpanded(filePath: string | undefined, expandedGroups: string[])
 
 function collectDescendants(nodeId: string, containsChildren: Map<string, string[]>, out: Set<string>): void {
   for (const child of containsChildren.get(nodeId) ?? []) {
+    if (out.has(child)) continue // cycle guard — diff views can merge `contains` edges from both snapshots
     out.add(child)
     collectDescendants(child, containsChildren, out)
   }
@@ -285,25 +286,30 @@ export function computeView(allNodes: GraphNode[], allEdges: GraphEdge[], params
   let nodes = allNodes.filter((n) => !hiddenKindSet.has(n.kind))
   let nodeIds = new Set(nodes.map((n) => n.id))
 
-  // hiddenPaths filter (prefix-match semantics)
-  if (hiddenPaths.length > 0) {
-    const hSet = new Set(hiddenPaths)
-    nodes = nodes.filter((n) => !isHiddenByPath(n, hSet))
-    nodeIds = new Set(nodes.map((n) => n.id))
-  }
-
-  // excludePatterns filter
-  if (excludePatterns.trim()) {
-    const regexes = excludePatterns
-      .split(',')
-      .map(globToRegex)
-      .filter((r): r is RegExp => r !== null)
-    if (regexes.length > 0) {
-      nodes = nodes.filter((n) => {
-        const fp = n.filePath ?? ''
-        return !regexes.some((r) => r.test(fp))
-      })
+  // When scopeFiles provides a whitelist (e.g. PR review mode), it becomes
+  // the authoritative file filter — skip hiddenPaths and excludePatterns so
+  // the explorer sidebar cannot hide PR-relevant files.
+  if (scopeFiles.length === 0) {
+    // hiddenPaths filter (prefix-match semantics)
+    if (hiddenPaths.length > 0) {
+      const hSet = new Set(hiddenPaths)
+      nodes = nodes.filter((n) => !isHiddenByPath(n, hSet))
       nodeIds = new Set(nodes.map((n) => n.id))
+    }
+
+    // excludePatterns filter
+    if (excludePatterns.trim()) {
+      const regexes = excludePatterns
+        .split(',')
+        .map(globToRegex)
+        .filter((r): r is RegExp => r !== null)
+      if (regexes.length > 0) {
+        nodes = nodes.filter((n) => {
+          const fp = n.filePath ?? ''
+          return !regexes.some((r) => r.test(fp))
+        })
+        nodeIds = new Set(nodes.map((n) => n.id))
+      }
     }
   }
 

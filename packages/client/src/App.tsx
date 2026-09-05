@@ -207,6 +207,24 @@ export default function App() {
     get diffCgIdMap() {
       return state.diffCgIdMap
     },
+    get scopeFiles() {
+      return state.scopeFiles
+    },
+    get prStack() {
+      return state.prStack
+    },
+    get baseRef() {
+      return state.baseRef
+    },
+    get targetRef() {
+      return state.targetRef
+    },
+    get isComputing() {
+      return state.isComputing
+    },
+    get diffError() {
+      return state.diffError
+    },
     get gitCommits() {
       return state.gitGraph?.commits ?? []
     },

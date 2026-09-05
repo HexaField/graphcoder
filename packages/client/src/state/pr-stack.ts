@@ -33,24 +33,11 @@ export const prStackInitial: PrStackState = {
   error: null
 }
 
-/** Collect all unique file paths across every PR in the stack. */
-function collectScopeFiles(prs: PrInfo[]): string[] {
-  const set = new Set<string>()
-  for (const pr of prs) {
-    for (const f of pr.files) set.add(f)
-  }
-  return [...set]
-}
-
 export async function loadPrStack(base: string, tip: string): Promise<void> {
   setState('prStack', { loading: true, error: null, baseRef: base, tipRef: tip })
   try {
     const result = await fetchPrStack(base, tip)
     setState('prStack', { prs: result.prs, loading: false, activePrIndex: 0 })
-
-    // Scope the graph to only files the PR stack touches.
-    setState('scopeFiles', collectScopeFiles(result.prs))
-
     syncUrlParams()
 
     // Auto-import annotations so the sidebar populates without a manual click.
@@ -84,8 +71,17 @@ export async function importPrAnnotations(): Promise<void> {
   }
 }
 
-/** Set the temporal diff refs and run the diff for a given PR. */
+/** Set the temporal diff refs, scope to this PR's files, and run the diff. */
 async function triggerDiffForPr(pr: PrInfo): Promise<void> {
+  // Scope the graph to only files this PR touches — each PR review shows
+  // just its own files, not the entire stack.
+  // Spread to unwrap SolidJS store proxies — passing a proxy directly to
+  // setState for a different key can silently produce an empty array.
+  const files = [...pr.files]
+  setState('scopeFiles', files)
+  // Auto-expand all scoped file groups so symbols render immediately.
+  // Without this, all groups collapse and ELK receives empty containers.
+  setState('expandedGroups', files)
   setState('baseRef', pr.baseCommitHash)
   setState('targetRef', pr.commitHash)
   const { runTemporalDiff } = await import('./temporal.js')
@@ -96,7 +92,21 @@ export async function setActivePr(index: number): Promise<void> {
   const prs = state.prStack.prs
   if (index < 0 || index >= prs.length) return
   setState('prStack', 'activePrIndex', index)
-  await triggerDiffForPr(prs[index])
+  // Unwrap the SolidJS store proxy into a plain object so triggerDiffForPr
+  // gets real arrays, not reactive proxies that break setState cross-key.
+  const pr = prs[index]
+  const plain: PrInfo = {
+    index: pr.index,
+    branch: pr.branch,
+    title: pr.title,
+    commitHash: pr.commitHash,
+    baseCommitHash: pr.baseCommitHash,
+    parentBranch: pr.parentBranch,
+    files: [...pr.files],
+    stats: { additions: pr.stats.additions, deletions: pr.stats.deletions },
+    memberIds: [...pr.memberIds]
+  }
+  await triggerDiffForPr(plain)
 }
 
 export async function nextPr(): Promise<void> {
@@ -111,7 +121,8 @@ export async function prevPr(): Promise<void> {
 
 export function clearPrStack(): void {
   setState('prStack', prStackInitial)
-  // Remove the scope filter so the full graph returns.
+  // Remove the scope filter and auto-expanded groups so the full graph returns.
   setState('scopeFiles', [])
+  setState('expandedGroups', [])
   syncUrlParams()
 }
