@@ -9,7 +9,8 @@ import {
   goForward,
   selectNode,
   setFocus,
-  state
+  state,
+  toggleBodyFlow
 } from '../state/store.js'
 import { searchNodes } from '../api/graph.js'
 import { CodeViewer } from './CodeViewer.js'
@@ -134,6 +135,24 @@ export const NodeInspector: Component = () => {
                 >
                   {state.focusedNodeId === detail().node.id ? 'Unfocus' : 'Focus'}
                 </button>
+                <Show when={detail().node.kind === 'function' || detail().node.kind === 'method'}>
+                  <button
+                    class={`text-xs px-2 py-0.5 rounded border transition-colors ${
+                      state.expandedBodyFlows.has(detail().node.id)
+                        ? "bg-emerald-100 dark:bg-emerald-900/40 border-emerald-300 dark:border-emerald-700 text-emerald-700 dark:text-emerald-300"
+                        : "border-gray-300 dark:border-gray-600 text-emerald-600 dark:text-emerald-400 hover:bg-gray-100 dark:hover:bg-gray-800"
+                    }`}
+                    disabled={state.bodyFlowLoading.has(detail().node.id)}
+                    onClick={() => void toggleBodyFlow(detail().node.id)}
+                    title={state.expandedBodyFlows.has(detail().node.id) ? 'Collapse body flow' : 'Expand body flow'}
+                  >
+                    {state.bodyFlowLoading.has(detail().node.id)
+                      ? '…'
+                      : state.expandedBodyFlows.has(detail().node.id)
+                        ? 'Hide Flow'
+                        : 'Body Flow'}
+                  </button>
+                </Show>
 
                 <button
                   class="text-xs px-1.5 py-0.5 rounded text-gray-400 dark:text-gray-500

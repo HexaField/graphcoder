@@ -1,4 +1,4 @@
-import type { EntryPoint, TracedFlow, FlowTracerConfig } from '@graphcoder/core'
+import type { EntryPoint, TracedFlow, FlowTracerConfig, BodyFlow } from '@graphcoder/core'
 import { API_BASE as API } from '../config.js'
 
 async function handleResponse<T>(res: Response): Promise<T> {
@@ -54,4 +54,10 @@ export async function fetchConvergence(flowNodeIds: string[][], minFlowCount = 2
   })
   const data = await handleResponse<{ convergence: ConvergenceEntry[] }>(res)
   return data.convergence
+}
+
+export async function fetchBodyFlow(nodeId: string): Promise<BodyFlow> {
+  const res = await fetch(`${API}/api/nodes/${encodeURIComponent(nodeId)}/body-flow`)
+  const data = await handleResponse<{ bodyFlow: BodyFlow }>(res)
+  return data.bodyFlow
 }

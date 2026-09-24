@@ -56,6 +56,7 @@ import { resolvedTheme } from '../state/theme.js'
 import type { DiffOverlay, HitResult } from './ThreeRenderer.js'
 import { ThreeRenderer } from './ThreeRenderer.js'
 import { AnnotationOverlay } from './AnnotationOverlay.js'
+import { BodyFlowOverlay } from './BodyFlowOverlay.js'
 
 /** Layout result paired with the node lookup used to produce it.
  *  Keeping them together prevents rendering with a mismatched (layout, nodeById)
@@ -779,6 +780,14 @@ export const GraphCanvas: Component = () => {
       <canvas ref={canvasRef} class="w-full h-full block" data-testid="graph-webgl-canvas" />
 
       <AnnotationOverlay
+        panX={cam().panX}
+        panY={cam().panY}
+        zoom={cam().zoom}
+        layoutNodes={layoutSnap()?.result.nodes ?? null}
+        semanticToLayoutId={semanticToLayoutId()}
+      />
+
+      <BodyFlowOverlay
         panX={cam().panX}
         panY={cam().panY}
         zoom={cam().zoom}

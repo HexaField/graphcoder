@@ -4,7 +4,7 @@ import type { ElkExtendedEdge, ElkNode } from 'elkjs/lib/elk-api.js'
 // gives us a constructor whose instances are real Web Workers — ELK layout
 // then runs off the main thread entirely.
 import ELKWorker from 'elkjs/lib/elk-worker.min.js?worker'
-import type { FileGroup, GraphDirection, GraphEdge, GraphNode } from '@graphcoder/core'
+import type { FileGroup, GraphDirection, GraphEdge, GraphNode, CFNode, CFEdge } from '@graphcoder/core'
 
 const elk = new ELK({ workerFactory: () => new ELKWorker() })
 
@@ -1202,4 +1202,111 @@ export async function layoutGraph(
   }
 
   return layoutFlat(nodes, edges, direction, nodeIds)
+}
+
+// ── Body flow layout ─────────────────────────────────────────────────────────
+
+export interface BFLayoutNode {
+  id: string
+  x: number
+  y: number
+  width: number
+  height: number
+}
+
+export interface BFLayoutEdge {
+  source: string
+  target: string
+  kind: string
+  points: Array<{ x: number; y: number }>
+}
+
+export interface BFLayoutResult {
+  nodes: Map<string, BFLayoutNode>
+  edges: BFLayoutEdge[]
+  width: number
+  height: number
+}
+
+const BF_CHAR_W = 6.5
+const BF_PAD_X = 28
+const BF_MIN_W = 80
+const BF_NODE_H = 30
+
+const BF_MAX_W = 220
+
+function bfNodeWidth(label: string): number {
+  return Math.min(BF_MAX_W, Math.max(BF_MIN_W, label.length * BF_CHAR_W + BF_PAD_X))
+}
+
+export async function layoutBodyFlow(nodes: CFNode[], edges: CFEdge[]): Promise<BFLayoutResult> {
+  const elkNodes: ElkNode[] = nodes.map((n) => ({
+    id: n.id,
+    width: bfNodeWidth(n.label),
+    height: BF_NODE_H
+  }))
+
+  const elkEdges: ElkExtendedEdge[] = edges.map((e, i) => ({
+    id: `bf-e${i}`,
+    sources: [e.source],
+    targets: [e.target]
+  }))
+
+  const graph: ElkNode = {
+    id: 'body-flow-root',
+    layoutOptions: {
+      'elk.algorithm': 'layered',
+      'elk.direction': 'DOWN',
+      'elk.spacing.nodeNode': '20',
+      'elk.layered.spacing.nodeNodeBetweenLayers': '35',
+      'elk.layered.nodePlacement.strategy': 'BRANDES_KOEPF',
+      'elk.edgeRouting': 'ORTHOGONAL'
+    },
+    children: elkNodes,
+    edges: elkEdges
+  }
+
+  const result = await elk.layout(graph)
+
+  const layoutNodes = new Map<string, BFLayoutNode>()
+  for (const child of result.children ?? []) {
+    layoutNodes.set(child.id, {
+      id: child.id,
+      x: child.x ?? 0,
+      y: child.y ?? 0,
+      width: child.width ?? BF_MIN_W,
+      height: child.height ?? BF_NODE_H
+    })
+  }
+
+  const edgeKindByEndpoints = new Map<string, string>()
+  for (const e of edges) {
+    edgeKindByEndpoints.set(`${e.source}\x00${e.target}`, e.kind)
+  }
+
+  const layoutEdges: BFLayoutEdge[] = []
+  for (const edge of result.edges ?? []) {
+    const ext = edge as ElkExtendedEdge
+    const source = (ext.sources ?? [])[0] ?? ''
+    const target = (ext.targets ?? [])[0] ?? ''
+    const points: Array<{ x: number; y: number }> = []
+    for (const section of ext.sections ?? []) {
+      points.push(section.startPoint)
+      for (const bp of section.bendPoints ?? []) points.push(bp)
+      points.push(section.endPoint)
+    }
+    layoutEdges.push({
+      source,
+      target,
+      kind: edgeKindByEndpoints.get(`${source}\x00${target}`) ?? 'next',
+      points
+    })
+  }
+
+  return {
+    nodes: layoutNodes,
+    edges: layoutEdges,
+    width: result.width ?? 0,
+    height: result.height ?? 0
+  }
 }

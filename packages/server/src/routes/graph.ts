@@ -6,6 +6,8 @@ import { graphService } from '../codegraph/service.js'
 import { broadcastGraphUpdate } from '../ws.js'
 import { openProjectSchema, searchQuerySchema } from '../schemas/graph.js'
 import type { Node } from '@colbymchenry/codegraph'
+import { extractBodyFlow } from '../body-flow/extractor.js'
+import { parseSource, supportsLanguage } from '../body-flow/parser.js'
 
 const router = Router()
 
@@ -270,6 +272,74 @@ router.get('/nodes/:nodeId/callgraph', (req: Request, res: Response) => {
       edges: subgraph.edges,
       rootId: nodeId
     })
+  } catch (err) {
+    res.status(500).json({ error: err instanceof Error ? err.message : 'Internal error' })
+  }
+})
+
+// GET /nodes/:nodeId/body-flow
+router.get('/nodes/:nodeId/body-flow', async (req: Request, res: Response) => {
+  if (!graphService.isOpen()) {
+    res.status(503).json({ error: 'No project open' })
+    return
+  }
+
+  const { nodeId } = req.params
+
+  try {
+    const cg = graphService.getCodeGraph()
+    const node = cg.getNode(nodeId)
+
+    if (!node) {
+      res.status(404).json({ error: `Node ${nodeId} not found` })
+      return
+    }
+
+    const bodyKinds = new Set(['function', 'method'])
+    if (!bodyKinds.has(node.kind)) {
+      res.status(400).json({ error: `Node ${node.name} (${node.kind}) has no parseable body` })
+      return
+    }
+
+    if (!node.filePath) {
+      res.status(400).json({ error: `Node ${node.name} has no file path` })
+      return
+    }
+
+    const lang = node.filePath.endsWith('.tsx')
+      ? 'tsx'
+      : node.filePath.endsWith('.ts')
+        ? 'typescript'
+        : node.filePath.endsWith('.jsx')
+          ? 'jsx'
+          : node.filePath.endsWith('.js') || node.filePath.endsWith('.mjs') || node.filePath.endsWith('.cjs')
+            ? 'javascript'
+            : ''
+
+    if (!lang || !supportsLanguage(lang)) {
+      res.status(400).json({ error: `Language not supported for body flow: ${node.filePath}` })
+      return
+    }
+
+    const projectRoot = graphService.getProjectRoot()
+    const filePath = join(projectRoot, node.filePath)
+    const source = await readFile(filePath, 'utf-8')
+
+    const tree = parseSource(source, lang)
+    if (!tree) {
+      res.status(500).json({ error: 'Failed to parse source file' })
+      return
+    }
+
+    const outgoing = graphService.getOutgoingEdgesAugmented(nodeId)
+
+    const bodyFlow = extractBodyFlow(node, outgoing, tree)
+    if (!bodyFlow) {
+      res.status(400).json({ error: `Could not extract body flow for ${node.name}` })
+      return
+    }
+
+    res.json({ bodyFlow })
   } catch (err) {
     res.status(500).json({ error: err instanceof Error ? err.message : 'Internal error' })
   }

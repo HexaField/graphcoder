@@ -125,6 +125,10 @@ export {
 } from './flow.js'
 export type { FlowState, ViewMode } from './flow.js'
 
+// Section: Body flow (intra-function CFG)
+export { toggleBodyFlow, collapseBodyFlow, collapseAllBodyFlows } from './body-flow.js'
+export type { BodyFlowState } from './body-flow.js'
+
 // Section: PR Stack
 export { loadPrStack, importPrAnnotations, setActivePr, nextPr, prevPr, clearPrStack } from './pr-stack.js'
 export type { PrInfo, PrStackState } from './pr-stack.js'

@@ -173,6 +173,9 @@ export { deriveShape } from './annotations/types.js'
 export type { ResolutionResult } from './annotations/resolve.js'
 export type { ExtractedPath } from './annotations/extract.js'
 
+// Body flow (intra-function control flow)
+export type { CFNode, CFNodeKind, CFEdge, CFEdgeKind, BodyFlow } from './body-flow/index.js'
+
 // Flow tracing
 export type { EntryPoint, TracedFlow, Branch, FlowTracerConfig, NoiseFilter } from './flow/index.js'
 export {

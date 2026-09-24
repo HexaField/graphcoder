@@ -13,6 +13,8 @@ import type { AnnotationsState } from './annotations.js'
 import { annotationsInitial } from './annotations.js'
 import type { FlowState } from './flow.js'
 import { flowInitial } from './flow.js'
+import type { BodyFlowState } from './body-flow.js'
+import { bodyFlowInitial } from './body-flow.js'
 import type { PrStackState } from './pr-stack.js'
 import { prStackInitial } from './pr-stack.js'
 import type { TemporalState } from './temporal.js'
@@ -33,7 +35,8 @@ export type AppState = ProjectState &
   HierarchyState &
   TemporalState &
   AnnotationsState &
-  FlowState & {
+  FlowState &
+  BodyFlowState & {
     prStack: PrStackState
   }
 
@@ -101,6 +104,9 @@ export const [state, setState] = createStore<AppState>({
 
   // Flow tracing
   ...flowInitial,
+
+  // Body flow (intra-function CFG)
+  ...bodyFlowInitial,
 
   // PR Stack
   prStack: prStackInitial
