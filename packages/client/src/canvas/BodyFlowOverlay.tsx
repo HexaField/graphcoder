@@ -2,6 +2,7 @@ import { type Component, For, Show, createEffect, createMemo, createSignal } fro
 import { flowSuccessors, sliceBodyFlow, type BodyFlow, type CFNode } from '@graphcoder/core'
 import {
   BF_BLOCK_PAD_Y,
+  BF_DIAMOND_TEXT_SHARE,
   BF_ROW_H,
   layoutBodyFlow,
   type BFLayoutEdge,
@@ -179,7 +180,7 @@ function NodeShape(props: {
             font-size="10"
             font-family="ui-monospace, monospace"
           >
-            {fit(n().label, l().width)}
+            {fit(n().label, n().kind === 'branch' ? l().width * BF_DIAMOND_TEXT_SHARE : l().width)}
           </text>
         }
       >

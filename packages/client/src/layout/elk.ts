@@ -1242,7 +1242,16 @@ function bfNodeWidth(label: string): number {
   return Math.min(BF_MAX_W, Math.max(BF_MIN_W, label.length * BF_CHAR_W + BF_PAD_X))
 }
 
+/** A diamond's text row only has about this share of its width clear of the slanted edges */
+export const BF_DIAMOND_TEXT_SHARE = 0.7
+
 function bfNodeSize(n: CFNode): { width: number; height: number } {
+  if (n.kind === 'branch') {
+    return {
+      width: Math.min(BF_MAX_W / BF_DIAMOND_TEXT_SHARE, bfNodeWidth(n.label) / BF_DIAMOND_TEXT_SHARE),
+      height: BF_NODE_H
+    }
+  }
   if (!n.calls) return { width: bfNodeWidth(n.label), height: BF_NODE_H }
   return {
     width: Math.max(...n.calls.map((c) => bfNodeWidth(c.label))),
