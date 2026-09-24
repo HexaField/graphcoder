@@ -46,7 +46,7 @@ async function waitForProposedAnnotation(timeoutMs = 15_000): Promise<{
   status: string
   description: string
   reasoning: string | null
-  members: string[]
+  members: Array<{ id: string }>
 }> {
   const deadline = Date.now() + timeoutMs
   while (Date.now() < deadline) {
@@ -139,7 +139,7 @@ test.describe('AI Suggest pipeline (Phase 3b)', () => {
     expect(proposed.members.length).toBeGreaterThan(0)
     for (const member of proposed.members) {
       // Semantic IDs consist of 64 hex characters
-      expect(member).toMatch(/^[0-9a-f]{64}$/)
+      expect(member.id).toMatch(/^[0-9a-f]{64}$/)
     }
   })
 
@@ -454,7 +454,7 @@ test.describe('AI Suggest pipeline (Phase 3b)', () => {
       kind: string
       description: string
       reasoning: string | null
-      members: string[]
+      members: Array<{ id: string }>
     }
 
     expect(final.status).toBe('active')

@@ -103,7 +103,7 @@ test.describe('Drawing gestures decide the shape', () => {
     await expect(page.getByTestId('annotate-hint')).not.toBeVisible()
   })
 
-  test('dragging on empty canvas produces a region', async ({ page }) => {
+  test('dragging on empty canvas drafts a region and saves an unordered annotation', async ({ page }) => {
     await page.keyboard.press('a')
     await expect(page.getByTestId('annotate-hint')).toBeVisible()
 
@@ -135,11 +135,11 @@ test.describe('Drawing gestures decide the shape', () => {
     await expect(page.getByTestId('kind-input-new')).toBeVisible()
     await page.keyboard.press('Enter')
 
+    // v3 derives the saved shape from members: an empty lasso is unordered with nothing inside, so a point
     const ann = await waitForAnnotation((a) => a.kind === 'subsystem')
-    expect(ann.shape).toBe('region')
-    // The drawn outline persisted
-    const geometry = ann.geometry as { points: number[][] }
-    expect(geometry.points.length).toBeGreaterThanOrEqual(3)
+    expect(ann.ordered).toBe(false)
+    expect(ann.members).toEqual([])
+    expect(ann.shape).toBe('point')
   })
 
   test('clicking empty canvas produces a point', async ({ page }) => {

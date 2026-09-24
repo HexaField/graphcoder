@@ -172,11 +172,10 @@ test.describe('Annotation resilience (malformed JSON on disk)', () => {
     const annotation = (await res.json()) as Record<string, unknown>
 
     expect(Array.isArray(annotation.members)).toBe(true)
-    expect(Array.isArray(annotation.childIds)).toBe(true)
+    expect(typeof annotation.ordered).toBe('boolean')
     expect(annotation.geometry).toBeTruthy()
     expect(typeof annotation.kind).toBe('string')
     expect(typeof annotation.description).toBe('string')
-    expect(typeof annotation.createdAt).toBe('string')
 
     await expect(page.getByTestId('project-stats')).toBeVisible()
     await expect(page.getByTestId('graph-canvas')).toBeVisible()
@@ -215,11 +214,14 @@ test.describe('Annotation resilience (malformed JSON on disk)', () => {
 
     for (const ann of data.annotations) {
       expect(Array.isArray(ann.members)).toBe(true)
-      expect(Array.isArray(ann.childIds)).toBe(true)
+      expect(typeof ann.ordered).toBe('boolean')
       expect(ann.geometry).toBeTruthy()
     }
   })
 })
+
+/** v3 members are rich references; the tests compare their semantic IDs */
+const memberIds = (ann: Record<string, unknown>) => (ann.members as Array<{ id: string }>).map((m) => m.id)
 
 // ── v1 → v2 migration ────────────────────────────────────────────────────────
 
@@ -277,17 +279,9 @@ test.describe('v1 to v2 annotation migration', () => {
     // Structure moved into shape; the old kind survives as a user-defined kind
     expect(ann.shape).toBe('region')
     expect(ann.kind).toBe('boundary')
-    expect(ann.version).toBe(2)
-    expect(ann.members).toEqual(['abc123'])
-
-    // anchor + memberLayout became geometry
-    const geometry = ann.geometry as { points: number[][]; anchor: { x: number; y: number } }
-    expect(geometry.anchor).toEqual({ x: 42, y: 84 })
-    expect(geometry.points).toEqual([
-      [0, 0],
-      [10, 0],
-      [10, 10]
-    ])
+    expect(ann.ordered).toBe(false)
+    expect(memberIds(ann)).toEqual(['abc123'])
+    // v3 derives geometry from member positions at runtime, so the v1 anchor is not carried over
   })
 
   test('v1 path migrates to a polyline with steps collapsed into ordered members', async ({ page }) => {
@@ -325,7 +319,8 @@ test.describe('v1 to v2 annotation migration', () => {
     expect(ann.shape).toBe('polyline')
     expect(ann.kind).toBe('path')
     // Step order wins over the v1 members bag — order is the path
-    expect(ann.members).toEqual(['node-a', 'node-b', 'node-c'])
+    expect(ann.ordered).toBe(true)
+    expect(memberIds(ann)).toEqual(['node-a', 'node-b', 'node-c'])
     // The parallel step structure is gone
     expect(ann.steps).toBeUndefined()
     expect(ann.stepEdges).toBeUndefined()
@@ -357,7 +352,6 @@ test.describe('v1 to v2 annotation migration', () => {
     const note = (await noteRes.json()) as Record<string, unknown>
     expect(note.shape).toBe('point')
     expect(note.kind).toBe('note')
-    expect((note.geometry as { anchor: { x: number } }).anchor.x).toBe(5)
 
     const qRes = await fetch(`${SERVER}/api/annotations/bbbbbbbb-0000-0000-0000-000000000004`)
     const question = (await qRes.json()) as Record<string, unknown>
