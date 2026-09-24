@@ -1215,6 +1215,8 @@ export interface BFLayoutNode {
 }
 
 export interface BFLayoutEdge {
+  /** Index into the body flow's `edges` */
+  index: number
   source: string
   target: string
   kind: string
@@ -1232,19 +1234,24 @@ const BF_CHAR_W = 6.5
 const BF_PAD_X = 28
 const BF_MIN_W = 80
 const BF_NODE_H = 30
-
 const BF_MAX_W = 220
+export const BF_ROW_H = 16
+export const BF_BLOCK_PAD_Y = 7
 
 function bfNodeWidth(label: string): number {
   return Math.min(BF_MAX_W, Math.max(BF_MIN_W, label.length * BF_CHAR_W + BF_PAD_X))
 }
 
+function bfNodeSize(n: CFNode): { width: number; height: number } {
+  if (!n.calls) return { width: bfNodeWidth(n.label), height: BF_NODE_H }
+  return {
+    width: Math.max(...n.calls.map((c) => bfNodeWidth(c.label))),
+    height: n.calls.length * BF_ROW_H + BF_BLOCK_PAD_Y * 2
+  }
+}
+
 export async function layoutBodyFlow(nodes: CFNode[], edges: CFEdge[]): Promise<BFLayoutResult> {
-  const elkNodes: ElkNode[] = nodes.map((n) => ({
-    id: n.id,
-    width: bfNodeWidth(n.label),
-    height: BF_NODE_H
-  }))
+  const elkNodes: ElkNode[] = nodes.map((n) => ({ id: n.id, ...bfNodeSize(n) }))
 
   const elkEdges: ElkExtendedEdge[] = edges.map((e, i) => ({
     id: `bf-e${i}`,
@@ -1279,16 +1286,11 @@ export async function layoutBodyFlow(nodes: CFNode[], edges: CFEdge[]): Promise<
     })
   }
 
-  const edgeKindByEndpoints = new Map<string, string>()
-  for (const e of edges) {
-    edgeKindByEndpoints.set(`${e.source}\x00${e.target}`, e.kind)
-  }
-
   const layoutEdges: BFLayoutEdge[] = []
   for (const edge of result.edges ?? []) {
     const ext = edge as ElkExtendedEdge
-    const source = (ext.sources ?? [])[0] ?? ''
-    const target = (ext.targets ?? [])[0] ?? ''
+    // Two edges can join the same pair with different kinds (an empty branch arm), so map back by id
+    const index = Number(ext.id.slice('bf-e'.length))
     const points: Array<{ x: number; y: number }> = []
     for (const section of ext.sections ?? []) {
       points.push(section.startPoint)
@@ -1296,9 +1298,10 @@ export async function layoutBodyFlow(nodes: CFNode[], edges: CFEdge[]): Promise<
       points.push(section.endPoint)
     }
     layoutEdges.push({
-      source,
-      target,
-      kind: edgeKindByEndpoints.get(`${source}\x00${target}`) ?? 'next',
+      index,
+      source: (ext.sources ?? [])[0] ?? '',
+      target: (ext.targets ?? [])[0] ?? '',
+      kind: edges[index]?.kind ?? 'next',
       points
     })
   }

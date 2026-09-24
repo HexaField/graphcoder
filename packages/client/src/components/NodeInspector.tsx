@@ -1,5 +1,6 @@
 import type { Component } from 'solid-js'
 import { createSignal, Show } from 'solid-js'
+import { BODY_FLOW_KINDS } from '@graphcoder/core'
 import {
   canGoBack,
   canGoForward,
@@ -135,8 +136,18 @@ export const NodeInspector: Component = () => {
                 >
                   {state.focusedNodeId === detail().node.id ? 'Unfocus' : 'Focus'}
                 </button>
-                <Show when={detail().node.kind === 'function' || detail().node.kind === 'method'}>
+                <Show when={state.bodyFlowError?.nodeId === detail().node.id}>
+                  <span
+                    data-testid="body-flow-error"
+                    class="text-xs text-red-600 dark:text-red-400 truncate max-w-64"
+                    title={state.bodyFlowError?.message}
+                  >
+                    {state.bodyFlowError?.message}
+                  </span>
+                </Show>
+                <Show when={BODY_FLOW_KINDS.has(detail().node.kind)}>
                   <button
+                    data-testid="body-flow-toggle"
                     class={`text-xs px-2 py-0.5 rounded border transition-colors ${
                       state.expandedBodyFlows.has(detail().node.id)
                         ? "bg-emerald-100 dark:bg-emerald-900/40 border-emerald-300 dark:border-emerald-700 text-emerald-700 dark:text-emerald-300"

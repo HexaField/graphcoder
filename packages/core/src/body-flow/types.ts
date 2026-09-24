@@ -1,13 +1,35 @@
-export type CFNodeKind = 'entry' | 'exit' | 'call' | 'branch' | 'loop' | 'try' | 'catch' | 'finally' | 'guard' | 'await'
+export type CFNodeKind =
+  | 'entry'
+  | 'exit'
+  | 'call'
+  | 'block'
+  | 'branch'
+  | 'loop'
+  | 'try'
+  | 'catch'
+  | 'finally'
+  | 'guard'
+  | 'await'
+
+/** One call inside a `block` node — a run of sequential calls merged into a single node. */
+export interface CFCall {
+  label: string
+  line: number
+  targetNodeId?: string | null
+  await?: boolean
+}
 
 export interface CFNode {
   id: string
   kind: CFNodeKind
   label: string
+  /** 1-based source line */
   line: number
   column: number
   targetNodeId?: string | null
   condition?: string
+  /** Present only on `block` nodes, in execution order */
+  calls?: CFCall[]
 }
 
 export type CFEdgeKind =

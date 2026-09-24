@@ -31,6 +31,8 @@ export class GraphService {
     if (initialized) {
       console.log(`Opening existing CodeGraph project at ${projectRoot}`)
       this.cg = await CodeGraph.open(projectRoot)
+      // The watcher only sees edits made while open — catch up on anything changed since
+      await this.cg.sync()
     } else {
       console.log(`Initializing new CodeGraph project at ${projectRoot}`)
       this.cg = await CodeGraph.init(projectRoot)

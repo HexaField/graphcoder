@@ -6,7 +6,7 @@ export interface BodyFlowState {
   expandedBodyFlows: Set<string>
   bodyFlowData: Map<string, BodyFlow>
   bodyFlowLoading: Set<string>
-  bodyFlowError: string | null
+  bodyFlowError: { nodeId: string; message: string } | null
 }
 
 export const bodyFlowInitial: BodyFlowState = {
@@ -16,33 +16,22 @@ export const bodyFlowInitial: BodyFlowState = {
   bodyFlowError: null
 }
 
+/** Expanding always refetches — the source may have changed since the last extraction. */
 export async function toggleBodyFlow(nodeId: string): Promise<void> {
-  const expanded = state.expandedBodyFlows
-  if (expanded.has(nodeId)) {
-    const next = new Set(expanded)
-    next.delete(nodeId)
-    setState('expandedBodyFlows', next)
+  if (state.expandedBodyFlows.has(nodeId)) {
+    collapseBodyFlow(nodeId)
     return
   }
 
-  if (state.bodyFlowData.has(nodeId)) {
-    setState('expandedBodyFlows', new Set([...expanded, nodeId]))
-    return
-  }
-
-  const loading = new Set(state.bodyFlowLoading)
-  loading.add(nodeId)
-  setState('bodyFlowLoading', loading)
+  setState('bodyFlowLoading', new Set([...state.bodyFlowLoading, nodeId]))
   setState('bodyFlowError', null)
 
   try {
     const bodyFlow = await flowApi.fetchBodyFlow(nodeId)
-    const nextData = new Map(state.bodyFlowData)
-    nextData.set(nodeId, bodyFlow)
-    setState('bodyFlowData', nextData)
+    setState('bodyFlowData', new Map(state.bodyFlowData).set(nodeId, bodyFlow))
     setState('expandedBodyFlows', new Set([...state.expandedBodyFlows, nodeId]))
   } catch (e) {
-    setState('bodyFlowError', e instanceof Error ? e.message : 'Failed to load body flow')
+    setState('bodyFlowError', { nodeId, message: e instanceof Error ? e.message : 'Failed to load body flow' })
   } finally {
     const done = new Set(state.bodyFlowLoading)
     done.delete(nodeId)

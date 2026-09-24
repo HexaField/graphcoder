@@ -6,8 +6,9 @@ import { graphService } from '../codegraph/service.js'
 import { broadcastGraphUpdate } from '../ws.js'
 import { openProjectSchema, searchQuerySchema } from '../schemas/graph.js'
 import type { Node } from '@colbymchenry/codegraph'
+import { BODY_FLOW_KINDS } from '@graphcoder/core'
 import { extractBodyFlow } from '../body-flow/extractor.js'
-import { parseSource, supportsLanguage } from '../body-flow/parser.js'
+import { languageForPath, parseSource } from '../body-flow/parser.js'
 
 const router = Router()
 
@@ -295,28 +296,13 @@ router.get('/nodes/:nodeId/body-flow', async (req: Request, res: Response) => {
       return
     }
 
-    const bodyKinds = new Set(['function', 'method'])
-    if (!bodyKinds.has(node.kind)) {
+    if (!BODY_FLOW_KINDS.has(node.kind)) {
       res.status(400).json({ error: `Node ${node.name} (${node.kind}) has no parseable body` })
       return
     }
 
-    if (!node.filePath) {
-      res.status(400).json({ error: `Node ${node.name} has no file path` })
-      return
-    }
-
-    const lang = node.filePath.endsWith('.tsx')
-      ? 'tsx'
-      : node.filePath.endsWith('.ts')
-        ? 'typescript'
-        : node.filePath.endsWith('.jsx')
-          ? 'jsx'
-          : node.filePath.endsWith('.js') || node.filePath.endsWith('.mjs') || node.filePath.endsWith('.cjs')
-            ? 'javascript'
-            : ''
-
-    if (!lang || !supportsLanguage(lang)) {
+    const lang = node.filePath ? languageForPath(node.filePath) : null
+    if (!lang) {
       res.status(400).json({ error: `Language not supported for body flow: ${node.filePath}` })
       return
     }
@@ -333,7 +319,7 @@ router.get('/nodes/:nodeId/body-flow', async (req: Request, res: Response) => {
 
     const outgoing = graphService.getOutgoingEdgesAugmented(nodeId)
 
-    const bodyFlow = extractBodyFlow(node, outgoing, tree)
+    const bodyFlow = extractBodyFlow(node, outgoing, tree, lang)
     if (!bodyFlow) {
       res.status(400).json({ error: `Could not extract body flow for ${node.name}` })
       return

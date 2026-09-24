@@ -69,6 +69,7 @@ CodeGraph cannot link `fetch()` calls to route handlers because the URL is a run
 | 3     | ✅ Done | Annotation surface — draw-to-annotate, user-defined kinds, AI proposals           |
 | 3c    | ✅ Done | Consumer tooling — CLI, MCP server, PR stack UI                                   |
 | 3d    | ✅ Done | Flow tracing — entry points, call-path walk, Monaco inspector, navigation         |
+| 4-BF  | ✅ Done | Body flow — per-function control-flow chart, flow-path slice, TS/JS/Py/Go/Rust    |
 | 4     | Planned | Projections + constraints (sketch changes, enforce rules, measure reach)          |
 | 5     | Planned | Prospective state engine (projections → CoW graph forks, validation)              |
 | 6     | Planned | Code synthesis engine (ArchDiff → file changes → commit)                          |
@@ -192,6 +193,19 @@ The bottom panel shows detail for the selected node. Metadata on the left (signa
 ### Flow deduplication
 
 `traceFromEntryPoint` early-returns if a flow with the same entry node already exists. Prevents duplicate flows from URL restoration or repeated calls.
+
+## Body flow (intra-function control flow)
+
+`GET /api/nodes/:id/body-flow` parses the node's source file with tree-sitter on demand and returns a `BodyFlow` (CFG of `CFNode`/`CFEdge`, types in `packages/core/src/body-flow/`). Nothing is pre-indexed. Available for node kinds in `BODY_FLOW_KINDS` (function, method, route, component).
+
+- **Extractor** — `packages/server/src/body-flow/extractor.ts`. One generic walker driven by a `LanguageProfile` per grammar (node-type sets plus small hooks for switch cases, try parts, signatures). The walker threads a list of pending exits (`Exit[]`) through each statement, so merge points after `if`/`else`, `false → next`, `loop_exit`, `break`/`continue`/Go `fallthrough`, and switch fallthrough fall out naturally. An empty exit list means the code after is unreachable.
+- **Grammars** — `tree-sitter-typescript` (TS; the TSX grammar also parses JS/JSX), `tree-sitter-python`, `tree-sitter-go`, `tree-sitter-rust`. `languageForPath()` in `parser.ts` maps extensions. The native builds need `onlyBuiltDependencies` in `.npmrc` and `allowBuilds` in `pnpm-workspace.yaml`.
+- **Simplification** — structures that contain no calls or jumps are rolled back (`hollow`). Runs of 3+ straight-line calls merge into one `block` node with a `calls[]` list. Logging, and unresolved value helpers (`len`, `Ok`, `String`…), are noise. A `return` at the end of the function is a normal exit, not a `guard`. Calls inside conditions, loop headers, and call arguments only get a node when they link to a graph node.
+- **Call targets** — matched against the function's outgoing CodeGraph edges: same line plus `metadata.refName`, with column as the tie-break. CodeGraph pins every call inside an Express route handler to the route's own line (column 0), so there is a name-only fallback on the declaration line. `fetch()` resolves through the HTTP-bridge synthetic edge by method and path.
+- **Flow-view slice (4d)** — in flow view, `flowSuccessors()` + `sliceBodyFlow()` (core, pure) keep the CF nodes/edges on some path from entry to a call of the next traced function. The overlay draws them amber and dims the rest.
+- **Client** — `canvas/BodyFlowOverlay.tsx` renders each expanded flow as an HTML card with an SVG flowchart (ELK `layered`, top-down) anchored under its node. The card is clamped to the canvas area and scrolls. Expanding always refetches. Extraction errors show next to the inspector's Body Flow button.
+- **Line ranges come from the index** — a stale index (file edited since the last sync) makes `findFunction` miss. `GraphService.open()` therefore runs `cg.sync()` after `CodeGraph.open()`: the watcher only sees edits made while the project is open, and `tsx watch` restarts the server (closing the project) on every server edit.
+- **Tests** — `extractor.test.ts` (per-language CFG shapes), `core/src/body-flow/slice.test.ts`, and `client/tests/body-flow.spec.ts` (E2E on `test-fixtures/body-flow-project`, which holds TS, Python, Go, and Rust sources).
 
 ## Known gotchas
 
