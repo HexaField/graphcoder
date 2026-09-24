@@ -702,8 +702,9 @@ export const GraphCanvas: Component = () => {
     const trimmedKind = kind.trim()
     const finalLabel = label.trim() || trimmedKind || 'Untitled'
 
-    void addAnnotation(pending.shape, finalLabel, pending.members, {
+    void addAnnotation(finalLabel, pending.members, {
       kind: trimmedKind,
+      ordered: pending.shape === 'polyline',
       geometry: { points: pending.points, anchor: pending.anchor }
     })
 

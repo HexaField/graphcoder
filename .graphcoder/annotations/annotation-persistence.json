@@ -1,0 +1,62 @@
+{
+  "description": "CRUD operations for annotation JSON files in .graphcoder/annotations/. Slug-named files with canonical sorted-key JSON. Kind registry in annotation-kinds.json with auto-colour assignment. V1 to V2 migration via normalizeAnnotation.",
+  "kind": "domain",
+  "label": "Annotation Persistence",
+  "members": [
+    {
+      "file": "packages/core/src/annotations/store.ts",
+      "id": "3181f0b8e7c090b5779ff90e99542b38534fc97a5379a4ad5d71228653165def",
+      "note": "Generates UUID, writes {slug}.json with sortKeys canonical JSON.",
+      "ref": "createAnnotation"
+    },
+    {
+      "file": "packages/core/src/annotations/store.ts",
+      "id": "d514e8a17b10afef151d9b29344f6262894511b804c6cfb69c9435fd65bfe21d",
+      "note": "Writes canonical JSON with sortKeys.",
+      "ref": "saveAnnotation"
+    },
+    {
+      "file": "packages/core/src/annotations/store.ts",
+      "id": "4f27fdb71e55124dbce302b399ac6ed6a29af2284e99fcf33cfc43ef85ec5bb5",
+      "note": "Reads and deserialises a single annotation file.",
+      "ref": "loadAnnotation"
+    },
+    {
+      "file": "packages/core/src/annotations/store.ts",
+      "id": "2fe7e55dd63d3539ea3b2630e06e0bbb81a926eaa396dcea5e67b750b067c920",
+      "note": "Reads all .json files from the annotations directory.",
+      "ref": "loadAllAnnotations"
+    },
+    {
+      "file": "packages/core/src/annotations/store.ts",
+      "id": "e0f0e46f1b8d5f2f013731806d1df1da0185b863a3314ccf54ece65a1e4bb888",
+      "note": "Removes the annotation file from disk.",
+      "ref": "deleteAnnotation"
+    },
+    {
+      "file": "packages/core/src/annotations/types.ts",
+      "id": "a6f30615cfc0cc16a730bc0674ebfbc77f30f6fdf81e5afa01d3fa6a4b30132e",
+      "note": "The full interface: id, version, shape, kind, status, label, description, members, geometry, author, timestamps, reasoning.",
+      "ref": "Annotation"
+    },
+    {
+      "file": "packages/core/src/annotations/kinds.ts",
+      "id": "e477655f4e5cd4bde9cc4195aa6aa4e6ee18a4d3d6cd128f09402a9e77e32e52",
+      "note": "Reads the kind registry from annotation-kinds.json.",
+      "ref": "loadKinds"
+    },
+    {
+      "file": "packages/core/src/annotations/kinds.ts",
+      "id": "28fa467ec84c7e873f9140811d933a41fb73757a9f1fed7e143e9b3194375c0a",
+      "note": "Registers a kind if absent. Deterministic colour from name hash.",
+      "ref": "ensureKind"
+    },
+    {
+      "file": "packages/core/src/annotations/kinds.ts",
+      "id": "dd33301c99e648814eee2324751bc3113ca33650ec782bd8300b786b88b6c341",
+      "note": "Reconciles registry against kinds actually used in annotation files.",
+      "ref": "syncKindsFromAnnotations"
+    }
+  ],
+  "ordered": false
+}

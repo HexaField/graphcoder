@@ -1,0 +1,50 @@
+{
+  "description": "Gathers architectural context from the graph, dispatches to a pluggable AI provider, parses structured annotation proposals, and feeds them back through the annotation system. Supports iterative refinement via conversation history. Three provider backends: CLI (spawns external process), OpenAI-compatible (HTTP), and test (deterministic).",
+  "kind": "domain",
+  "label": "AI Suggest",
+  "members": [
+    {
+      "file": "packages/server/src/suggest/context.ts",
+      "id": "5929211e225cd8f398b6c5ffe0186160ff171c9a7826e5328a1ee55c9d628aee",
+      "note": "Scores nodes against prompt terms, expands BFS neighbourhood, collects edges and file tree, loads existing annotations. Produces SuggestContext.",
+      "ref": "gatherContext"
+    },
+    {
+      "file": "packages/server/src/suggest/providers/types.ts",
+      "id": "04ed0f22dc1292747d50e15c93a0bee1a2a87f48fe94419d6fa2eb43e6c7adf2",
+      "note": "Interface contract: suggest(req) and refine(req) returning SuggestResult.",
+      "ref": "AIProvider"
+    },
+    {
+      "file": "packages/server/src/suggest/providers/cli.ts",
+      "id": "9b33a0da0bf7ca28a589f5362e54d3dad323acd7966c9d9d693ee1531e8bde1e",
+      "note": "Spawns a CLI process, pipes system+context+user prompt to stdin, extracts JSON from stdout.",
+      "ref": "CLIProvider"
+    },
+    {
+      "file": "packages/server/src/suggest/providers/openai-compat.ts",
+      "id": "ef6d0630a31705dda6f36ac510ab6195d0af94d270b5e15e0d3dd09a2d8e0632",
+      "note": "Calls any /v1/chat/completions endpoint. Replays conversation history for refinement.",
+      "ref": "OpenAICompatProvider"
+    },
+    {
+      "file": "packages/server/src/suggest/providers/test.ts",
+      "id": "13aef38516b5018c69d75ac266afbafbc30c17ac5597f66f0bb729a480acc2d6",
+      "note": "Returns deterministic responses from matched nodes. No external invocation.",
+      "ref": "TestProvider"
+    },
+    {
+      "file": "packages/server/src/suggest/providers/types.ts",
+      "id": "78def808a47851654814c152bb98c5cb06d19fd6109c0fc295099d0b5cce4a22",
+      "note": "Discriminated union: cli, openai-compat, test.",
+      "ref": "ProviderConfig"
+    },
+    {
+      "file": "packages/server/src/ws.ts",
+      "id": "5f1b5a18d49cfdb76ad3fea87d9b2024ca2a0f06197ad5b585e33817a808dda2",
+      "note": "WebSocket notification when an AI proposal arrives.",
+      "ref": "broadcastAnnotationProposed"
+    }
+  ],
+  "ordered": false
+}

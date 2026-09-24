@@ -6,7 +6,7 @@
  * same shape, just in its own colour.
  */
 import { type Component, createMemo, For, Show } from 'solid-js'
-import type { Annotation, Point } from '@graphcoder/core'
+import type { Annotation, AnnotationMember, Point } from '@graphcoder/core'
 import type { LayoutNode } from '../layout/elk.js'
 import { state, selectAnnotation, kindColor } from '../state/store.js'
 
@@ -32,13 +32,13 @@ function isStale(ann: Annotation): boolean {
 }
 
 function memberPositions(
-  members: string[],
+  members: AnnotationMember[],
   semanticToLayoutId: Map<string, string>,
   layoutNodes: Map<string, LayoutNode>
 ): LayoutNode[] {
   const result: LayoutNode[] = []
-  for (const semId of members) {
-    const layoutId = semanticToLayoutId.get(semId)
+  for (const m of members) {
+    const layoutId = semanticToLayoutId.get(m.id)
     if (!layoutId) continue
     const node = layoutNodes.get(layoutId)
     if (node) result.push(node)

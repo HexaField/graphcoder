@@ -157,6 +157,7 @@ export type GraphDirection = 'LR' | 'TB'
 export type {
   Annotation,
   AnnotationKind,
+  AnnotationMember,
   AnnotationShape,
   AnnotationStatus,
   Geometry,
@@ -168,6 +169,7 @@ export type {
   AISuggestResponse,
   AISuggestedAnnotation
 } from './annotations/types.js'
+export { deriveShape } from './annotations/types.js'
 export type { ResolutionResult } from './annotations/resolve.js'
 export type { ExtractedPath } from './annotations/extract.js'
 

@@ -1,0 +1,32 @@
+[
+  {
+    "name": "domain",
+    "color": "#3b82f6",
+    "description": "A bounded subsystem with a coherent responsibility",
+    "createdAt": "2026-09-23T08:00:00.000Z"
+  },
+  {
+    "name": "data-flow",
+    "color": "#10b981",
+    "description": "An ordered sequence of members that data passes through",
+    "createdAt": "2026-09-23T08:00:00.000Z"
+  },
+  {
+    "name": "concern",
+    "color": "#f59e0b",
+    "description": "A cross-cutting architectural tension or design decision",
+    "createdAt": "2026-09-23T08:00:00.000Z"
+  },
+  {
+    "name": "contract",
+    "color": "#8b5cf6",
+    "description": "An interface boundary that external code depends on",
+    "createdAt": "2026-09-23T08:00:00.000Z"
+  },
+  {
+    "name": "test",
+    "color": "#6366f1",
+    "description": "",
+    "createdAt": "2026-09-23T06:51:46.641Z"
+  }
+]

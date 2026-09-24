@@ -1,96 +1,93 @@
 /**
- * Annotation model.
+ * Annotation model — v3.
  *
  * Two orthogonal axes:
- *   - SHAPE  — how it was drawn. Determines rendering. Fixed vocabulary.
- *   - KIND   — what it means. Free-form, user-defined. Just a string.
+ *   - SHAPE  — derived from ordered + member count. Drives rendering.
+ *   - KIND   — free-form, user-defined. Just a string.
  *
- * The user never picks a shape from a menu; the drawing gesture decides it.
- * The user names the kind, and the kind registry remembers it for next time.
+ * Committed format (on disk):
+ *   { kind, label, description, ordered, members: [{id, ref, file, note}] }
+ *
+ * Runtime adds: id (slug from filename), shape, status, geometry.
+ * AI proposals add: author, reasoning, status.
  */
 
-/** How an annotation was drawn — drives rendering, carries no meaning */
 export type AnnotationShape = 'region' | 'polyline' | 'point'
 
-/** Annotation lifecycle */
 export type AnnotationStatus = 'active' | 'proposed' | 'stale' | 'dismissed'
 
-/** A vertex in graph world coordinates */
 export type Point = [number, number]
 
-/** The drawn geometry, in graph world coordinates */
 export interface Geometry {
-  /** Outline vertices (region) or waypoints (polyline). Empty for point. */
   points: Point[]
-  /** Pin position and label anchor */
   anchor: { x: number; y: number }
 }
 
-/**
- * A user-defined annotation kind. Created on first use — typing a new
- * name in the inline input registers it with an auto-assigned colour.
- */
 export interface AnnotationKind {
-  /** Unique, user-typed. Case-preserved, matched case-insensitively. */
   name: string
-  /** Hex colour used for every annotation of this kind */
   color: string
   description: string
   createdAt: string
 }
 
-/** The unified annotation — one shape, one user-defined kind */
-export interface Annotation {
-  id: string // UUID, immutable after creation
-  version: number // schema version for migration
+/** A member reference — rich object with semantic ID + human-readable fields */
+export interface AnnotationMember {
+  /** Semantic ID (SHA-256 hash) — primary stable reference */
+  id: string
+  /** Human-readable qualified name — for git diff readability */
+  ref: string
+  /** File path — for git diff readability */
+  file: string
+  /** Per-member note */
+  note: string
+}
 
-  /** Gesture-determined structure */
+/** Runtime annotation — the full model used by server and client */
+export interface Annotation {
+  /** Slug (filename stem) — the annotation identifier */
+  id: string
+
+  /** Derived from ordered + member count */
   shape: AnnotationShape
-  /** User-defined semantic label. Empty string means unkinded. */
+  /** User-defined semantic label */
   kind: string
+  /** Derived from member resolution */
   status: AnnotationStatus
 
   label: string
   description: string
+  /** True for path/flow annotations where member order carries meaning */
+  ordered: boolean
+  /** Rich member references */
+  members: AnnotationMember[]
 
-  /**
-   * Architecture nodes this annotation covers (semantic IDs).
-   * ORDER IS SIGNIFICANT for polyline shapes — it is the traversal order.
-   */
-  members: string[]
-
-  /** The drawn shape */
+  /** Drawn geometry — runtime only, not committed */
   geometry: Geometry
 
-  /** Composition — parent/child nesting */
-  parentId: string | null
-  childIds: string[]
+  /** AI proposals carry author and reasoning (not committed for accepted annotations) */
+  author?: 'human' | 'agent'
+  reasoning?: string | null
+}
 
-  /** Metadata */
-  author: 'human' | 'agent'
-  createdAt: string // ISO 8601
-  updatedAt: string // ISO 8601
-
-  /** AI reasoning behind the annotation (proposed annotations only) */
-  reasoning: string | null
+/** Derive the rendering shape from ordered flag + member count */
+export function deriveShape(ordered: boolean, memberCount: number): AnnotationShape {
+  if (ordered) return 'polyline'
+  if (memberCount > 1) return 'region'
+  return 'point'
 }
 
 // ── AI suggestion types ──────────────────────────────────────────────────────
 
-/** A single turn in a refinement conversation */
 export interface ConversationTurn {
   role: 'user' | 'assistant'
   content: string
-  timestamp: string // ISO 8601
-  /** Partial annotation update returned by the AI (assistant turns only) */
+  timestamp: string
   annotationDelta: Partial<Annotation> | null
 }
 
-/** Full conversation log for a proposed annotation */
 export interface ConversationLog {
   annotationId: string
   provider: string
-  /** Provider-specific session handle for resuming the conversation */
   sessionId: string | null
   turns: ConversationTurn[]
 }
@@ -102,28 +99,22 @@ export interface NodeRef {
   filePath: string
 }
 
-/** Resolution result for a single nodeRef */
 export interface NodeRefResolution {
   ref: NodeRef
   semanticId: string | null
   confidence: 'exact' | 'fuzzy' | 'unresolved'
 }
 
-/** A single annotation suggested by the AI */
 export interface AISuggestedAnnotation {
-  /** Structure the AI chose for this suggestion */
   shape: AnnotationShape
-  /** Free-form kind — the AI may reuse an existing kind or coin a new one */
   kind: string
   label: string
   description: string
-  /** Ordered for polyline shapes */
   nodeRefs: NodeRef[]
   reasoning: string
 }
 
-/** The AI's structured response when suggesting annotations */
 export interface AISuggestResponse {
   annotations: AISuggestedAnnotation[]
-  parentAnnotation: string | null // label or UUID of existing annotation
+  parentAnnotation: string | null
 }

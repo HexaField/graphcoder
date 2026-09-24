@@ -1,4 +1,7 @@
 # GraphCoder data files — local to each machine, not for committing.
-# Ignore everything in .graphcoder/ except this file itself.
+# Ignore everything except committed artifacts.
 *
 !.gitignore
+!annotation-kinds.json
+!annotations/
+!annotations/*.json

@@ -1,0 +1,50 @@
+{
+  "description": "Traces execution flows through the graph from discovered entry points. Forward tracing walks the call graph with noise filtering. Reverse tracing produces multiple paths converging on a target. Convergence detection counts nodes appearing in multiple flows.",
+  "kind": "domain",
+  "label": "Flow Tracing",
+  "members": [
+    {
+      "file": "packages/core/src/flow/tracer.ts",
+      "id": "408811d4f32abdb63138f8caed257a69696bb60f80d76ae13b2ad2ecf98b94c3",
+      "note": "Forward DFS walk. Noise filter excludes utility/helper nodes below a configurable call threshold.",
+      "ref": "traceFlow"
+    },
+    {
+      "file": "packages/core/src/flow/tracer.ts",
+      "id": "9413f327ff3295039694e546c641d58f6939c0bf2f4c8aafbe8c252cd5b8800b",
+      "note": "Backward walk from a target node. Produces multiple Branch paths.",
+      "ref": "traceFlowReverse"
+    },
+    {
+      "file": "packages/core/src/flow/tracer.ts",
+      "id": "510311b0f03b90474df241dffc55ce6b2b0ec1be32147283c3df392655f27b11",
+      "note": "Counts nodes that appear in multiple traced flows. High convergence indicates shared infrastructure.",
+      "ref": "detectConvergence"
+    },
+    {
+      "file": "packages/core/src/flow/entry-points.ts",
+      "id": "c3a6057b7420f48c88a270d405fe147645c368bdce043e2ff580ce41478119b6",
+      "note": "Classifies nodes as route/component/export/handler based on kind, export status, and naming conventions.",
+      "ref": "discoverEntryPoints"
+    },
+    {
+      "file": "packages/core/src/flow/types.ts",
+      "id": "29a8478afb8e97e1c900f4dcc41cd5a10fbb637705627d4b9a9fd4e39fe74941",
+      "note": "A named flow: entry point + ordered list of node IDs + branches.",
+      "ref": "TracedFlow"
+    },
+    {
+      "file": "packages/client/src/state/flow.ts",
+      "id": "96a0f143b0c02f919737b433975976341229853e1d96a1f3366b758774a522f5",
+      "note": "Client-side reactive state: view mode, entry points, active flows, convergence data.",
+      "ref": "FlowState"
+    },
+    {
+      "file": "packages/client/src/state/flow.ts",
+      "id": "c2404701932e42a778c28b5375ca45dc6e3063d1042963b55110c47f42a9335e",
+      "note": "Scopes the graph to flow-relevant nodes and re-runs computeView.",
+      "ref": "recomputeFlowView"
+    }
+  ],
+  "ordered": false
+}

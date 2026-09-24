@@ -1,0 +1,26 @@
+{
+  "description": "semanticId hashes kind + name + normalised signature. Two functions with the same name and signature in different files produce the same ID. File/module nodes special-case this by including filePath. Other node kinds (function, class, variable) do not — relying on the assumption that identical signatures in different files represent the same logical entity. This assumption breaks for common names like init, handle, process in unrelated modules.",
+  "kind": "concern",
+  "label": "Semantic ID Collision",
+  "members": [
+    {
+      "file": "packages/core/src/identity.ts",
+      "id": "2167721cfee96f0e53d6d791e1289c902872e97ab409b9fe3247153115588ee9",
+      "note": "Does not include filePath for non-file kinds. Collision possible for common function names with identical signatures.",
+      "ref": "semanticId"
+    },
+    {
+      "file": "packages/core/src/identity.ts",
+      "id": "173f93e051b21684e8263cb044a4ebdbfe55ef33b7521bac16e34b28d387eed1",
+      "note": "Special-cases file/module kinds. All other kinds hash without location.",
+      "ref": "nodeSemanticId"
+    },
+    {
+      "file": "packages/core/src/diff/compute.ts",
+      "id": "53bd70bc1e0a7de4cdcd573d082117425a24593e75c7037942fec0207ad2a49e",
+      "note": "Consumes semantic IDs. A collision would merge two unrelated nodes into one, producing phantom modify_node ops or missing add/remove pairs.",
+      "ref": "computeArchDiff"
+    }
+  ],
+  "ordered": false
+}

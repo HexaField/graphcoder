@@ -1,0 +1,44 @@
+{
+  "description": "Maintains per-client view params. Each connected client receives its own filtered view snapshot. Broadcasts graph updates, annotation changes, AI proposals, refinements, and suggest errors. The hierarchy snapshot sends immediately on connect so the sidebar renders before any view_request round-trip.",
+  "kind": "domain",
+  "label": "WebSocket Layer",
+  "members": [
+    {
+      "file": "packages/server/src/ws.ts",
+      "id": "1140af7170cc8881683ab877d02eb89d96e6cda02eefad15b00789bfdcd9b8f6",
+      "note": "Creates WebSocketServer on /ws. Handles view_request messages.",
+      "ref": "setupWebSocket"
+    },
+    {
+      "file": "packages/server/src/ws.ts",
+      "id": "9f04c29bc554f1e72e3e3597ed63e8370bde98c874ca01a5d9003abcd8607382",
+      "note": "Runs computeView with the client's params and sends the result.",
+      "ref": "sendViewSnapshot"
+    },
+    {
+      "file": "packages/server/src/ws.ts",
+      "id": "5aa1e8486f028201588638bfbb18a61531022d6e012b03a52aaad36b292a31f5",
+      "note": "Sends file/module nodes for the sidebar tree. Fires on connect and on graph update.",
+      "ref": "sendHierarchySnapshot"
+    },
+    {
+      "file": "packages/server/src/ws.ts",
+      "id": "6902470550eae41651225152652c732853bf3d511a4e44fdcffd6c0eae7a0e1c",
+      "note": "Re-sends every client's view after a graph change. Each client sees its own scope.",
+      "ref": "broadcastGraphUpdate"
+    },
+    {
+      "file": "packages/server/src/ws.ts",
+      "id": "1957a0f115a65557bd86c4b9a1330aae0eb44f0edfc2ee4d04e4b320e2e35371",
+      "note": "Notifies clients to refetch annotations.",
+      "ref": "broadcastAnnotationUpdate"
+    },
+    {
+      "file": "packages/server/src/ws.ts",
+      "id": "2d7f8293ce161a49d7486a96cae31a3f29c1788f3502794f817baa5ca6bcd159",
+      "note": "Map<WebSocket, ViewParams>. Per-connection view state.",
+      "ref": "clientParams"
+    }
+  ],
+  "ordered": false
+}

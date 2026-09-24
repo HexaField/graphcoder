@@ -1,0 +1,50 @@
+{
+  "description": "Applies client-controlled filters (hidden kinds, paths, globs, focus, scope) and grouping (file, class, contract, package) to the raw graph. Produces ViewResult containing nodes, edges, groups, and fileNodes for ELK layout. Each connected WebSocket client maintains independent ViewParams.",
+  "kind": "domain",
+  "label": "View Pipeline",
+  "members": [
+    {
+      "file": "packages/core/src/view.ts",
+      "id": "d4acadd5468ae058c7c086250f0cfb7f0504e910d311a213f4118ec5659bb457",
+      "note": "Pure function. Takes raw nodes + edges + ViewParams, returns ViewResult.",
+      "ref": "computeView"
+    },
+    {
+      "file": "packages/core/src/view.ts",
+      "id": "b145c2e9182978cf7ce3cc4dcc39eb3fc5cf02ae80bdba4d3f0744707b90e97f",
+      "note": "All client-side UI state that affects what the server sends.",
+      "ref": "ViewParams"
+    },
+    {
+      "file": "packages/core/src/view.ts",
+      "id": "1412516329e37495caf48ef4aada3cc1d00d0e9f03339fee151ea85350235787",
+      "note": "Nodes, edges, groups, fileNodes — ready for ELK.",
+      "ref": "ViewResult"
+    },
+    {
+      "file": "packages/core/src/view.ts",
+      "id": "adf55bbf68406825dfe97e90ac13de57723331763a5e00557993ca2315e799e4",
+      "note": "Starting params before client loads persisted prefs. Hides contains and exports edges by default.",
+      "ref": "DEFAULT_VIEW_PARAMS"
+    },
+    {
+      "file": "packages/client/src/state/filters.ts",
+      "id": "f2cbbd9787ef24af40b0682c82c9614b1eb7549301a74115c1d285d58295719a",
+      "note": "Client-side reactive mirror of ViewParams fields.",
+      "ref": "FiltersState"
+    },
+    {
+      "file": "packages/server/src/ws.ts",
+      "id": "9f04c29bc554f1e72e3e3597ed63e8370bde98c874ca01a5d9003abcd8607382",
+      "note": "Runs computeView per-client and sends the result.",
+      "ref": "sendViewSnapshot"
+    },
+    {
+      "file": "packages/client/src/state/temporal.ts",
+      "id": "e113dccd2771c81353248a72045d5934131223fb2b6fe34199f301ae09dd9b64",
+      "note": "Re-runs computeView on cached diff data when filters change.",
+      "ref": "refilterDiffView"
+    }
+  ],
+  "ordered": false
+}

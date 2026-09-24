@@ -1,0 +1,44 @@
+{
+  "description": "Wraps the CodeGraph library. Manages project open/close, file watching, and HTTP bridge synthesis. Produces augmented node/edge sets that include synthetic cross-boundary call edges.",
+  "kind": "domain",
+  "label": "Graph Service",
+  "members": [
+    {
+      "file": "packages/server/src/codegraph/service.ts",
+      "id": "6037dc363e834b6364d28ea917fbf8ee121df760a47d63401bcfb352b7756a9d",
+      "note": "Singleton class. Owns the CodeGraph instance, project root, and synthetic HTTP edges.",
+      "ref": "GraphService"
+    },
+    {
+      "file": "packages/server/src/codegraph/service.ts",
+      "id": "28cb53f174369433f6af7a5d2e38b063e9cf862a907c0ebb98f7a4c3335e0fc0",
+      "note": "Module-level singleton export. All routes and the WebSocket layer import this.",
+      "ref": "graphService"
+    },
+    {
+      "file": "packages/server/src/codegraph/http-bridge.ts",
+      "id": "3766aa8f2ff0a2fafa98126ded6a653262a4454faeeb27c6ad7f81d2088ac490",
+      "note": "Synthesises calls edges between client fetch callers and server route handlers.",
+      "ref": "analyzeHttpBridge"
+    },
+    {
+      "file": "packages/server/src/codegraph/service.ts",
+      "id": "179946703644734af1d2fad0871c7f4b5c4be3542ca23a3be91c7a6dd44f516b",
+      "note": "Returns raw + synthetic edges. The includeSynthetic flag controls whether HTTP bridge edges appear.",
+      "ref": "getAllNodesAndEdges"
+    },
+    {
+      "file": "packages/server/src/codegraph/service.ts",
+      "id": "d03c81e0f280d8e0455a219ad6ae30f801f4b763625a58b779df4a4dceec2b24",
+      "note": "Incoming edges with synthetic deduplication.",
+      "ref": "getIncomingEdgesAugmented"
+    },
+    {
+      "file": "packages/server/src/codegraph/service.ts",
+      "id": "7859a230c0f642ce7f0e03d9725ac316b9a3aa6e7a3be7ebef2854bc737bed6b",
+      "note": "Outgoing edges with synthetic deduplication.",
+      "ref": "getOutgoingEdgesAugmented"
+    }
+  ],
+  "ordered": false
+}

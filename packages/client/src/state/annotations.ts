@@ -1,4 +1,4 @@
-import type { Annotation, AnnotationKind, AnnotationShape, ConversationLog, Geometry } from '@graphcoder/core'
+import type { Annotation, AnnotationKind, ConversationLog, Geometry } from '@graphcoder/core'
 import { batch } from 'solid-js'
 import * as api from '../api/annotations.js'
 import { state, setState } from './core.js'
@@ -110,13 +110,12 @@ export async function loadAnnotations(): Promise<void> {
 }
 
 export async function addAnnotation(
-  shape: AnnotationShape,
   label: string,
-  members: string[] = [],
-  opts?: Partial<api.CreateAnnotationInput>
+  memberIds: string[] = [],
+  opts?: Partial<Omit<api.CreateAnnotationInput, 'label' | 'memberIds'>>
 ): Promise<Annotation | null> {
   try {
-    const annotation = await api.createAnnotation({ shape, label, members, ...opts })
+    const annotation = await api.createAnnotation({ label, ordered: opts?.ordered ?? false, memberIds, ...opts })
     setState('annotations', (prev) => [...prev, annotation])
     pushUndo({ type: 'create', annotation })
     // A new kind may have just come into existence
@@ -174,8 +173,8 @@ export async function setAnnotationKind(id: string, kind: string): Promise<void>
 }
 
 /** Replace an annotation's geometry after a canvas edit. */
-export async function setAnnotationGeometry(id: string, geometry: Geometry, members: string[]): Promise<void> {
-  await patchAnnotation(id, { geometry, members })
+export async function setAnnotationGeometry(id: string, geometry: Geometry, memberIds: string[]): Promise<void> {
+  await patchAnnotation(id, { geometry, memberIds } as Parameters<typeof api.updateAnnotation>[1])
 }
 
 // ── Undo / redo ──────────────────────────────────────────────────────────────
@@ -199,14 +198,13 @@ function pushUndo(entry: UndoEntry): void {
 /** Recreate an annotation from a snapshot, preserving its content. */
 async function restore(annotation: Annotation): Promise<void> {
   await api.createAnnotation({
-    shape: annotation.shape,
-    kind: annotation.kind,
     label: annotation.label,
-    members: annotation.members,
+    ordered: annotation.ordered,
+    kind: annotation.kind,
+    memberIds: annotation.members.map((m) => m.id),
     description: annotation.description,
     status: annotation.status,
     geometry: annotation.geometry,
-    parentId: annotation.parentId,
     author: annotation.author
   })
   await loadAnnotations()

@@ -1,0 +1,56 @@
+{
+  "description": "Computes structural diffs between any two git commits at the architectural level. Extracts graph snapshots via detached-HEAD worktrees. Diffs operate on semantic IDs (file-path-independent), producing six operation types. Diffs compose transitively and hash deterministically.",
+  "kind": "domain",
+  "label": "Temporal Diffing",
+  "members": [
+    {
+      "file": "packages/server/src/temporal/mapper.ts",
+      "id": "4e6885d9631d5c9e0520c0b98ebbbf14497a5a0fd50b5330db4aeb4fe8dae406",
+      "note": "Creates a worktree at a commit, initialises CodeGraph, extracts the snapshot (nodes + edges + HTTP bridge), caches in SQLite, cleans up the worktree.",
+      "ref": "snapshotAtCommit"
+    },
+    {
+      "file": "packages/core/src/diff/compute.ts",
+      "id": "53bd70bc1e0a7de4cdcd573d082117425a24593e75c7037942fec0207ad2a49e",
+      "note": "Compares two GraphSnapshot objects. Maps nodes by semantic ID. Detects add/remove/modify/move/rename for nodes, add/remove for edges.",
+      "ref": "computeArchDiff"
+    },
+    {
+      "file": "packages/core/src/diff/apply.ts",
+      "id": "e06d34479c4e5c4094822f5baa0295fee6d300d524901f0d32ebb49cdcb6b07f",
+      "note": "Replays diff operations onto a snapshot. Validates base hash before applying.",
+      "ref": "applyArchDiff"
+    },
+    {
+      "file": "packages/core/src/diff/compose.ts",
+      "id": "29064cb26c2b612440301993bdb18777e1520c1a494e49244cb908de327c97dc",
+      "note": "Merges two sequential diffs (A to B, B to C) into one (A to C). Handles operation cancellation (add then remove equals no-op).",
+      "ref": "compose"
+    },
+    {
+      "file": "packages/core/src/diff/types.ts",
+      "id": "95a2ede24aa3dd7bb7349244c7895b93f7e7461df0b6ea2822cdd9acd11c7186",
+      "note": "Version 2 format: base hash, target hash, diffHash, operations array.",
+      "ref": "ArchDiff"
+    },
+    {
+      "file": "packages/core/src/diff/types.ts",
+      "id": "80301e1c7aa3ab773a52b9d072e23f43909d3153807d2e453000b560b8430374",
+      "note": "Six-variant discriminated union: add_node, remove_node, modify_node, move_node, add_edge, remove_edge.",
+      "ref": "ArchOp"
+    },
+    {
+      "file": "packages/core/src/diff/hash.ts",
+      "id": "74d07e607b40df28ae393cbaea25d86ad13c1b462f8590cc1b864f4d9464ec49",
+      "note": "Deterministic SHA-256 of canonical JSON. Schwartzian sort by semantic ID.",
+      "ref": "snapshotHash"
+    },
+    {
+      "file": "packages/client/src/state/temporal.ts",
+      "id": "c66d20bcf5c1bda56b1db9d60093b740f2f947cdabd55948061958bc6f947623",
+      "note": "Client entry point. Fetches snapshots via SSE, computes diff, builds merged view with status colouring.",
+      "ref": "runTemporalDiff"
+    }
+  ],
+  "ordered": false
+}

@@ -9,6 +9,7 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import { z } from 'zod'
 import { nodeSemanticId } from '@graphcoder/core'
+import type { AnnotationMember } from '@graphcoder/core'
 import {
   loadAllAnnotations,
   findStaleAnnotations,
@@ -132,11 +133,11 @@ server.tool(
         status: a.status,
         description: a.description,
         memberCount: a.members.length,
-        members: a.members.map((sid) => {
-          const node = nodeBySemId?.get(sid)
+        members: a.members.map((m) => {
+          const node = nodeBySemId?.get(m.id)
           return node
-            ? { semanticId: sid, name: node.name, kind: node.kind, file: node.filePath }
-            : { semanticId: sid, name: null, kind: null, file: null }
+            ? { semanticId: m.id, name: node.name, kind: node.kind, file: node.filePath }
+            : { semanticId: m.id, name: m.ref || null, kind: null, file: m.file || null }
         })
       }))
     }))
@@ -211,28 +212,29 @@ server.tool(
       const diff = await git.diffSummary([`${commit.hash}~1`, commit.hash])
       const files = diff.files.map((f) => f.file)
 
-      const memberIds: string[] = []
+      const members: AnnotationMember[] = []
       const seen = new Set<string>()
       for (const file of files) {
         for (const node of nodesByFile.get(file) ?? []) {
           const sid = nodeSemanticId(node)
           if (!seen.has(sid)) {
             seen.add(sid)
-            memberIds.push(sid)
+            members.push({ id: sid, ref: node.name, file: node.filePath ?? '', note: '' })
           }
         }
       }
 
-      if (memberIds.length === 0) continue
+      if (members.length === 0) continue
 
-      const annotation = createAnnotation('region', label, memberIds, {
+      const annotation = createAnnotation(label, members, {
         kind: 'pr',
         description: `Commit ${commit.hash.slice(0, 8)}: ${title}`,
+        ordered: false,
         status: 'proposed',
         author: 'agent'
       })
       saveAnnotation(projectRoot, annotation)
-      created.push({ label, members: memberIds.length })
+      created.push({ label, members: members.length })
     }
 
     const text = JSON.stringify({ created: created.length, annotations: created }, null, 2)

@@ -1,0 +1,38 @@
+{
+  "description": "User selects two commits. Client initiates SSE stream. Server extracts graph snapshots at each commit via detached-HEAD worktrees (cached in SQLite). Server computes ArchDiff using semantic IDs. Client receives the diff, builds a merged view with added/removed/modified status colouring, and re-runs the view pipeline on the merged data.",
+  "kind": "data-flow",
+  "label": "Temporal Diff to Overlay",
+  "members": [
+    {
+      "file": "packages/client/src/state/temporal.ts",
+      "id": "c66d20bcf5c1bda56b1db9d60093b740f2f947cdabd55948061958bc6f947623",
+      "note": "Client entry. Opens SSE stream for progress. Requests snapshots and diff.",
+      "ref": "runTemporalDiff"
+    },
+    {
+      "file": "packages/server/src/temporal/mapper.ts",
+      "id": "4e6885d9631d5c9e0520c0b98ebbbf14497a5a0fd50b5330db4aeb4fe8dae406",
+      "note": "Creates worktree, initialises CodeGraph, extracts snapshot, caches, cleans up.",
+      "ref": "snapshotAtCommit"
+    },
+    {
+      "file": "packages/core/src/diff/compute.ts",
+      "id": "53bd70bc1e0a7de4cdcd573d082117425a24593e75c7037942fec0207ad2a49e",
+      "note": "Maps nodes by semantic ID. Detects the six operation types. Sorts deterministically.",
+      "ref": "computeArchDiff"
+    },
+    {
+      "file": "packages/client/src/state/temporal.ts",
+      "id": "e113dccd2771c81353248a72045d5934131223fb2b6fe34199f301ae09dd9b64",
+      "note": "Re-runs computeView on cached diff data. Called when filters change.",
+      "ref": "refilterDiffView"
+    },
+    {
+      "file": "packages/core/src/view.ts",
+      "id": "d4acadd5468ae058c7c086250f0cfb7f0504e910d311a213f4118ec5659bb457",
+      "note": "Applies current filters to the merged diff graph.",
+      "ref": "computeView"
+    }
+  ],
+  "ordered": true
+}

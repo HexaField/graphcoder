@@ -107,7 +107,9 @@ export async function digestCommand(targetPath: string, options: DigestOptions):
         kind: key || '(unkinded)',
         annotations: (groups.get(key) ?? []).map((ann) => {
           const staleResult = staleMap.get(ann.id)
-          const memberNames = ann.members.map((sid) => nodeBySemId.get(sid)?.name).filter((n): n is string => n != null)
+          const memberNames = ann.members
+            .map((m) => nodeBySemId.get(m.id)?.name ?? (m.ref || null))
+            .filter((n): n is string => n != null)
           return {
             id: ann.id,
             shape: ann.shape,
@@ -149,7 +151,9 @@ export async function digestCommand(targetPath: string, options: DigestOptions):
       }
 
       // Members
-      const memberNames = ann.members.map((sid) => nodeBySemId.get(sid)?.name).filter((n): n is string => n != null)
+      const memberNames = ann.members
+        .map((m) => nodeBySemId.get(m.id)?.name ?? (m.ref || null))
+        .filter((n): n is string => n != null)
 
       if (memberNames.length > 0) {
         const prefix = ann.shape === 'polyline' ? 'Path' : 'Members'

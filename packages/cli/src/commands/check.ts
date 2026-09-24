@@ -87,11 +87,12 @@ export async function checkCommand(targetPath: string): Promise<void> {
       chalk.yellow('⚠') + ` ${ann.shape} "${ann.label}"${kindLabel} — ${resolvedCount}/${totalCount} resolved`
     )
 
-    for (const unresolvedId of result.unresolved) {
-      const shortId = unresolvedId.slice(0, 12) + '…'
-      console.log(`  ${chalk.red('✗')} member ${shortId} not found`)
+    for (const member of result.unresolved) {
+      const shortId = member.id.slice(0, 12) + '…'
+      const label = member.ref ? ` (${member.ref})` : ''
+      console.log(`  ${chalk.red('✗')} member ${shortId}${label} not found`)
 
-      const candidate = findCandidate(unresolvedId, allNodes, knownIds, nodeBySemId)
+      const candidate = findCandidate(member.id, allNodes, knownIds, nodeBySemId)
       if (candidate) {
         console.log(`    ${chalk.cyan('candidate:')} ${candidate.name} (${candidate.filePath}) [${candidate.reason}]`)
       }

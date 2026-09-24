@@ -1,0 +1,38 @@
+{
+  "description": "User selects an entry point from the discovered list. Client calls REST. Server runs forward DFS through the call graph with noise filtering. Client receives the traced flow, scopes the view to flow-relevant nodes, re-runs layout, and renders the focused subgraph.",
+  "kind": "data-flow",
+  "label": "Flow Trace to Canvas Update",
+  "members": [
+    {
+      "file": "packages/client/src/state/flow.ts",
+      "id": "d18acbee5891dd679431412d0c396d54764caf0e1a7a3a74ff647d27bc767356",
+      "note": "Client entry. Guards against duplicate traces. Calls REST.",
+      "ref": "traceFromEntryPoint"
+    },
+    {
+      "file": "packages/core/src/flow/tracer.ts",
+      "id": "408811d4f32abdb63138f8caed257a69696bb60f80d76ae13b2ad2ecf98b94c3",
+      "note": "Forward DFS walk. Noise filter excludes low-connectivity utility nodes.",
+      "ref": "traceFlow"
+    },
+    {
+      "file": "packages/client/src/state/flow.ts",
+      "id": "c2404701932e42a778c28b5375ca45dc6e3063d1042963b55110c47f42a9335e",
+      "note": "Collects node IDs from all active flows. Scopes the view.",
+      "ref": "recomputeFlowView"
+    },
+    {
+      "file": "packages/core/src/view.ts",
+      "id": "d4acadd5468ae058c7c086250f0cfb7f0504e910d311a213f4118ec5659bb457",
+      "note": "Runs with flow-scoped node set.",
+      "ref": "computeView"
+    },
+    {
+      "file": "packages/client/src/layout/elk.ts",
+      "id": "9c1b61ba3eb8934450a8bd59691ad7b95e35b1562b5c87ef4277baeb5b22fb05",
+      "note": "Positions the narrowed graph.",
+      "ref": "layoutGraph"
+    }
+  ],
+  "ordered": true
+}

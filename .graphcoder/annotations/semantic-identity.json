@@ -1,0 +1,32 @@
+{
+  "description": "Assigns deterministic, file-path-independent identifiers to graph nodes. SHA-256 of kind + name + normalised signature. File and module nodes include filePath to prevent collision between same-named files in different directories. Powers temporal diffing and cross-machine annotation resolution.",
+  "kind": "domain",
+  "label": "Semantic Identity",
+  "members": [
+    {
+      "file": "packages/core/src/identity.ts",
+      "id": "173f93e051b21684e8263cb044a4ebdbfe55ef33b7521bac16e34b28d387eed1",
+      "note": "Entry point. Special-cases file/module kinds to include filePath.",
+      "ref": "nodeSemanticId"
+    },
+    {
+      "file": "packages/core/src/identity.ts",
+      "id": "2167721cfee96f0e53d6d791e1289c902872e97ab409b9fe3247153115588ee9",
+      "note": "Raw hash: SHA-256(kind \\0 name \\0 normalizedSignature).",
+      "ref": "semanticId"
+    },
+    {
+      "file": "packages/core/src/identity.ts",
+      "id": "1cc4bc6b5802caf6a6195805b7a7f6a24a672332a3a7098c52525222c3c5a946",
+      "note": "Strips default parameter values and collapses whitespace before hashing.",
+      "ref": "normalizeSignature"
+    },
+    {
+      "file": "packages/core/src/identity.ts",
+      "id": "9b4665942d2ddc9afc0dc4b9fb22419e57ace360aaadb1b6cfe1a43cf11e1488",
+      "note": "Reverse map from semantic IDs back to CodeGraph IDs. Target overwrites base — current codebase takes priority.",
+      "ref": "buildDiffIdMap"
+    }
+  ],
+  "ordered": false
+}

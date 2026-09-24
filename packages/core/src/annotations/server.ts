@@ -4,7 +4,7 @@ export {
   loadAnnotation,
   loadAllAnnotations,
   deleteAnnotation,
-  getAnnotationMtime
+  slugify
 } from './store.js'
 export { resolveAnnotation, findStaleAnnotations } from './resolve.js'
 export { buildPathFromNodes } from './extract.js'

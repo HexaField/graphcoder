@@ -1,0 +1,44 @@
+{
+  "description": "User switches to annotate mode, draws a shape (lasso, polyline, or point), names it. Client sends REST POST. Server creates the annotation file with slug filename and canonical sorted-key JSON. Server registers the kind if new. Server broadcasts annotation change to all clients.",
+  "kind": "data-flow",
+  "label": "Annotation Create to Persist",
+  "members": [
+    {
+      "file": "packages/client/src/state/interaction.ts",
+      "id": "aa6a2b41d8af09adaeb0061bd72fe9a28ce772c5623de1b8079adcf718d254d0",
+      "note": "Switches canvas from select to annotate mode.",
+      "ref": "setInteractionMode"
+    },
+    {
+      "file": "packages/client/src/state/interaction.ts",
+      "id": "a35cd1b81e7472ecb2888d0caa9059f6c00187bce4cfd042d1cf08a46e8030d3",
+      "note": "Stores the drawn shape before the user commits it.",
+      "ref": "setPendingAnnotation"
+    },
+    {
+      "file": "packages/client/src/state/annotations.ts",
+      "id": "5c06a5e5329a661896d8f578f9ec4fd9bf6ad523f5941ea0ba35b952bf382c7a",
+      "note": "Client state action. Calls REST POST.",
+      "ref": "addAnnotation"
+    },
+    {
+      "file": "packages/core/src/annotations/store.ts",
+      "id": "3181f0b8e7c090b5779ff90e99542b38534fc97a5379a4ad5d71228653165def",
+      "note": "Generates UUID, writes {slug}.json with sortKeys canonical JSON.",
+      "ref": "createAnnotation"
+    },
+    {
+      "file": "packages/core/src/annotations/kinds.ts",
+      "id": "28fa467ec84c7e873f9140811d933a41fb73757a9f1fed7e143e9b3194375c0a",
+      "note": "Registers the kind if absent. Assigns deterministic colour from name hash.",
+      "ref": "ensureKind"
+    },
+    {
+      "file": "packages/server/src/ws.ts",
+      "id": "1957a0f115a65557bd86c4b9a1330aae0eb44f0edfc2ee4d04e4b320e2e35371",
+      "note": "Notifies all clients to refetch.",
+      "ref": "broadcastAnnotationUpdate"
+    }
+  ],
+  "ordered": true
+}

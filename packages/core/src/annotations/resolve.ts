@@ -1,33 +1,25 @@
-import type { Annotation } from './types.js'
+import type { Annotation, AnnotationMember } from './types.js'
 
 export interface ResolutionResult {
-  resolved: string[] // semantic IDs that matched
-  unresolved: string[] // semantic IDs that didn't match
+  resolved: AnnotationMember[]
+  unresolved: AnnotationMember[]
 }
 
-/**
- * Resolve an annotation's member semantic IDs against a set of known IDs.
- * Members carry the full node set for every shape, so this covers regions,
- * polylines, and points alike.
- */
 export function resolveAnnotation(annotation: Annotation, knownSemanticIds: Set<string>): ResolutionResult {
-  const resolved: string[] = []
-  const unresolved: string[] = []
+  const resolved: AnnotationMember[] = []
+  const unresolved: AnnotationMember[] = []
 
-  for (const id of annotation.members) {
-    if (knownSemanticIds.has(id)) {
-      resolved.push(id)
+  for (const member of annotation.members) {
+    if (knownSemanticIds.has(member.id)) {
+      resolved.push(member)
     } else {
-      unresolved.push(id)
+      unresolved.push(member)
     }
   }
 
   return { resolved, unresolved }
 }
 
-/**
- * Check all annotations and return those that have unresolved members.
- */
 export function findStaleAnnotations(
   annotations: Annotation[],
   knownSemanticIds: Set<string>

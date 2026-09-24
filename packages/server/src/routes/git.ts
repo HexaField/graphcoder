@@ -370,23 +370,24 @@ router.post('/git/pr-stack/import', async (req: Request, res: Response) => {
       const label = `PR${slice.index}: ${slice.title}`
       if (existingLabels.has(label)) continue
 
-      const memberIds: string[] = []
+      const members: import('@graphcoder/core').AnnotationMember[] = []
       const seen = new Set<string>()
       for (const file of slice.files) {
         for (const node of nodesByFile.get(file) ?? []) {
           const sid = nodeSemanticId(node)
           if (!seen.has(sid)) {
             seen.add(sid)
-            memberIds.push(sid)
+            members.push({ id: sid, ref: node.name, file: node.filePath ?? '', note: '' })
           }
         }
       }
 
-      if (memberIds.length === 0) continue
+      if (members.length === 0) continue
 
-      const annotation = createAnnotation('region', label, memberIds, {
+      const annotation = createAnnotation(label, members, {
         kind: 'pr',
         description: `Commit ${slice.commitHash.slice(0, 8)}: ${slice.title}`,
+        ordered: false,
         status: 'proposed',
         author: 'agent'
       })

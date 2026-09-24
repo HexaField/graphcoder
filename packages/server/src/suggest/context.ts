@@ -157,7 +157,7 @@ export function gatherContext(
     id: ann.id,
     kind: ann.kind,
     label: ann.label,
-    members: ann.members
+    members: ann.members.map((m) => m.id)
   }))
 
   return {

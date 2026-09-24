@@ -14,6 +14,7 @@ import chalk from 'chalk'
 import simpleGit from 'simple-git'
 import { createAnnotation, saveAnnotation, ensureKind, loadAllAnnotations } from '@graphcoder/core/annotations/server'
 import { nodeSemanticId } from '@graphcoder/core'
+import type { AnnotationMember } from '@graphcoder/core'
 import type { Node } from '@colbymchenry/codegraph'
 import { CodeGraph, NODE_KINDS } from '../codegraph-shim.js'
 import { findProjectRoot } from '../utils/project.js'
@@ -110,36 +111,35 @@ export async function importPrsCommand(targetPath: string, options: ImportPrsOpt
       continue
     }
 
-    // Collect semantic IDs of nodes in changed files
-    const memberIds: string[] = []
-    const memberIdSet = new Set<string>()
+    const members: AnnotationMember[] = []
+    const seen = new Set<string>()
     for (const file of slice.files) {
-      // Try both the raw path and common prefixes
       const nodes = nodesByFile.get(file) ?? []
       for (const node of nodes) {
         const sid = nodeSemanticId(node)
-        if (!memberIdSet.has(sid)) {
-          memberIdSet.add(sid)
-          memberIds.push(sid)
+        if (!seen.has(sid)) {
+          seen.add(sid)
+          members.push({ id: sid, ref: node.name, file: node.filePath ?? '', note: '' })
         }
       }
     }
 
-    if (memberIds.length === 0) {
+    if (members.length === 0) {
       console.log(chalk.dim(`  skip: PR${slice.index} "${slice.message}" — no graph nodes in changed files`))
       continue
     }
 
-    const annotation = createAnnotation('region', label, memberIds, {
+    const annotation = createAnnotation(label, members, {
       kind: 'pr',
       description: `Commit ${slice.hash.slice(0, 8)}: ${slice.message}`,
+      ordered: false,
       status: 'proposed',
       author: 'agent'
     })
 
     saveAnnotation(projectRoot, annotation)
     created++
-    console.log(chalk.green(`  ✓ PR${slice.index}:`) + ` "${slice.message}" (${memberIds.length} members)`)
+    console.log(chalk.green(`  ✓ PR${slice.index}:`) + ` "${slice.message}" (${members.length} members)`)
   }
 
   console.log()

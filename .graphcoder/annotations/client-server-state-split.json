@@ -1,0 +1,32 @@
+{
+  "description": "View params live client-side (persisted to localStorage). Graph data comes from the server. Annotation overlay renders client-side SVG over the Three.js WebGL canvas. During temporal diff, the client holds authority over edge topology (semantic IDs) while the server holds authority over source code (CodeGraph IDs). The selectNode function negotiates this boundary by building local detail from diff data and optionally enriching with REST source code.",
+  "kind": "concern",
+  "label": "Client-Server State Split",
+  "members": [
+    {
+      "file": "packages/server/src/ws.ts",
+      "id": "2d7f8293ce161a49d7486a96cae31a3f29c1788f3502794f817baa5ca6bcd159",
+      "note": "Server stores per-client params but the client owns and persists them.",
+      "ref": "clientParams"
+    },
+    {
+      "file": "packages/client/src/state/selection.ts",
+      "id": "097e1d62cd5a7bfdedd709cb7e5adea2a2e3a4d8c18beee260a38ac3cda16d4b",
+      "note": "During diff: uses local detail (correct semantic IDs) + optional REST enrichment (source code). Outside diff: REST holds authority.",
+      "ref": "selectNode"
+    },
+    {
+      "file": "packages/client/src/state/selection.ts",
+      "id": "d02c12fd9456a14c214fba77f5c744dcc5680b6cefae02fed76f7caadea9f971",
+      "note": "Fallback for historical nodes where REST cannot resolve the CodeGraph ID.",
+      "ref": "buildLocalDetail"
+    },
+    {
+      "file": "packages/client/src/state/temporal.ts",
+      "id": "e113dccd2771c81353248a72045d5934131223fb2b6fe34199f301ae09dd9b64",
+      "note": "Re-runs view pipeline client-side on cached data — server not involved after initial diff.",
+      "ref": "refilterDiffView"
+    }
+  ],
+  "ordered": false
+}

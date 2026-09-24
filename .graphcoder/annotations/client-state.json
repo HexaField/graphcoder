@@ -1,0 +1,44 @@
+{
+  "description": "SolidJS createStore split across 12 modules: core, diff, filters, project, selection, search, hierarchy, temporal, annotations, flow, pr-stack, URL sync. The store barrel (store.ts) re-exports the public API. Filter and hierarchy state persist to localStorage keyed by project root. Navigation history tracks a cursor with back/forward.",
+  "kind": "domain",
+  "label": "Client State",
+  "members": [
+    {
+      "file": "packages/client/src/state/core.ts",
+      "id": "5a78b1c8b4e944c7c3d7e3a3e4de3fc0811e6a8846b835720d15da9f6fe1b151",
+      "note": "AppState type alias. Destructured createStore produces state/setState — the reactive proxy all components read and all state modules write through.",
+      "ref": "AppState"
+    },
+    {
+      "file": "packages/client/src/state/project.ts",
+      "id": "529684a793de04e17961f83123478ba58521ae57e79aee9f1d4526dfb1182c39",
+      "note": "Clears stale view data, calls REST, reloads persisted state, syncs URL params.",
+      "ref": "openProject"
+    },
+    {
+      "file": "packages/client/src/state/selection.ts",
+      "id": "097e1d62cd5a7bfdedd709cb7e5adea2a2e3a4d8c18beee260a38ac3cda16d4b",
+      "note": "Aborts prior in-flight fetch, pushes navigation history, resolves detail from REST or local diff data.",
+      "ref": "selectNode"
+    },
+    {
+      "file": "packages/client/src/state/flow.ts",
+      "id": "c2404701932e42a778c28b5375ca45dc6e3063d1042963b55110c47f42a9335e",
+      "note": "Scopes the graph to traced flow nodes and re-runs the view pipeline.",
+      "ref": "recomputeFlowView"
+    },
+    {
+      "file": "packages/client/src/state/interaction.ts",
+      "id": "91c9f6fc84bf3dca43aaef15233e9a9d3e9e844e52e2180d1dd472bcf2d64978",
+      "note": "select or annotate. Determines whether canvas gestures select nodes or draw annotation shapes.",
+      "ref": "InteractionMode"
+    },
+    {
+      "file": "packages/client/src/state/store.ts",
+      "id": "9d78a40465964a1dcac39f1a479c1536b151e999b5795357295996c8b0e50733",
+      "note": "Barrel module. Re-exports from all state modules. Single import point for components.",
+      "ref": "store.ts"
+    }
+  ],
+  "ordered": false
+}

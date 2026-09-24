@@ -1,4 +1,4 @@
-import type { Annotation, AnnotationKind, AnnotationShape, AnnotationStatus, Geometry } from '@graphcoder/core'
+import type { Annotation, AnnotationKind, AnnotationStatus, Geometry } from '@graphcoder/core'
 import { API_BASE as API } from '../config.js'
 
 async function handleResponse<T>(res: Response): Promise<T> {
@@ -28,15 +28,15 @@ export async function fetchAnnotation(id: string): Promise<Annotation> {
 }
 
 export interface CreateAnnotationInput {
-  shape: AnnotationShape
   label: string
+  ordered: boolean
   /** Free-form kind name — registered on the server if new */
   kind?: string
-  members?: string[]
+  /** Bare semantic IDs — server enriches to full AnnotationMember objects */
+  memberIds?: string[]
   description?: string
   status?: AnnotationStatus
   geometry?: Geometry
-  parentId?: string | null
   author?: 'human' | 'agent'
 }
 
@@ -49,10 +49,7 @@ export async function createAnnotation(input: CreateAnnotationInput): Promise<An
   return handleResponse<Annotation>(res)
 }
 
-export async function updateAnnotation(
-  id: string,
-  updates: Partial<Omit<Annotation, 'id' | 'version' | 'createdAt' | 'updatedAt'>>
-): Promise<Annotation> {
+export async function updateAnnotation(id: string, updates: Partial<Omit<Annotation, 'id'>>): Promise<Annotation> {
   const res = await fetch(`${API}/api/annotations/${encodeURIComponent(id)}`, {
     method: 'PATCH',
     headers: { 'Content-Type': 'application/json' },

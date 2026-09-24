@@ -1,0 +1,50 @@
+{
+  "description": "Renders the architecture graph on a Three.js WebGL canvas. ELK computes hierarchical layout. SolidJS GraphCanvas component manages camera state, layout versioning, and annotation overlay positioning. Two layout modes: flat (no grouping) and grouped (ELK compound nodes).",
+  "kind": "domain",
+  "label": "Canvas Rendering",
+  "members": [
+    {
+      "file": "packages/client/src/canvas/ThreeRenderer.ts",
+      "id": "b4ef52d65d0d9e8137aaeabb5eba97a30279e56fac17ce9e91545fdfd8fdc3b2",
+      "note": "WebGL renderer. Handles node/edge geometry, hit testing, pan/zoom, selection highlights.",
+      "ref": "ThreeRenderer"
+    },
+    {
+      "file": "packages/client/src/canvas/GraphCanvas.tsx",
+      "id": "80bf0e4d7f9448f3a946c511065abcee3a685d446c784365e03b83b4b0fae06d",
+      "note": "SolidJS component. Owns renderer lifecycle, layout effect, camera state persistence.",
+      "ref": "GraphCanvas"
+    },
+    {
+      "file": "packages/client/src/layout/elk.ts",
+      "id": "9c1b61ba3eb8934450a8bd59691ad7b95e35b1562b5c87ef4277baeb5b22fb05",
+      "note": "Dispatches to layoutFlat or layoutGrouped. Returns LayoutResult with positioned nodes, edges, and containers at multiple tiers.",
+      "ref": "layoutGraph"
+    },
+    {
+      "file": "packages/client/src/canvas/AnnotationOverlay.tsx",
+      "id": "9b3ae366153c3b73e39d1edfd9b57722963a5c622f9b04cec5c05634789171c8",
+      "note": "SVG layer over the WebGL canvas. Switches rendering by shape: RegionOverlay, PolylineOverlay, PointOverlay.",
+      "ref": "AnnotationOverlay"
+    },
+    {
+      "file": "packages/client/src/canvas/AnnotationOverlay.tsx",
+      "id": "0355fe4f6cae46140dee7f7999c21d71bb519192cc2cd465ea3a1993c7c919b7",
+      "note": "Renders region annotations as lasso polygons or bounding-box fallback rectangles.",
+      "ref": "RegionOverlay"
+    },
+    {
+      "file": "packages/client/src/canvas/AnnotationOverlay.tsx",
+      "id": "bff6aac3e579c285812a735d6432624ecb83e7e6d5de390408afbab8198cd465",
+      "note": "Renders ordered flow annotations. Prefers live node centres; falls back to drawn stroke when members no longer resolve.",
+      "ref": "PolylineOverlay"
+    },
+    {
+      "file": "packages/client/src/canvas/AnnotationOverlay.tsx",
+      "id": "d306a4311943e0f0368b36c52ca156428d107f86f3a9b8f8150dc6543da9df95",
+      "note": "Renders point annotations anchored to a member node or a canvas coordinate.",
+      "ref": "PointOverlay"
+    }
+  ],
+  "ordered": false
+}

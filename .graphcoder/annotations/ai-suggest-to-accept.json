@@ -1,0 +1,44 @@
+{
+  "description": "User requests an AI suggestion with a prompt. Server gathers context (scored nodes, BFS neighbourhood, call graph edges, existing annotations). Provider generates structured proposals. Client receives proposed annotations with AI badge. User can refine via conversation. On accept, the proposed annotation becomes a committed file.",
+  "kind": "data-flow",
+  "label": "AI Suggest to Refine to Accept",
+  "members": [
+    {
+      "file": "packages/client/src/state/annotations.ts",
+      "id": "3656ea260ffcecb2e6699ba73b0dfe35668238c27c6bcde730998feaa0d6e9eb",
+      "note": "Client entry. Calls REST with prompt and label.",
+      "ref": "requestSuggest"
+    },
+    {
+      "file": "packages/server/src/suggest/context.ts",
+      "id": "5929211e225cd8f398b6c5ffe0186160ff171c9a7826e5328a1ee55c9d628aee",
+      "note": "Scores nodes, BFS neighbourhood expansion, collects edges and file tree.",
+      "ref": "gatherContext"
+    },
+    {
+      "file": "packages/server/src/suggest/providers/types.ts",
+      "id": "04ed0f22dc1292747d50e15c93a0bee1a2a87f48fe94419d6fa2eb43e6c7adf2",
+      "note": "Provider contract. suggest(req) and refine(req) returning SuggestResult.",
+      "ref": "AIProvider"
+    },
+    {
+      "file": "packages/server/src/ws.ts",
+      "id": "5f1b5a18d49cfdb76ad3fea87d9b2024ca2a0f06197ad5b585e33817a808dda2",
+      "note": "Notifies clients of the new proposal.",
+      "ref": "broadcastAnnotationProposed"
+    },
+    {
+      "file": "packages/server/src/suggest/orchestrator.ts",
+      "id": "d940dbaa806bc1ececfbea87a403625d2267eb68619aa01e9db29371d10213df",
+      "note": "Replays conversation history. Calls provider.refine.",
+      "ref": "refineAnnotation"
+    },
+    {
+      "file": "packages/client/src/state/annotations.ts",
+      "id": "2762d3ac705884b5d17246bf39a9362fe4bc2f8471a4befdd5099ea3763e2f5c",
+      "note": "Transitions annotation status from proposed to accepted. Persists via REST PATCH.",
+      "ref": "acceptAnnotation"
+    }
+  ],
+  "ordered": true
+}

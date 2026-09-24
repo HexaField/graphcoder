@@ -1,0 +1,56 @@
+{
+  "description": "User provides a project root. Client calls REST, server opens CodeGraph (init or existing), starts file watcher, synthesises HTTP bridge edges. Server broadcasts view_snapshot via WebSocket. Client receives nodes/edges/groups, runs ELK layout, Three.js renders the positioned graph.",
+  "kind": "data-flow",
+  "label": "Project Open to Graph Render",
+  "members": [
+    {
+      "file": "packages/client/src/state/project.ts",
+      "id": "529684a793de04e17961f83123478ba58521ae57e79aee9f1d4526dfb1182c39",
+      "note": "Clears stale state, calls api.openProject.",
+      "ref": "openProject"
+    },
+    {
+      "file": "packages/server/src/codegraph/service.ts",
+      "id": "201d4928edb08838816e543add7f4bb9f1f20706e33e3597cf0b65ea85ddb8c9",
+      "note": "Opens or initialises CodeGraph. Starts watcher. Runs HTTP bridge analysis.",
+      "ref": "GraphService.open"
+    },
+    {
+      "file": "packages/server/src/codegraph/service.ts",
+      "id": "e5d71e93336d315917eb60446b4f8c7f1a04d885f03570085a3001209db5a451",
+      "note": "Synthesises cross-boundary call edges from fetch-to-route matching.",
+      "ref": "refreshHttpBridge"
+    },
+    {
+      "file": "packages/server/src/ws.ts",
+      "id": "6902470550eae41651225152652c732853bf3d511a4e44fdcffd6c0eae7a0e1c",
+      "note": "Sends hierarchy_snapshot + view_snapshot to every connected client.",
+      "ref": "broadcastGraphUpdate"
+    },
+    {
+      "file": "packages/server/src/ws.ts",
+      "id": "9f04c29bc554f1e72e3e3597ed63e8370bde98c874ca01a5d9003abcd8607382",
+      "note": "Runs computeView with the client's ViewParams.",
+      "ref": "sendViewSnapshot"
+    },
+    {
+      "file": "packages/core/src/view.ts",
+      "id": "d4acadd5468ae058c7c086250f0cfb7f0504e910d311a213f4118ec5659bb457",
+      "note": "Applies filters + grouping to produce ViewResult.",
+      "ref": "computeView"
+    },
+    {
+      "file": "packages/client/src/layout/elk.ts",
+      "id": "9c1b61ba3eb8934450a8bd59691ad7b95e35b1562b5c87ef4277baeb5b22fb05",
+      "note": "Dispatches to flat or grouped ELK layout. Returns LayoutResult with positioned nodes.",
+      "ref": "layoutGraph"
+    },
+    {
+      "file": "packages/client/src/canvas/ThreeRenderer.ts",
+      "id": "f14c52f8d33177dc215643c84905d5846f4c1a571090c7740fbb7ff34cca061e",
+      "note": "Draws the positioned graph on the WebGL canvas.",
+      "ref": "ThreeRenderer.render"
+    }
+  ],
+  "ordered": true
+}

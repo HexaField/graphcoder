@@ -27,7 +27,7 @@ export const NodeAnnotations: Component = () => {
   const referencing = createMemo((): Annotation[] => {
     const sid = semanticId()
     if (!sid) return []
-    return state.annotations.filter((a) => a.status !== 'dismissed' && a.members.includes(sid))
+    return state.annotations.filter((a) => a.status !== 'dismissed' && a.members.some((m) => m.id === sid))
   })
 
   const isSelected = (id: string) => state.selectedAnnotationId === id

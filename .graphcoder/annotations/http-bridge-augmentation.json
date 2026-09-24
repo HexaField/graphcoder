@@ -1,0 +1,32 @@
+{
+  "description": "CodeGraph does not natively produce edges between client fetch callers and server route handlers. The HTTP bridge analyser synthesises these as calls edges, deduplicated against natural edges. These synthetic edges participate in all downstream operations: view filtering, flow tracing, AI context gathering, temporal snapshots. The analysis runs on project open and after sync. If the bridge misidentifies a route, it produces phantom call edges that appear real in every subsystem.",
+  "kind": "concern",
+  "label": "HTTP Bridge Augmentation",
+  "members": [
+    {
+      "file": "packages/server/src/codegraph/http-bridge.ts",
+      "id": "3766aa8f2ff0a2fafa98126ded6a653262a4454faeeb27c6ad7f81d2088ac490",
+      "note": "Source of truth for synthetic edges. Pattern-matches fetch calls to route definitions.",
+      "ref": "analyzeHttpBridge"
+    },
+    {
+      "file": "packages/server/src/codegraph/service.ts",
+      "id": "179946703644734af1d2fad0871c7f4b5c4be3542ca23a3be91c7a6dd44f516b",
+      "note": "Merges synthetic edges transparently. Downstream consumers cannot distinguish them from natural edges.",
+      "ref": "getAllNodesAndEdges"
+    },
+    {
+      "file": "packages/server/src/temporal/mapper.ts",
+      "id": "4e6885d9631d5c9e0520c0b98ebbbf14497a5a0fd50b5330db4aeb4fe8dae406",
+      "note": "Runs HTTP bridge analysis on the historical snapshot too — synthetic edges appear in diffs.",
+      "ref": "snapshotAtCommit"
+    },
+    {
+      "file": "packages/server/src/suggest/context.ts",
+      "id": "5929211e225cd8f398b6c5ffe0186160ff171c9a7826e5328a1ee55c9d628aee",
+      "note": "AI context includes synthetic edges. The AI cannot distinguish them from natural relationships.",
+      "ref": "gatherContext"
+    }
+  ],
+  "ordered": false
+}
