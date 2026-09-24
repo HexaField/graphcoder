@@ -9,16 +9,22 @@
  */
 import type { ConversationLog, ConversationTurn } from './types.js'
 import { readFileSync, writeFileSync, existsSync, unlinkSync } from 'node:fs'
+import { randomUUID } from 'node:crypto'
 import { join } from 'node:path'
+import { isValidAnnotationId } from './store.js'
 
 const ANNOTATIONS_DIR = 'annotations'
 
 function conversationPath(projectRoot: string, annotationId: string): string {
+  if (!isValidAnnotationId(annotationId)) {
+    throw new Error(`Invalid annotation id: ${annotationId}`)
+  }
   return join(projectRoot, '.graphcoder', ANNOTATIONS_DIR, `${annotationId}.conversation.json`)
 }
 
 /** Load a conversation log for an annotation. Returns null when no conversation exists. */
 export function loadConversation(projectRoot: string, annotationId: string): ConversationLog | null {
+  if (!isValidAnnotationId(annotationId)) return null
   const filePath = conversationPath(projectRoot, annotationId)
   if (!existsSync(filePath)) return null
   try {
@@ -31,6 +37,9 @@ export function loadConversation(projectRoot: string, annotationId: string): Con
 
 /** Save (overwrite) a conversation log to disk. */
 export function saveConversation(projectRoot: string, log: ConversationLog): void {
+  if (!isValidAnnotationId(log.annotationId)) {
+    log.annotationId = randomUUID()
+  }
   const filePath = conversationPath(projectRoot, log.annotationId)
   writeFileSync(filePath, JSON.stringify(log, null, 2) + '\n', 'utf-8')
 }
@@ -51,6 +60,9 @@ export function createConversation(
 
 /** Append a turn to an existing conversation and persist. */
 export function appendTurn(projectRoot: string, annotationId: string, turn: ConversationTurn): ConversationLog {
+  if (!isValidAnnotationId(annotationId)) {
+    throw new Error(`Invalid annotation id: ${annotationId}`)
+  }
   let log = loadConversation(projectRoot, annotationId)
   if (!log) {
     log = createConversation(annotationId, 'unknown')
@@ -59,9 +71,9 @@ export function appendTurn(projectRoot: string, annotationId: string, turn: Conv
   saveConversation(projectRoot, log)
   return log
 }
-
 /** Delete a conversation file. Returns true when the file existed. */
 export function deleteConversation(projectRoot: string, annotationId: string): boolean {
+  if (!isValidAnnotationId(annotationId)) return false
   const filePath = conversationPath(projectRoot, annotationId)
   if (!existsSync(filePath)) return false
   unlinkSync(filePath)

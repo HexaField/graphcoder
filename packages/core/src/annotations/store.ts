@@ -10,7 +10,27 @@ function annotationsDir(projectRoot: string): string {
   return join(projectRoot, '.graphcoder', ANNOTATIONS_DIR)
 }
 
+/**
+ * Annotation ids are generated as UUIDs and used verbatim as filenames.
+ * Reject any id that could traverse out of the annotations directory before
+ * it reaches the filesystem (GH #2/#3 — path traversal read + delete).
+ */
+export function isValidAnnotationId(id: string): boolean {
+  return (
+    typeof id === 'string' &&
+    id.length > 0 &&
+    !id.includes('/') &&
+    !id.includes('\\') &&
+    !id.includes('..') &&
+    !id.startsWith('.') &&
+    id === id.trim()
+  )
+}
+
 function annotationPath(projectRoot: string, id: string): string {
+  if (!isValidAnnotationId(id)) {
+    throw new Error(`Invalid annotation id: ${id}`)
+  }
   return join(annotationsDir(projectRoot), `${id}.json`)
 }
 
@@ -65,9 +85,14 @@ function ensureDir(projectRoot: string): void {
   }
 }
 
-/** Save an annotation to disk as canonical JSON */
+/** Save an annotation to disk as canonical JSON.
+ *  Falls back to a server-generated UUID when the annotation carries an unsafe
+ *  id (e.g. hand-edited files) instead of writing outside the directory. */
 export function saveAnnotation(projectRoot: string, annotation: Annotation): void {
   ensureDir(projectRoot)
+  if (!isValidAnnotationId(annotation.id)) {
+    annotation.id = randomUUID()
+  }
   annotation.updatedAt = new Date().toISOString()
   const filePath = annotationPath(projectRoot, annotation.id)
   writeFileSync(filePath, canonicalStringify(annotation) + '\n', 'utf-8')
@@ -173,6 +198,7 @@ function normalizeAnnotation(input: Record<string, unknown>): Annotation {
 
 /** Load a single annotation by ID */
 export function loadAnnotation(projectRoot: string, id: string): Annotation | null {
+  if (!isValidAnnotationId(id)) return null
   const filePath = annotationPath(projectRoot, id)
   if (!existsSync(filePath)) return null
   const raw = readFileSync(filePath, 'utf-8')
@@ -195,9 +221,9 @@ export function loadAllAnnotations(projectRoot: string): Annotation[] {
   }
   return annotations
 }
-
 /** Delete an annotation file from disk */
 export function deleteAnnotation(projectRoot: string, id: string): boolean {
+  if (!isValidAnnotationId(id)) return false
   const filePath = annotationPath(projectRoot, id)
   if (!existsSync(filePath)) return false
   unlinkSync(filePath)
@@ -206,6 +232,7 @@ export function deleteAnnotation(projectRoot: string, id: string): boolean {
 
 /** Get file mtime for cache comparison */
 export function getAnnotationMtime(projectRoot: string, id: string): number | null {
+  if (!isValidAnnotationId(id)) return null
   const filePath = annotationPath(projectRoot, id)
   if (!existsSync(filePath)) return null
   return statSync(filePath).mtimeMs
