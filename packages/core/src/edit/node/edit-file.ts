@@ -228,21 +228,28 @@ async function changeReport(root: string | undefined, file: string, changes: Sig
   }
 }
 
+/**
+ * Tests that import the file directly, else those one step further out.
+ * codegraph's default depth (5) lists every test that reaches the file at
+ * all: 60 for a core module, with its own test pushed out of view.
+ */
 async function affectedTests(root: string, file: string): Promise<string[]> {
-  try {
-    const { stdout } = await execFileAsync(
-      'codegraph',
-      ['affected', path.relative(root, file), '-p', root, '--quiet'],
-      {
-        timeout: 5_000
-      }
-    )
-    const tests = stdout
-      .split('\n')
-      .map((l) => l.trim())
-      .filter(Boolean)
-    return tests.length > TEST_CAP ? [...tests.slice(0, TEST_CAP), `… ${tests.length - TEST_CAP} more`] : tests
-  } catch {
-    return []
+  for (const depth of ['1', '2']) {
+    try {
+      const { stdout } = await execFileAsync(
+        'codegraph',
+        ['affected', path.relative(root, file), '-p', root, '--depth', depth, '--quiet'],
+        { timeout: 5_000 }
+      )
+      const tests = stdout
+        .split('\n')
+        .map((l) => l.trim())
+        .filter(Boolean)
+      if (tests.length > TEST_CAP) return [...tests.slice(0, TEST_CAP), `… ${tests.length - TEST_CAP} more`]
+      if (tests.length) return tests
+    } catch {
+      return []
+    }
   }
+  return []
 }

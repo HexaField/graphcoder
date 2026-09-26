@@ -670,6 +670,36 @@ describe.skipIf(!hasCodegraph)('with a codegraph index', () => {
     expect(r.report).toMatch(/affected tests: .*src\/greet\.test\.ts/)
   })
 
+  it('lists the nearest tests: direct importers, else one step further out', { timeout: 60_000 }, async () => {
+    put('src/util.ts', "export const PREFIX = 'hi'\n")
+    const greet = put(
+      'src/greet.ts',
+      "import { PREFIX } from './util'\n\nexport function greet(name: string): string {\n  return PREFIX + name\n}\n"
+    )
+    put('src/app.ts', "import { greet } from './greet'\n\nexport function main() {\n  return greet('a')\n}\n")
+    put('src/greet.test.ts', "import { greet } from './greet'\n\ngreet('t')\n")
+    put('src/app.test.ts', "import { main } from './app'\n\nmain()\n")
+    execFileSync('git', ['init', '-q', tmp])
+    execFileSync('codegraph', ['init', tmp], { stdio: 'ignore' })
+
+    // app.test.ts reaches greet.ts only through app.ts: one step too far.
+    const direct = await editFile(
+      {
+        file: greet,
+        ops: [{ op: 'replace_in', symbol: 'greet', find: 'PREFIX + name', code: 'PREFIX + name.trim()' }]
+      },
+      { roots: [tmp] }
+    )
+    expect(direct.report).toMatch(/^affected tests: src\/greet\.test\.ts$/m)
+
+    // No test imports util.ts itself, so the list steps out one level.
+    const further = await editFile(
+      { file: path.join(tmp, 'src/util.ts'), ops: [{ op: 'replace_in', find: "'hi'", code: "'hello'" }] },
+      { roots: [tmp] }
+    )
+    expect(further.report).toMatch(/^affected tests: src\/greet\.test\.ts$/m)
+  })
+
   it('still edits when the index cannot answer', { timeout: 60_000 }, async () => {
     const lib = put('src/greet.ts', 'export function greet(name: string): string {\n  return name\n}\n')
     put('src/app.ts', "import { greet } from './greet'\n\nexport function main() {\n  return greet('a')\n}\n")
