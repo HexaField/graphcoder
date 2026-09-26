@@ -52,6 +52,7 @@ export async function editFile(args: EditArgs, opts: EditFileOptions = {}): Prom
   const bytes = exists ? readBytes(target) : Buffer.alloc(0)
   const source = normaliseSource(decodeUtf8(bytes, target))
   const label = projectRelative(target)
+  await analyzer.prepare?.(target)
   const outcome = applyOps(target, source.text, args.ops, analyzer, { label, exists })
 
   if (outcome.text === source.text) {

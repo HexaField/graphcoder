@@ -389,15 +389,57 @@ describe('create and missing files', () => {
 describe('files that do not parse', () => {
   const BROKEN = 'export function ok() {\n  return 1\n}\nexport function bad( {\n'
 
-  it('explains why symbols do not resolve, and still allows a symbol-less replace_in', async () => {
+  it('still resolves symbols in a broken file, and lets edits through that add no error', async () => {
     const file = put('b.ts', BROKEN)
-    const refusal = await edit(file, [{ op: 'remove', symbol: 'ok' }]).catch((e: Error) => e.message)
-    const at = /has a syntax error at line (4:\d+), so no symbol resolves/.exec(String(refusal))?.[1]
-    expect(at).toBeDefined()
-    const r = await edit(file, [{ op: 'replace_in', find: 'bad( {', code: 'bad() {}' }])
-    expect(read(file)).toBe('export function ok() {\n  return 1\n}\nexport function bad() {}\n')
-    // Both messages name the same place, 1-based.
-    expect(r.report).toContain(`already had a syntax error (line ${at})`)
+    const r = await edit(file, [{ op: 'remove', symbol: 'ok' }])
+    expect(read(file)).toBe('export function bad( {\n')
+    expect(r.report).toContain('syntax ok')
+    await edit(file, [{ op: 'replace_in', find: 'bad( {', code: 'bad() {}' }])
+    expect(read(file)).toBe('export function bad() {}\n')
+  })
+
+  // tree-sitter-typescript 0.23 misparses an array of an inline import type:
+  // valid TypeScript that the grammar reports as an error.
+  const GAP = `export interface Api {
+  send(text: string, files?: import('./types').File[]): void
+}
+
+export function total(xs: number[]): number {
+  return xs.length
+}
+`
+
+  it('edits valid code the grammar misreads, judging only the problems an edit adds', async () => {
+    const file = put('gap.ts', GAP)
+    const r = await edit(file, [
+      {
+        op: 'replace',
+        symbol: 'total',
+        code: 'export function total(xs: number[]): number {\n  return xs.reduce((a, b) => a + b, 0)\n}'
+      }
+    ])
+    expect(read(file)).toContain('return xs.reduce((a, b) => a + b, 0)')
+    expect(r.report).toContain('syntax ok')
+    expect(r.report).not.toMatch(/syntax error|already/)
+  })
+
+  it('still rejects a real error in a file with a grammar gap', async () => {
+    const file = put('gap.ts', GAP)
+    await expect(
+      edit(file, [{ op: 'replace_in', symbol: 'total', find: 'return xs.length', code: 'return (xs.length' }])
+    ).rejects.toThrow(/breaks the syntax/)
+    expect(read(file)).toBe(GAP)
+  })
+
+  it('checks the syntax of a language with no widening profile (Java)', async () => {
+    const JAVA =
+      'public class Greeter {\n    public String greet(String name) {\n        return "hi " + name;\n    }\n}\n'
+    const file = put('Greeter.java', JAVA)
+    await edit(file, [{ op: 'replace_in', symbol: 'Greeter::greet', find: '"hi "', code: '"hello "' }])
+    expect(read(file)).toContain('return "hello " + name;')
+    await expect(edit(file, [{ op: 'replace_in', symbol: 'greet', find: 'name;', code: 'name' }])).rejects.toThrow(
+      /breaks the syntax/
+    )
   })
 })
 

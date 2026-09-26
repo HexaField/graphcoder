@@ -153,27 +153,27 @@ Flags (or the matching `GRAPHCODER_*` environment variables): `--tools a,b` regi
 
 Run with `node packages/mcp/dist/index.js` or register in MCP config as `graphcoder-mcp`.
 
-**Builds bundle `@graphcoder/core`.** Core ships TypeScript source (`main: src/index.ts`), which Node cannot run, so the `cli` and `mcp` tsdown configs inline it (`noExternal: [/^@graphcoder\//]`) and keep core as a devDependency. Every other dependency stays external, so a package that bundles core must also list core's runtime dependencies. Both write `dist/index.js`, the path their `bin` names.
+**Builds bundle `@graphcoder/core`.** Core ships TypeScript source (`main: src/index.ts`), which Node cannot run, so the `cli` and `mcp` tsdown configs inline it (`noExternal: [/^@graphcoder\//]`) and keep core as a devDependency. Every other dependency stays external, so a package that bundles core must also list core's runtime dependencies (codegraph, diff, @noble/hashes). Both write `dist/index.js`, the path their `bin` names.
 
-**Standalone install:** `pnpm --filter @graphcoder/mcp deploy --prod --legacy <dir>` copies the package with its own `node_modules` (native tree-sitter builds included); link `<dir>/dist/index.js` onto PATH as `graphcoder-mcp`. `--legacy` is needed because the workspace does not set `inject-workspace-packages`.
+**Standalone install:** `pnpm --filter @graphcoder/mcp deploy --prod --legacy <dir>` copies the package with its own `node_modules` (codegraph's platform bundle included); link `<dir>/dist/index.js` onto PATH as `graphcoder-mcp`. `--legacy` is needed because the workspace does not set `inject-workspace-packages`.
 
 ## Symbol edit (`@graphcoder/core/edit`)
 
 Edit code by naming a symbol instead of quoting its text. Two layers:
 
 - **`@graphcoder/core/edit`** (pure, no I/O): `applyOps(path, text, ops, analyzer)` applies `replace` / `replace_in` / `insert` / `remove` / `create` in order and re-analyses after each op; any failure throws `EditError` and nothing is written. Symbol names match the tail of a codegraph qualified name at a `::` boundary (`.` also works; `name@line` picks between same-named declarations). It never guesses between candidates.
-- **`@graphcoder/core/edit/node`**: `createAnalyzer()` and `editFile()`. The analyzer takes symbols from codegraph's `extractFromSource` and widens each to its whole declaration with a tree-sitter parse: attached comments, decorators or attributes, `export`/`pub`, the variable statement around a function value. `editFile` adds path guards (roots, `.git`, `node_modules`, secrets, 1 MB), BOM/CRLF round-trip, compare-and-swap, an atomic write that keeps the file mode, and, from the codegraph index, callers of a changed signature and affected tests.
+- **`@graphcoder/core/edit/node`**: `createAnalyzer()` and `editFile()`. The analyzer takes symbols from codegraph's `extractFromSource` and parses with codegraph's own WASM grammars (`node/codegraph.ts` loads both by path from codegraph's platform package). For TS/JS, Python, Rust and Go a profile (`node/languages.ts`) widens each symbol to its whole declaration: attached comments, decorators or attributes, `export`/`pub`, the variable statement around a function value, TS overload signatures. Every other language codegraph parses keeps codegraph's spans but still gets the syntax check. `editFile` adds path guards (roots, `.git`, `node_modules`, secrets, 1 MB, non-UTF-8), BOM and line-ending round-trip (mixed LF/CRLF kept per line), compare-and-swap, an atomic write that keeps the file mode, and, from the codegraph index, callers of a changed signature and affected tests.
 
 Gotchas:
 
-- **Spans always come from the live text**, never from the index DB, which can lag the file.
-- **Never call codegraph's `initGrammars()` in the analyzer's process.** Its native kernel then rejects a file with a syntax error outright instead of returning the symbols of an error-recovering parse, and `replace_in` could no longer repair broken files.
-- **codegraph columns are JS string indices** (UTF-16), like tree-sitter's `startIndex`; no byte conversion.
-- **Python syntax is judged by CPython** (`python3 -c ast.parse`): tree-sitter-python accepts bad indentation, such as a `def` with no indented body. Without `python3`, the grammar's verdict stands.
-- **The syntax gate only blocks edits to files that parsed before.** Languages without a grammar here (TS/JS, Python, Go, Rust have one) keep codegraph's raw spans and get no syntax check.
-- `replace` keeps an omitted `export`/`pub` only in front of code that declares something; code that opens with a comment or decorator replaces the old ones.
+- **Load the file's grammar before extracting** (`Analyzer.prepare`, called by `editFile`). codegraph's native kernel refuses any file it cannot parse, a syntax error or a gap in the grammar alike, and returns no symbols; with the WASM grammar loaded it falls back to an error-tolerant parse and still names them.
+- **Grammars have gaps.** tree-sitter-typescript 0.23 reports `import('m').T[]` (an array of an inline import type) as an error. So the syntax gate blocks only problems an edit _adds_: problems are keyed by their text and their line's text, not their position, and compared as a multiset.
+- **Free every tree** (`tree.delete()`): web-tree-sitter trees live in WASM memory and are not garbage-collected.
+- **Spans always come from the live text**, never from the index DB, which can lag the file. codegraph columns and tree-sitter offsets are both JS string indices (UTF-16); no byte conversion.
+- **Python syntax is also judged by CPython** (`python3 -c ast.parse`): tree-sitter-python accepts bad indentation, such as a `def` with no indented body. That verdict blocks an edit only when the file passed it before. A missing `python3` switches it off; a timeout skips one file.
+- **What `replace` keeps:** code that opens with a comment replaces the old comments; code that opens with a decorator replaces the old decorators. Omitted decorators, `export`/`pub` (only in front of code that declares something) and a trailing comment on the declaration's last line stay. A blank line detaches a comment from the declaration below, never a decorator or overload. `remove` and `insert before` treat TS overload signatures as part of the implementation.
 
-Tests: `core/src/edit/text.test.ts` (pure helpers, resolution) and `core/src/edit/node/edit-file.test.ts` (every op across TS, TSX, Python, Go, Rust, plus guards, CRLF/BOM, symlinks, the compare-and-swap race, and a live codegraph index when the CLI is installed).
+Tests: `core/src/edit/text.test.ts` (pure helpers, resolution) and `core/src/edit/node/edit-file.test.ts` (every op across TS, TSX, Python, Go, Rust, Java; grammar gaps; guards; CRLF/BOM; symlinks; the compare-and-swap race; a live codegraph index when the CLI is installed).
 
 ## PR stack UI
 

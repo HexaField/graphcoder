@@ -52,8 +52,11 @@ export interface Declaration {
 
 export interface SyntaxProblem {
   line: number
+  /** 0-based. */
   column: number
   message: string
+  /** Identifies the problem without its position, so edits elsewhere in the file leave it unchanged. */
+  key: string
 }
 
 export interface LanguageTraits extends CodeTraits {
@@ -68,13 +71,21 @@ export interface LanguageTraits extends CodeTraits {
 export interface Analysis {
   /** False when no grammar covers this file type, so nothing checks its syntax. */
   checked: boolean
-  syntaxError?: SyntaxProblem
+  /**
+   * Every problem the grammar reports, in file order. Grammars have gaps, so
+   * valid code can appear here; edits are judged by the problems they add.
+   */
+  syntaxErrors: SyntaxProblem[]
+  /** A stricter checker's verdict (CPython for Python): its first problem, null when clean, absent when none ran. */
+  strictError?: SyntaxProblem | null
   declarations: Declaration[]
   traits: LanguageTraits
 }
 
 /** Parses a file's text into declarations and a syntax verdict. */
 export interface Analyzer {
+  /** Ready the analyzer for `path`'s language (load its grammar). Call before `analyze`. */
+  prepare?(path: string): Promise<void>
   analyze(path: string, text: string): Analysis
 }
 

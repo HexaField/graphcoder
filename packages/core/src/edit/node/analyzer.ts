@@ -1,81 +1,41 @@
-// codegraph names the symbols; tree-sitter finds each one's whole declaration
-// and judges the syntax. codegraph covers 30+ languages; for the ones with a
-// grammar here (TS/JS, Python, Rust, Go) spans widen to the full declaration
-// and edits get a syntax check. Other languages use codegraph's spans as-is.
-//
-// Never initialise codegraph's WASM grammars in this process: its native
-// kernel then refuses a file that does not parse, instead of returning a
-// partial symbol table from an error-recovering parse.
+// codegraph names the symbols; its tree-sitter grammar finds each one's whole
+// declaration and judges the syntax. Every language codegraph parses gets the
+// syntax check; the ones with a profile (TS/JS, Python, Rust, Go) also widen
+// spans to the full declaration. Other languages use codegraph's spans as-is.
 
-import { createRequire } from 'node:module'
-import { dirname, join } from 'node:path'
-import { startsLine } from '../text.js'
-import { EditError, type Analysis, type Analyzer, type Declaration, type SyntaxProblem } from '../types.js'
+import { lineEnd, lineStart, startsLine } from '../text.js'
+import type { Analysis, Analyzer, Declaration, SyntaxProblem } from '../types.js'
+import { codegraph, loadGrammarFor, type CgNode } from './codegraph.js'
 import { GENERIC_TRAITS, profileFor, type LanguageProfile, type SyntaxNode } from './languages.js'
 
-const require = createRequire(import.meta.url)
-
-/** A codegraph symbol, as `extractFromSource` returns it. Columns are JS string indices. */
-interface CgNode {
-  kind: string
-  name: string
-  qualifiedName: string
-  startLine: number
-  startColumn: number
-  endLine: number
-  endColumn: number
-  signature?: string
-}
-
 const NOT_SYMBOLS = new Set(['file', 'import', 'export', 'parameter'])
-
-type Extract = (path: string, text: string) => CgNode[]
-
-let extractFn: Extract | undefined
-
-function extractor(): Extract {
-  if (extractFn) return extractFn
-  let mod: { extractFromSource: (p: string, t: string) => { nodes: CgNode[] } }
-  try {
-    // The compiled library ships in codegraph's per-platform package; the
-    // standalone extractor is not re-exported from its main entry.
-    const sdk = require.resolve('@colbymchenry/codegraph')
-    const lib = createRequire(sdk).resolve(
-      `@colbymchenry/codegraph-${process.platform}-${process.arch}/lib/dist/index.js`
-    )
-    mod = require(join(dirname(lib), 'extraction', 'index.js'))
-  } catch (err) {
-    throw new EditError(
-      `codegraph's extractor is unavailable on ${process.platform}-${process.arch}: ${(err as Error).message}`
-    )
-  }
-  extractFn = (path, text) => mod.extractFromSource(path, text).nodes.filter((n) => !NOT_SYMBOLS.has(n.kind))
-  return extractFn
-}
-
-const parsers = new Map<string, { parse(text: string): { rootNode: SyntaxNode } }>()
-
-function parserFor(profile: LanguageProfile) {
-  let parser = parsers.get(profile.id)
-  if (!parser) {
-    const Parser = require('tree-sitter')
-    parser = new Parser()
-    ;(parser as unknown as { setLanguage(l: unknown): void }).setLanguage(profile.grammar())
-    parsers.set(profile.id, parser!)
-  }
-  return parser!
-}
+const MAX_PROBLEMS = 200
 
 export function createAnalyzer(): Analyzer {
-  return { analyze }
+  return { prepare: loadGrammarFor, analyze }
 }
 
 function analyze(path: string, text: string): Analysis {
-  const profile = profileFor(path)
-  const root = profile ? parserFor(profile).parse(text).rootNode : undefined
+  const { extractFromSource, grammars } = codegraph()
+  const language = grammars.detectLanguage(path)
+  const tree = grammars.isGrammarLoaded(language) ? grammars.getParser(language)?.parse(text) : undefined
+  try {
+    return analyzeTree(path, text, profileFor(language), tree?.rootNode, extractFromSource)
+  } finally {
+    tree?.delete()
+  }
+}
+
+function analyzeTree(
+  path: string,
+  text: string,
+  profile: LanguageProfile | undefined,
+  root: SyntaxNode | undefined,
+  extract: (path: string, text: string) => { nodes: CgNode[] }
+): Analysis {
   const lines = lineStarts(text)
   const offset = (line: number, column: number) => Math.min((lines[line - 1] ?? text.length) + column, text.length)
-  const nodes = extractor()(path, text)
+  const nodes = extract(path, text).nodes.filter((n) => !NOT_SYMBOLS.has(n.kind))
   const spans = nodes.map((n) => ({ start: offset(n.startLine, n.startColumn), end: offset(n.endLine, n.endColumn) }))
   const lineAt = (o: number) => upperBound(lines, o)
 
@@ -103,11 +63,11 @@ function analyze(path: string, text: string): Analysis {
     }
   })
 
-  const checked = profile?.validate?.(text)
-  const syntaxError = checked !== undefined ? checked : root?.hasError ? firstError(root) : undefined
+  const strictError = profile?.validate?.(text)
   return {
-    checked: profile !== undefined,
-    ...(syntaxError ? { syntaxError } : {}),
+    checked: root !== undefined,
+    syntaxErrors: root?.hasError ? problems(root, text) : [],
+    ...(strictError !== undefined ? { strictError } : {}),
     declarations,
     traits: profile?.traits ?? GENERIC_TRAITS
   }
@@ -242,21 +202,31 @@ function isWrapper(profile: LanguageProfile, node: SyntaxNode): boolean {
   return !only || node.namedChildren.filter((c) => only.includes(c.type)).length === 1
 }
 
-function firstError(node: SyntaxNode): SyntaxProblem | undefined {
-  if (node.isMissing || node.type === 'ERROR') {
-    return {
-      line: node.startPosition.row + 1,
-      column: node.startPosition.column,
-      message: node.isMissing ? `missing '${node.type}'` : 'syntax error'
+/**
+ * Every ERROR and MISSING node, in file order. The key holds the problem's own
+ * text and its line's text, not its position, so a problem that an edit
+ * elsewhere only moves keeps its key.
+ */
+function problems(root: SyntaxNode, text: string): SyntaxProblem[] {
+  const out: SyntaxProblem[] = []
+  const squash = (s: string) => s.replace(/\s+/g, ' ').trim()
+  const visit = (node: SyntaxNode) => {
+    if (out.length >= MAX_PROBLEMS) return
+    if (node.isMissing || node.type === 'ERROR') {
+      const message = node.isMissing ? `missing '${node.type}'` : 'syntax error'
+      const lineText = text.slice(lineStart(text, node.startIndex), lineEnd(text, node.startIndex))
+      out.push({
+        line: node.startPosition.row + 1,
+        column: node.startPosition.column,
+        message,
+        key: `${message}|${squash(node.text).slice(0, 80)}|${squash(lineText)}`
+      })
+      return
     }
+    for (const child of node.children) if (child.hasError || child.isMissing) visit(child)
   }
-  for (const child of node.children) {
-    if (child.hasError || child.isMissing) {
-      const found = firstError(child)
-      if (found) return found
-    }
-  }
-  return undefined
+  visit(root)
+  return out
 }
 
 function lineStarts(text: string): number[] {

@@ -23,7 +23,7 @@ import {
   startsLine,
   trailingCommentEnd
 } from './text.js'
-import { EditError, type Analysis, type Analyzer, type Declaration, type EditOp } from './types.js'
+import { EditError, type Analysis, type Analyzer, type Declaration, type EditOp, type SyntaxProblem } from './types.js'
 
 export interface SignatureChange {
   qualifiedName: string
@@ -79,14 +79,16 @@ export function applyOps(
   const warnings: string[] = []
   const changes: SignatureChange[] = []
   if (creating) {
-    if (analysis.syntaxError) throw new EditError(`create: ${syntaxMessage(analysis, cur)}`)
+    const problem = analysis.strictError ?? analysis.syntaxErrors[0]
+    if (problem) throw new EditError(`create: ${syntaxMessage(problem, cur)}`)
     notes.push(`create · ${lineOf(cur, cur.length - 1)} lines`)
   }
-  const gate = analysis.checked && !analysis.syntaxError
   if (!analysis.checked) warnings.push('No grammar for this file type: syntax not checked.')
-  else if (analysis.syntaxError) {
-    const e = analysis.syntaxError
-    warnings.push(`The file already had a syntax error (line ${e.line}:${e.column + 1}): syntax not checked.`)
+  else if (analysis.strictError) {
+    const e = analysis.strictError
+    warnings.push(
+      `The file already fails its strict syntax check (${e.message}, line ${e.line}:${e.column + 1}); only parse errors are checked.`
+    )
   }
 
   ops.slice(creating ? 1 : 0).forEach((op, i) => {
@@ -100,9 +102,8 @@ export function applyOps(
     }
     const step = tagged(() => applyOne(op, cur, analysis, opts.label))
     const next = analyzer.analyze(path, step.text)
-    if (gate && next.syntaxError) {
-      throw new EditError(`${tag} breaks the syntax: ${syntaxMessage(next, step.text)}`)
-    }
+    const added = addedProblem(analysis, next)
+    if (added) throw new EditError(`${tag} breaks the syntax: ${syntaxMessage(added, step.text)}`)
     const warning = tagged(() => step.verify?.(next))
     if (warning) warnings.push(warning)
     const change = step.change?.(next)
@@ -112,7 +113,13 @@ export function applyOps(
     analysis = next
   })
 
-  return { text: cur, notes: [...notes, ...warnings], signatureChanges: changes, analysis, syntaxChecked: gate }
+  return {
+    text: cur,
+    notes: [...notes, ...warnings],
+    signatureChanges: changes,
+    analysis,
+    syntaxChecked: analysis.checked
+  }
 }
 
 function applyOne(op: EditOp, text: string, analysis: Analysis, label: string): Step {
@@ -390,7 +397,7 @@ function removeLines(text: string, from: number, to: number): string {
 
 /** A file that does not parse yields no symbols; say why instead of listing none. */
 function lookup(analysis: Analysis, symbol: string, label: string): Declaration {
-  const e = analysis.syntaxError
+  const e = analysis.strictError ?? analysis.syntaxErrors[0]
   if (e && analysis.declarations.length === 0) {
     throw new EditError(
       `${label} has a syntax error at line ${e.line}:${e.column + 1}, so no symbol resolves. Fix it first: replace_in without a symbol still works.`
@@ -424,8 +431,23 @@ function signatureChange(before: Declaration, after: Declaration | undefined): S
   }
 }
 
-function syntaxMessage(analysis: Analysis, text: string): string {
-  const e = analysis.syntaxError!
+/**
+ * The first problem `after` has that `before` did not. Parse problems count by
+ * key, so one that an edit only moves is not new; a strict verdict counts only
+ * when the file passed the strict check before.
+ */
+function addedProblem(before: Analysis, after: Analysis): SyntaxProblem | undefined {
+  if (before.strictError === null && after.strictError) return after.strictError
+  const seen = new Map<string, number>()
+  for (const p of before.syntaxErrors) seen.set(p.key, (seen.get(p.key) ?? 0) + 1)
+  return after.syntaxErrors.find((p) => {
+    const left = seen.get(p.key) ?? 0
+    seen.set(p.key, left - 1)
+    return left <= 0
+  })
+}
+
+function syntaxMessage(e: SyntaxProblem, text: string): string {
   const lineText = text.split('\n')[e.line - 1] ?? ''
   return `${e.message} at line ${e.line}:${e.column + 1}\n  ${e.line} | ${lineText}\n  ${' '.repeat(String(e.line).length)} | ${' '.repeat(e.column)}^`
 }
