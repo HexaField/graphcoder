@@ -1,9 +1,10 @@
 #!/usr/bin/env node
 /**
- * GraphCoder MCP server — exposes annotation check, digest, and PR-stack
- * import as MCP tools so AI agents can call them directly.
+ * GraphCoder MCP server — exposes annotation check, digest, PR-stack import,
+ * and symbol-level code edits as MCP tools so AI agents can call them directly.
  *
  * Transport: stdio (the standard for CLI-launched MCP servers).
+ * `--tools a,b` (or GRAPHCODER_TOOLS) limits which tools register.
  */
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
@@ -20,6 +21,8 @@ import {
 } from '@graphcoder/core/annotations/server'
 import simpleGit from 'simple-git'
 import { CodeGraph, NODE_KINDS } from './codegraph-shim.js'
+import { registerEditTool } from './edit-tool.js'
+import { option } from './options.js'
 import type { Node } from '@colbymchenry/codegraph'
 
 // ── Server setup ─────────────────────────────────────────────────────────────
@@ -31,7 +34,7 @@ const server = new McpServer({
 
 // ── Tool: graphcoder_check ──────────────────────────────────────────────────
 
-server.tool(
+const checkTool = server.tool(
   'graphcoder_check',
   'Check annotation health — reports which annotations have unresolvable member references',
   { projectRoot: z.string().describe('Absolute path to the project root (must contain .graphcoder/)') },
@@ -90,7 +93,7 @@ server.tool(
 
 // ── Tool: graphcoder_digest ─────────────────────────────────────────────────
 
-server.tool(
+const digestTool = server.tool(
   'graphcoder_digest',
   'Produce a structured digest of all annotations, grouped by kind, with resolved member names',
   { projectRoot: z.string().describe('Absolute path to the project root') },
@@ -149,7 +152,7 @@ server.tool(
 
 // ── Tool: graphcoder_import_prs ─────────────────────────────────────────────
 
-server.tool(
+const importTool = server.tool(
   'graphcoder_import_prs',
   'Import a stacked PR chain as proposed annotations. Each PR becomes a region annotation with kind=pr.',
   {
@@ -243,6 +246,21 @@ server.tool(
 )
 
 // ── Start ────────────────────────────────────────────────────────────────────
+
+const tools = {
+  graphcoder_check: checkTool,
+  graphcoder_digest: digestTool,
+  graphcoder_import_prs: importTool,
+  edit: registerEditTool(server)
+}
+
+const only = option('tools')
+  ?.split(',')
+  .map((t) => t.trim())
+  .filter(Boolean)
+if (only?.length) {
+  for (const [name, tool] of Object.entries(tools)) if (!only.includes(name)) tool.remove()
+}
 
 async function main(): Promise<void> {
   const transport = new StdioServerTransport()

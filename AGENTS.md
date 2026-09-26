@@ -145,11 +145,35 @@ Exit codes: 0 = success, 1 = issues found, 2 = error. Requires `.graphcoder/` (C
 
 ## MCP server (`@graphcoder/mcp`)
 
-`packages/mcp/` — wraps CLI commands as MCP tools over stdio transport.
+`packages/mcp/` — MCP tools over stdio transport.
 
-Tools: `graphcoder_check`, `graphcoder_digest`, `graphcoder_import_prs`. Each takes `projectRoot` (absolute path). The import tool also takes `base` and `tip` git refs.
+Tools: `graphcoder_check`, `graphcoder_digest`, `graphcoder_import_prs` (each takes `projectRoot`; the import tool also takes `base` and `tip` git refs), and `edit` (see Symbol edit below).
+
+Flags (or the matching `GRAPHCODER_*` environment variables): `--tools a,b` registers only the named tools; `--edit-roots <dir>:<dir>` bounds where `edit` may write (default: the home directory).
 
 Run with `node packages/mcp/dist/index.js` or register in MCP config as `graphcoder-mcp`.
+
+**Builds bundle `@graphcoder/core`.** Core ships TypeScript source (`main: src/index.ts`), which Node cannot run, so the `cli` and `mcp` tsdown configs inline it (`noExternal: [/^@graphcoder\//]`) and keep core as a devDependency. Every other dependency stays external, so a package that bundles core must also list core's runtime dependencies. Both write `dist/index.js`, the path their `bin` names.
+
+**Standalone install:** `pnpm --filter @graphcoder/mcp deploy --prod --legacy <dir>` copies the package with its own `node_modules` (native tree-sitter builds included); link `<dir>/dist/index.js` onto PATH as `graphcoder-mcp`. `--legacy` is needed because the workspace does not set `inject-workspace-packages`.
+
+## Symbol edit (`@graphcoder/core/edit`)
+
+Edit code by naming a symbol instead of quoting its text. Two layers:
+
+- **`@graphcoder/core/edit`** (pure, no I/O): `applyOps(path, text, ops, analyzer)` applies `replace` / `replace_in` / `insert` / `remove` / `create` in order and re-analyses after each op; any failure throws `EditError` and nothing is written. Symbol names match the tail of a codegraph qualified name at a `::` boundary (`.` also works; `name@line` picks between same-named declarations). It never guesses between candidates.
+- **`@graphcoder/core/edit/node`**: `createAnalyzer()` and `editFile()`. The analyzer takes symbols from codegraph's `extractFromSource` and widens each to its whole declaration with a tree-sitter parse: attached comments, decorators or attributes, `export`/`pub`, the variable statement around a function value. `editFile` adds path guards (roots, `.git`, `node_modules`, secrets, 1 MB), BOM/CRLF round-trip, compare-and-swap, an atomic write that keeps the file mode, and, from the codegraph index, callers of a changed signature and affected tests.
+
+Gotchas:
+
+- **Spans always come from the live text**, never from the index DB, which can lag the file.
+- **Never call codegraph's `initGrammars()` in the analyzer's process.** Its native kernel then rejects a file with a syntax error outright instead of returning the symbols of an error-recovering parse, and `replace_in` could no longer repair broken files.
+- **codegraph columns are JS string indices** (UTF-16), like tree-sitter's `startIndex`; no byte conversion.
+- **Python syntax is judged by CPython** (`python3 -c ast.parse`): tree-sitter-python accepts bad indentation, such as a `def` with no indented body. Without `python3`, the grammar's verdict stands.
+- **The syntax gate only blocks edits to files that parsed before.** Languages without a grammar here (TS/JS, Python, Go, Rust have one) keep codegraph's raw spans and get no syntax check.
+- `replace` keeps an omitted `export`/`pub` only in front of code that declares something; code that opens with a comment or decorator replaces the old ones.
+
+Tests: `core/src/edit/text.test.ts` (pure helpers, resolution) and `core/src/edit/node/edit-file.test.ts` (every op across TS, TSX, Python, Go, Rust, plus guards, CRLF/BOM, symlinks, the compare-and-swap race, and a live codegraph index when the CLI is installed).
 
 ## PR stack UI
 

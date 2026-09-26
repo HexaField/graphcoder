@@ -12,11 +12,12 @@
   },
   "dependencies": {
     "@colbymchenry/codegraph": "^1.5.0",
-    "@graphcoder/core": "workspace:*",
+    "@noble/hashes": "^2.3.0",
     "chalk": "^5.4.1",
     "simple-git": "^3.36.0"
   },
   "devDependencies": {
+    "@graphcoder/core": "workspace:*",
     "tsdown": "0.22.1"
   }
 }

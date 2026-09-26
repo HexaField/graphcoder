@@ -6,7 +6,9 @@
   "types": "src/index.ts",
   "exports": {
     ".": "./src/index.ts",
-    "./annotations/server": "./src/annotations/server.ts"
+    "./annotations/server": "./src/annotations/server.ts",
+    "./edit": "./src/edit/index.ts",
+    "./edit/node": "./src/edit/node/index.ts"
   },
   "publishConfig": {
     "exports": {
@@ -21,6 +23,13 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@noble/hashes": "^2.3.0"
+    "@colbymchenry/codegraph": "^1.5.0",
+    "@noble/hashes": "^2.3.0",
+    "diff": "^8.0.2",
+    "tree-sitter": "^0.25.1",
+    "tree-sitter-go": "^0.25.0",
+    "tree-sitter-python": "^0.25.0",
+    "tree-sitter-rust": "^0.24.0",
+    "tree-sitter-typescript": "^0.23.2"
   }
 }
