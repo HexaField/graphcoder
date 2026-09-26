@@ -20,8 +20,9 @@ export interface EditArgs {
  * One declaration in a file. Offsets index the LF-normalised text; they
  * follow the region rules the ops rely on:
  *
- *   triviaStart ── attached comments ── decoratorStart ── decorators ──
- *   headStart ── [exportPrefix] declaration ── [value] ── end
+ *   [overloadStart ── overload signatures] ── triviaStart ── attached comments ──
+ *   decoratorStart ── decorators ── headStart ── [exportPrefix] declaration ──
+ *   [value] ── end
  */
 export interface Declaration {
   name: string
@@ -29,6 +30,8 @@ export interface Declaration {
   qualifiedName: string
   kind: string
   signature?: string
+  /** Start of the TS overload signatures above, with their comments. remove and insert take them along; replace keeps them. */
+  overloadStart?: number
   /** Start of the comments and decorators attached above; equals headStart when there are none. */
   triviaStart: number
   /** Earliest decorator or attribute, when the declaration has one. */
@@ -39,8 +42,9 @@ export interface Declaration {
   exportPrefix?: string
   /** The value, when the symbol is a function or class assigned to a variable. */
   value?: { start: number; end: number }
+  /** Where the declaration's code ends; a comment after it on the same line stays outside. */
   end: number
-  /** 1-based lines: first line of the trivia, the head, and the last line. */
+  /** 1-based lines: the first line (overloads or trivia), the head, and the last line. */
   startLine: number
   line: number
   endLine: number

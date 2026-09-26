@@ -259,6 +259,10 @@ const only = option('tools')
   .map((t) => t.trim())
   .filter(Boolean)
 if (only?.length) {
+  const unknown = only.filter((t) => !Object.keys(tools).includes(t))
+  if (unknown.length) {
+    console.error(`graphcoder-mcp: no tool named ${unknown.join(', ')}; tools: ${Object.keys(tools).join(', ')}`)
+  }
   for (const [name, tool] of Object.entries(tools)) if (!only.includes(name)) tool.remove()
 }
 

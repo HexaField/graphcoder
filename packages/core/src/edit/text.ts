@@ -1,23 +1,53 @@
 // Text helpers for the edit engine. All offsets index LF-normalised text.
 
+import { diffArrays } from 'diff'
+
 /** A source file split into its edit form (no BOM, LF endings) plus what restores it. */
 export interface NormalisedSource {
   text: string
   bom: boolean
+  /** Most lines end CRLF, so new lines do too. */
   crlf: boolean
+  /** Each line's own ending, kept only when the file mixes LF and CRLF. */
+  endings?: string[]
 }
 
 export function normaliseSource(raw: string): NormalisedSource {
   const bom = raw.charCodeAt(0) === 0xfeff
   const body = bom ? raw.slice(1) : raw
-  const crlfCount = body.match(/\r\n/g)?.length ?? 0
-  const crlf = crlfCount > (body.match(/\n/g)?.length ?? 0) - crlfCount
-  return { text: body.replace(/\r\n/g, '\n'), bom, crlf }
+  const endings = body.match(/\r?\n/g) ?? []
+  const crlfCount = endings.filter((e) => e === '\r\n').length
+  const mixed = crlfCount > 0 && crlfCount < endings.length
+  return {
+    text: body.replace(/\r\n/g, '\n'),
+    bom,
+    crlf: crlfCount > endings.length - crlfCount,
+    ...(mixed ? { endings } : {})
+  }
 }
 
-export function restoreSource(text: string, source: Pick<NormalisedSource, 'bom' | 'crlf'>): string {
-  const body = source.crlf ? text.replace(/\n/g, '\r\n') : text
-  return source.bom ? '﻿' + body : body
+export function restoreSource(text: string, source: NormalisedSource): string {
+  const eol = source.crlf ? '\r\n' : '\n'
+  const body = source.endings ? keepEndings(source.text, text, source.endings, eol) : text.replace(/\n/g, eol)
+  return source.bom ? '\uFEFF' + body : body
+}
+
+/** `after`, where each line kept from `before` ends as it did there and every new line ends with `eol`. */
+function keepEndings(before: string, after: string, endings: string[], eol: string): string {
+  const lines: string[] = []
+  const ends: string[] = []
+  let old = 0
+  for (const part of diffArrays(before.split('\n'), after.split('\n'))) {
+    if (part.removed) {
+      old += part.value.length
+      continue
+    }
+    for (const line of part.value) {
+      lines.push(line)
+      ends.push(part.added ? eol : (endings[old++] ?? eol))
+    }
+  }
+  return lines.map((line, i) => (i < lines.length - 1 ? line + ends[i] : line)).join('')
 }
 
 export function lineStart(text: string, offset: number): number {
@@ -51,7 +81,11 @@ export function offsetOf(text: string, line: number, column: number): number {
 /** Leading whitespace of the line holding `offset`. */
 export function indentAt(text: string, offset: number): string {
   const start = lineStart(text, offset)
-  return /^[ \t]*/.exec(text.slice(start, lineEnd(text, start)))![0]
+  return leadingSpace(text.slice(start, lineEnd(text, start)))
+}
+
+function leadingSpace(line: string): string {
+  return /^[ \t]*/.exec(line)![0]
 }
 
 /** True when only spaces and tabs sit between the start of its line and `offset`. */
@@ -62,16 +96,23 @@ export function startsLine(text: string, offset: number): boolean {
 /**
  * Re-base a code snippet onto `indent`. The first line is returned bare — it
  * lands where the old text began — and every later non-blank line gets
- * `indent` plus its indentation relative to the snippet's own base.
+ * `indent` plus its indentation relative to the first line's. A line shallower
+ * than the first moves the same distance left of `indent` (a Python dedent),
+ * or stays as written when `indent` is too shallow for that (string text).
  */
 export function reindent(code: string, indent: string): string {
   const lines = trimBlankEdges(code.replace(/\r\n/g, '\n')).split('\n')
-  const base = snippetBase(lines)
+  const base = leadingSpace(lines[0]) || flushLeftBase(lines)
   return lines
     .map((line, i) => {
       if (!line.trim()) return ''
-      const own = i === 0 ? line.trimStart() : line.startsWith(base) ? line.slice(base.length) : line.trimStart()
-      return i === 0 ? own : indent + own
+      if (i === 0) return line.trimStart()
+      if (line.startsWith(base)) return indent + line.slice(base.length)
+      const own = leadingSpace(line)
+      const drop = base.slice(own.length)
+      return base.startsWith(own) && indent.endsWith(drop)
+        ? indent.slice(0, indent.length - drop.length) + line.trimStart()
+        : line
     })
     .join('\n')
 }
@@ -82,24 +123,19 @@ export function indentBlock(code: string, indent: string): string {
 }
 
 function trimBlankEdges(code: string): string {
-  return code
-    .replace(/^(?:[ \t]*\n)+/, '')
-    .replace(/(?:\n[ \t]*)+$/, '')
-    .replace(/\s+$/, '')
+  return code.replace(/^(?:[ \t]*\n)+/, '').replace(/\s+$/, '')
 }
 
 /**
- * Indentation shared by a snippet's lines. Agents often paste code copied
- * from inside a block with the first line's indent stripped; when the first
- * line has none but the closing bracket does, that bracket's indent is the base.
+ * The base of a snippet whose first line has no indent. Agents often paste
+ * code copied from inside a block with only the first line's indent stripped;
+ * when the closing bracket and every line after the first keep an indent, that
+ * indent is the base.
  */
-function snippetBase(lines: string[]): string {
-  const nonBlank = lines.filter((l) => l.trim())
-  const common = commonIndent(nonBlank)
-  const closing = nonBlank[nonBlank.length - 1]
-  if (common || nonBlank.length < 2 || /^[ \t]/.test(nonBlank[0]) || !/^[ \t]+[}\])]/.test(closing)) return common
-  const last = /^[ \t]*/.exec(closing)![0]
-  return nonBlank.slice(1).every((l) => l.startsWith(last)) ? last : ''
+function flushLeftBase(lines: string[]): string {
+  const rest = lines.slice(1).filter((l) => l.trim())
+  const indent = /^([ \t]+)[}\])]/.exec(rest[rest.length - 1] ?? '')?.[1]
+  return indent && rest.every((l) => l.startsWith(indent)) ? indent : ''
 }
 
 function commonIndent(lines: string[]): string {
@@ -217,17 +253,24 @@ export function leadingElement(code: string, traits: CodeTraits): 'comment' | 'd
 
 /** Offset in `code` where the declaration begins, past leading comments and decorators. */
 export function declarationHead(code: string, traits: CodeTraits): number {
+  return leadingParts(code, traits).head
+}
+
+/** Where the declaration in `code` begins, past its leading comments and decorators, and whether a decorator is among them. */
+export function leadingParts(code: string, traits: CodeTraits): { head: number; decorated: boolean } {
   let i = 0
+  let decorated = false
   for (;;) {
     while (i < code.length && /\s/.test(code[i])) i++
     const rest = code.slice(i)
     const deco = traits.decorator.find((t) => rest.startsWith(t))
     if (deco) {
       i = skipDecorator(code, i + deco.length, deco === '#[')
+      decorated = true
       continue
     }
     const comment = traits.comment.find((t) => rest.startsWith(t))
-    if (!comment) return i
+    if (!comment) return { head: i, decorated }
     if (comment === '/*') {
       const close = code.indexOf('*/', i + 2)
       i = close === -1 ? code.length : close + 2
@@ -235,6 +278,32 @@ export function declarationHead(code: string, traits: CodeTraits): number {
       i = lineEnd(code, i)
     }
   }
+}
+
+// ── Comments after a declaration, on its last line ───────────────────────────
+
+/** True when `rest` is one comment and nothing else: `// x`, `# x`, or a block comment closed on the line. */
+function isComment(rest: string, traits: CodeTraits): boolean {
+  const r = rest.trim()
+  return traits.comment.some((t) => r.startsWith(t) && (t !== '/*' || r.indexOf('*/', 2) === r.length - 2))
+}
+
+/** Offset past a comment that follows `offset` on its line (`x = 1 // why`), else `offset`. */
+export function trailingCommentEnd(text: string, offset: number, traits: CodeTraits): number {
+  const eol = lineEnd(text, offset)
+  return isComment(text.slice(offset, eol), traits) ? eol : offset
+}
+
+/** True when only a list separator (`,` or `;`) and a comment, each optional, follow `offset` on its line. */
+export function endsLine(text: string, offset: number, traits: CodeTraits): boolean {
+  const rest = text.slice(offset, lineEnd(text, offset)).replace(/^[ \t]*[,;]?/, '')
+  return !rest.trim() || isComment(rest, traits)
+}
+
+/** True when a snippet's last line ends with a comment: a comment token after a space, no quote after it. */
+export function endsWithComment(code: string, traits: CodeTraits): boolean {
+  const last = code.trimEnd().split('\n').pop()!
+  return traits.comment.some((t) => new RegExp(`(?:^|\\s)${t.replace('*', '\\*')}[^'"\`]*$`).test(last))
 }
 
 /** Past a decorator body: a dotted name plus balanced brackets, or up to `]` for Rust attributes. */

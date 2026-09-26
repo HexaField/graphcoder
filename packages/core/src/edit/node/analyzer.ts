@@ -9,6 +9,7 @@
 
 import { createRequire } from 'node:module'
 import { dirname, join } from 'node:path'
+import { startsLine } from '../text.js'
 import { EditError, type Analysis, type Analyzer, type Declaration, type SyntaxProblem } from '../types.js'
 import { GENERIC_TRAITS, profileFor, type LanguageProfile, type SyntaxNode } from './languages.js'
 
@@ -81,21 +82,22 @@ function analyze(path: string, text: string): Analysis {
   const declarations = nodes.map((n, i): Declaration => {
     const region =
       root && profile
-        ? widen(root, profile, text, spans, i)
-        : { ...spans[i], triviaStart: spans[i].start, headStart: spans[i].start }
+        ? widen(root, profile, text, spans, i, n.name)
+        : { end: spans[i].end, triviaStart: spans[i].start, headStart: spans[i].start }
     const end = region.end
     return {
       name: n.name,
       qualifiedName: n.qualifiedName,
       kind: n.kind,
       ...(n.signature ? { signature: n.signature } : {}),
+      ...(region.overloadStart !== undefined ? { overloadStart: region.overloadStart } : {}),
       triviaStart: region.triviaStart,
       ...(region.decoratorStart !== undefined ? { decoratorStart: region.decoratorStart } : {}),
       headStart: region.headStart,
       ...(region.exportPrefix ? { exportPrefix: region.exportPrefix } : {}),
       ...(region.value ? { value: region.value } : {}),
       end,
-      startLine: lineAt(region.triviaStart),
+      startLine: lineAt(region.overloadStart ?? region.triviaStart),
       line: lineAt(region.headStart),
       endLine: lineAt(Math.max(region.headStart, end - 1))
     }
@@ -112,8 +114,8 @@ function analyze(path: string, text: string): Analysis {
 }
 
 interface Region {
-  start: number
   end: number
+  overloadStart?: number
   triviaStart: number
   decoratorStart?: number
   headStart: number
@@ -121,18 +123,22 @@ interface Region {
   value?: { start: number; end: number }
 }
 
+/** Comments that belong to the file or module, never to the declaration below: a shebang, Rust inner docs. */
+const FILE_COMMENT = /^(?:#!|\/\/!|\/\*!)/
+
 function widen(
   root: SyntaxNode,
   profile: LanguageProfile,
   text: string,
   spans: Array<{ start: number; end: number }>,
-  i: number
+  i: number,
+  name: string
 ): Region {
   const { start: s, end: e } = spans[i]
   let core = root.namedDescendantForIndex(s, Math.max(s, e - 1))
   while (core.parent && (core.startIndex > s || core.endIndex < e)) core = core.parent
   // codegraph and the grammar disagree about this symbol: trust codegraph's span.
-  if (core === root || !core.parent) return { start: s, end: e, triviaStart: s, headStart: s }
+  if (core === root || !core.parent) return { end: e, triviaStart: s, headStart: s }
 
   const holdsOther = (n: SyntaxNode, inner: SyntaxNode) =>
     spans.some(
@@ -145,41 +151,89 @@ function widen(
   let outer = core
   for (let p = outer.parent; p && isWrapper(profile, p) && !holdsOther(p, outer); p = outer.parent) outer = p
 
+  const trivia = (n: SyntaxNode) => profile.comments.has(n.type) || profile.decorators.has(n.type)
   let decoratorStart: number | undefined
   let headStart = outer.startIndex
   for (const child of outer.children) {
-    if (!profile.decorators.has(child.type)) {
+    if (!trivia(child)) {
       headStart = child.startIndex
       break
     }
-    decoratorStart ??= child.startIndex
+    if (profile.decorators.has(child.type)) decoratorStart ??= child.startIndex
   }
 
-  // Comments and decorators directly above, each on its own line, no blank line between.
+  // Comments and decorators directly above, each starting its line; above those,
+  // any overload signatures and their comments. A blank line detaches a comment
+  // (a section header), never a decorator or overload: those belong to what follows.
   let triviaStart = outer.startIndex
   let below = outer.startIndex
-  for (let sib = outer.previousNamedSibling; sib && profile.trivia.has(sib.type); sib = sib.previousNamedSibling) {
+  let overloaded = false
+  for (let sib = siblingAbove(outer); sib; sib = sib.previousNamedSibling) {
+    const overload = profile.overload?.(sib, name) ?? false
     const gap = text.slice(sib.endIndex, below)
+    // A decorator may share its line with the decorators before it (`@A() @B()`).
+    const prev = sib.previousNamedSibling
+    const afterDecorator =
+      profile.decorators.has(sib.type) &&
+      prev !== null &&
+      profile.decorators.has(prev.type) &&
+      /^[ \t]*$/.test(text.slice(prev.endIndex, sib.startIndex))
     if (
+      !(overload || trivia(sib)) ||
       gap.trim() ||
-      /\n[ \t]*\n/.test(gap) ||
-      !/^[ \t]*$/.test(text.slice(text.lastIndexOf('\n', sib.startIndex - 1) + 1, sib.startIndex))
+      (profile.comments.has(sib.type) && /\n[ \t]*\n/.test(gap)) ||
+      !(startsLine(text, sib.startIndex) || afterDecorator) ||
+      FILE_COMMENT.test(sib.text)
     )
       break
-    triviaStart = below = sib.startIndex
-    if (profile.decorators.has(sib.type)) decoratorStart = sib.startIndex
+    below = sib.startIndex
+    overloaded ||= overload
+    if (overloaded) continue
+    triviaStart = below
+    if (profile.decorators.has(sib.type)) decoratorStart = below
   }
 
   const valueHeld = profile.values?.has(core.type) && core.parent?.type === 'variable_declarator'
   return {
-    start: outer.startIndex,
-    end: outer.endIndex,
+    end: codeEnd(outer, profile.comments, text),
+    ...(overloaded ? { overloadStart: below } : {}),
     triviaStart,
     ...(decoratorStart !== undefined ? { decoratorStart } : {}),
     headStart,
     exportPrefix: profile.exportPrefix?.(outer, headStart, text),
-    ...(valueHeld ? { value: { start: core.startIndex, end: core.endIndex } } : {})
+    ...(valueHeld ? { value: { start: core.startIndex, end: codeEnd(core, profile.comments, text) } } : {})
   }
+}
+
+/**
+ * The named sibling above `node`. A Python block starts at its first statement
+ * and keeps the comments above that statement outside itself, so when a node
+ * opens its parent, look above the parent.
+ */
+function siblingAbove(node: SyntaxNode): SyntaxNode | null {
+  let n = node
+  while (!n.previousNamedSibling && n.parent && n.parent.startIndex === n.startIndex) n = n.parent
+  return n.previousNamedSibling
+}
+
+/**
+ * Where a declaration's code ends. Grammars tuck a same-line trailing comment
+ * into the node (`} // done`, `const x = 1 // why`). It stays outside when it
+ * follows a closing bracket or a one-line declaration; after the last
+ * statement of a body (`    return 1  # one`) it belongs to that statement.
+ */
+function codeEnd(node: SyntaxNode, comments: ReadonlySet<string>, text: string): number {
+  const end = lastToken(node, comments)
+  const code = text.slice(node.startIndex, end)
+  return /[}\])];?$/.test(code) || !code.includes('\n') ? end : node.endIndex
+}
+
+function lastToken(node: SyntaxNode, comments: ReadonlySet<string>): number {
+  for (let i = node.children.length - 1; i >= 0; i--) {
+    const child = node.children[i]
+    if (!comments.has(child.type)) return child.children.length ? lastToken(child, comments) : child.endIndex
+  }
+  return node.endIndex
 }
 
 function isWrapper(profile: LanguageProfile, node: SyntaxNode): boolean {

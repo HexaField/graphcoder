@@ -3,7 +3,7 @@
 // the change (callers of a changed signature, affected tests).
 
 import { execFile } from 'node:child_process'
-import { createHash, randomBytes } from 'node:crypto'
+import { randomBytes } from 'node:crypto'
 import fs from 'node:fs'
 import { createRequire } from 'node:module'
 import os from 'node:os'
@@ -49,8 +49,8 @@ export async function editFile(args: EditArgs, opts: EditFileOptions = {}): Prom
   guard(target, opts.roots ?? [os.homedir()])
 
   const exists = fs.existsSync(target)
-  const raw = exists ? readText(target) : ''
-  const source = normaliseSource(raw)
+  const bytes = exists ? readBytes(target) : Buffer.alloc(0)
+  const source = normaliseSource(decodeUtf8(bytes, target))
   const label = projectRelative(target)
   const outcome = applyOps(target, source.text, args.ops, analyzer, { label, exists })
 
@@ -68,7 +68,7 @@ export async function editFile(args: EditArgs, opts: EditFileOptions = {}): Prom
 
   if (!args.dryRun) {
     if (exists) {
-      if (sha256(fs.readFileSync(target, 'utf8')) !== sha256(raw)) {
+      if (!fs.readFileSync(target).equals(bytes)) {
         throw new EditError(`${label} changed on disk during the edit; retry.`)
       }
       writeAtomic(target, next)
@@ -109,7 +109,11 @@ function realTarget(file: string): string {
 
 function guard(target: string, roots: string[]): void {
   const realRoots = roots.map((r) => (fs.existsSync(r) ? fs.realpathSync(r) : path.resolve(r)))
-  if (!realRoots.some((r) => target === r || target.startsWith(r + path.sep))) {
+  const inside = (root: string) => {
+    const rel = path.relative(root, target)
+    return rel !== '..' && !rel.startsWith(`..${path.sep}`) && !path.isAbsolute(rel)
+  }
+  if (!realRoots.some(inside)) {
     throw new EditError(`${target} is outside the allowed roots (${realRoots.join(', ')}).`)
   }
   const segments = target.split(path.sep)
@@ -120,31 +124,36 @@ function guard(target: string, roots: string[]): void {
     throw new EditError(`Refusing to edit a secrets or key file: ${base}`)
 }
 
-function readText(file: string): string {
+function readBytes(file: string): Buffer {
   const stat = fs.statSync(file)
   if (!stat.isFile()) throw new EditError(`Not a regular file: ${file}`)
   if (stat.size > MAX_BYTES) throw new EditError(`${file} is ${stat.size} bytes; the limit is ${MAX_BYTES}.`)
-  const raw = fs.readFileSync(file, 'utf8')
-  if (raw.includes('\0')) throw new EditError(`${file} looks binary.`)
-  return raw
+  const bytes = fs.readFileSync(file)
+  if (bytes.includes(0)) throw new EditError(`${file} looks binary.`)
+  return bytes
 }
 
-/** Temp file in the same directory, same mode, renamed over the target. */
+/** Strict: a lenient decode turns every invalid byte into U+FFFD, and the write would keep that. */
+function decodeUtf8(bytes: Buffer, file: string): string {
+  try {
+    return new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(bytes)
+  } catch {
+    throw new EditError(`${file} is not UTF-8 text; edit it another way.`)
+  }
+}
+
+/** Temp file in the same directory, created with the target's mode, renamed over the target. */
 function writeAtomic(file: string, content: string): void {
   const mode = fs.statSync(file).mode & 0o7777
   const tmp = path.join(path.dirname(file), `.${path.basename(file)}.${randomBytes(4).toString('hex')}.tmp`)
   try {
-    fs.writeFileSync(tmp, content)
-    fs.chmodSync(tmp, mode)
+    fs.writeFileSync(tmp, content, { mode, flag: 'wx' })
+    fs.chmodSync(tmp, mode) // the umask may have narrowed the mode at creation
     fs.renameSync(tmp, file)
   } catch (err) {
     fs.rmSync(tmp, { force: true })
     throw err
   }
-}
-
-function sha256(text: string): string {
-  return createHash('sha256').update(text).digest('hex')
 }
 
 /** Path relative to the enclosing git checkout, else the base name. */
@@ -175,7 +184,8 @@ function codegraphRoot(file: string): string | undefined {
 
 /**
  * One line per changed signature or name, plus its callers from the index,
- * read before the write while the index still describes the old code.
+ * read before the write while the index still describes the old code. The
+ * index is optional: when it cannot answer, the changes go without callers.
  */
 async function changeReport(root: string | undefined, file: string, changes: SignatureChange[]): Promise<string[]> {
   if (changes.length === 0) return []
@@ -190,27 +200,31 @@ async function changeReport(root: string | undefined, file: string, changes: Sig
       inFile = cg.getNodesInFile(path.relative(root, file))
     }
   } catch {
-    // The index is optional: report the changes without callers.
+    // Report the changes without callers.
   }
-  const out: string[] = []
-  for (const change of changes) {
-    out.push(
-      change.renamedTo
-        ? `renamed ${change.qualifiedName} → ${change.renamedTo}`
-        : `signature changed: ${change.qualifiedName} ${change.before ?? '?'} → ${change.after ?? '?'}`
-    )
-    const node = inFile.find((n) => n.qualifiedName === change.qualifiedName)
-    if (!cg || !node) continue
-    const sites = [
-      ...new Set(cg.getCallers(node.id, 1).map((c) => `${c.node.filePath}:${c.edge.line ?? c.node.startLine}`))
-    ]
-    if (sites.length) {
-      const more = sites.length > CALLER_CAP ? `, … ${sites.length - CALLER_CAP} more` : ''
-      out.push(`  callers to check: ${sites.slice(0, CALLER_CAP).join(', ')}${more}`)
+  const callers = (qualifiedName: string): string[] => {
+    const node = inFile.find((n) => n.qualifiedName === qualifiedName)
+    if (!cg || !node) return []
+    try {
+      return [...new Set(cg.getCallers(node.id, 1).map((c) => `${c.node.filePath}:${c.edge.line ?? c.node.startLine}`))]
+    } catch {
+      return []
     }
   }
-  cg?.close()
-  return out
+  try {
+    return changes.flatMap((change) => {
+      const sites = callers(change.qualifiedName)
+      const more = sites.length > CALLER_CAP ? `, … ${sites.length - CALLER_CAP} more` : ''
+      return [
+        change.renamedTo
+          ? `renamed ${change.qualifiedName} → ${change.renamedTo}`
+          : `signature changed: ${change.qualifiedName} ${change.before ?? '?'} → ${change.after ?? '?'}`,
+        ...(sites.length ? [`  callers to check: ${sites.slice(0, CALLER_CAP).join(', ')}${more}`] : [])
+      ]
+    })
+  } finally {
+    cg?.close()
+  }
 }
 
 async function affectedTests(root: string, file: string): Promise<string[]> {

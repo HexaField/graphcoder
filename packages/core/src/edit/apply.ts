@@ -9,15 +9,19 @@ import { resolveSymbol } from './resolve.js'
 import {
   AnchorError,
   declarationHead,
+  endsLine,
+  endsWithComment,
   findAnchor,
   indentAt,
   indentBlock,
   leadingElement,
+  leadingParts,
   lineEnd,
   lineOf,
   lineStart,
   reindent,
-  startsLine
+  startsLine,
+  trailingCommentEnd
 } from './text.js'
 import { EditError, type Analysis, type Analyzer, type Declaration, type EditOp } from './types.js'
 
@@ -64,9 +68,7 @@ export function applyOps(
   opts: ApplyOptions
 ): EditOutcome {
   if (ops.length === 0) throw new EditError('No ops given.')
-  ops.slice(1).forEach((op) => {
-    if (op.op === 'create') throw new EditError('create must be the first op.')
-  })
+  if (ops.slice(1).some((op) => op.op === 'create')) throw new EditError('create must be the first op.')
   const creating = ops[0].op === 'create'
   if (creating && opts.exists) throw new EditError(`${opts.label} already exists; create only makes new files.`)
   if (!creating && !opts.exists) throw new EditError(`${opts.label} does not exist. Use a create op to make it.`)
@@ -84,27 +86,24 @@ export function applyOps(
   if (!analysis.checked) warnings.push('No grammar for this file type: syntax not checked.')
   else if (analysis.syntaxError) {
     const e = analysis.syntaxError
-    warnings.push(`The file already had a syntax error (line ${e.line}:${e.column}): syntax not checked.`)
+    warnings.push(`The file already had a syntax error (line ${e.line}:${e.column + 1}): syntax not checked.`)
   }
 
   ops.slice(creating ? 1 : 0).forEach((op, i) => {
     const tag = ops.length > 1 ? `op ${i + (creating ? 2 : 1)} (${op.op})` : op.op
-    let step: Step
-    try {
-      step = applyOne(op, cur, analysis, opts.label)
-    } catch (err) {
-      throw err instanceof EditError ? new EditError(`${tag}: ${err.message}`) : err
+    const tagged = <T>(run: () => T): T => {
+      try {
+        return run()
+      } catch (err) {
+        throw err instanceof EditError ? new EditError(`${tag}: ${err.message}`) : err
+      }
     }
+    const step = tagged(() => applyOne(op, cur, analysis, opts.label))
     const next = analyzer.analyze(path, step.text)
     if (gate && next.syntaxError) {
       throw new EditError(`${tag} breaks the syntax: ${syntaxMessage(next, step.text)}`)
     }
-    let warning: string | undefined
-    try {
-      warning = step.verify?.(next)
-    } catch (err) {
-      throw err instanceof EditError ? new EditError(`${tag}: ${err.message}`) : err
-    }
+    const warning = tagged(() => step.verify?.(next))
     if (warning) warnings.push(warning)
     const change = step.change?.(next)
     if (change) changes.push(change)
@@ -139,24 +138,33 @@ function replace(symbol: string, code: string, text: string, analysis: Analysis,
   const d = lookup(analysis, symbol, label)
   const { traits } = analysis
   const lead = leadingElement(code, traits)
-  const head = code.slice(declarationHead(code, traits)).trimStart()
+  const leading = leadingParts(code, traits)
+  const head = code.slice(leading.head).trimStart()
 
   // How far back the code reaches decides what it replaces: comments first,
   // then decorators, then the declaration; for a function or class held in a
   // variable, code that does not restate the statement replaces only the value.
+  // A comment after the declaration on its last line stays unless the code ends with one.
   let start = d.headStart
   let end = d.end
   const valueOnly = lead === 'code' && d.value !== undefined && !traits.statement?.test(head)
   if (lead === 'comment') start = d.triviaStart
   else if (lead === 'decorator') start = d.decoratorStart ?? d.headStart
   else if (valueOnly) ({ start, end } = d.value!)
+  if (endsWithComment(code, traits)) end = trailingCommentEnd(text, end, traits)
 
+  // Decorators and visibility the code omits stay, in front of its declaration.
   let body = reindent(code, indentAt(text, start))
-  let kept: string | undefined
+  const kept: string[] = []
+  if (lead === 'comment' && d.decoratorStart !== undefined && !leading.decorated) {
+    const at = declarationHead(body, traits)
+    body = body.slice(0, at) + text.slice(d.decoratorStart, d.headStart) + body.slice(at)
+    kept.push('kept the decorators (the code omitted them; use replace_in to drop them)')
+  }
   if (!valueOnly && d.exportPrefix && !traits.exported?.test(head) && traits.declaration?.test(head)) {
     const at = declarationHead(body, traits)
     body = body.slice(0, at) + d.exportPrefix + body.slice(at)
-    kept = d.exportPrefix.trim()
+    kept.push(`kept '${d.exportPrefix.trim()}' (the code omitted it; use replace_in to drop it)`)
   }
   const next = text.slice(0, start) + body + text.slice(end)
   const lo = start
@@ -182,10 +190,11 @@ function replace(symbol: string, code: string, text: string, analysis: Analysis,
         )
       }
       const notes = [
-        kept && `kept '${kept}' (the code omitted it; use replace_in to drop it)`,
-        o.qualifiedName !== d.qualifiedName &&
-          `renamed ${d.qualifiedName} → ${o.qualifiedName}; references are not updated`
-      ].filter(Boolean)
+        ...kept,
+        ...(o.qualifiedName !== d.qualifiedName
+          ? [`renamed ${d.qualifiedName} → ${o.qualifiedName}; references are not updated`]
+          : [])
+      ]
       return notes.length ? notes.join('; ') : undefined
     },
     change: (after) => signatureChange(d, occupant(after))
@@ -197,16 +206,17 @@ function replace(symbol: string, code: string, text: string, analysis: Analysis,
 function replaceIn(op: Extract<EditOp, { op: 'replace_in' }>, text: string, analysis: Analysis, label: string): Step {
   const d = op.symbol ? lookup(analysis, op.symbol, label) : undefined
   // Search from the start of the declaration's line, so indentation-insensitive
-  // matching sees the first line's real indent.
-  const hayStart = d ? (startsLine(text, d.triviaStart) ? lineStart(text, d.triviaStart) : d.triviaStart) : 0
-  const hay = text.slice(hayStart, d ? d.end : text.length)
+  // matching sees the first line's real indent, through a comment after its end.
+  const top = d ? topOf(d) : 0
+  const hayStart = d && startsLine(text, top) ? lineStart(text, top) : top
+  const hay = text.slice(hayStart, d ? trailingCommentEnd(text, d.end, analysis.traits) : text.length)
   const where = d ? `'${d.qualifiedName}'` : label
 
   const first = anchor(hay, op.find, 'find', where, d, text, hayStart)
   let endRel = first.end
   let exact = first.exact
   if (op.to !== undefined) {
-    const second = anchor(hay.slice(first.end), op.to, 'to', `${where} after find`, d, text, hayStart)
+    const second = anchor(hay.slice(first.end), op.to, 'to', `${where} after find`, d, text, hayStart + first.end)
     endRel = first.end + second.end
     exact = exact && second.exact
   }
@@ -221,7 +231,9 @@ function replaceIn(op: Extract<EditOp, { op: 'replace_in' }>, text: string, anal
   const parent = d ? containerOf(d.qualifiedName) : ''
   const owner = (after: Analysis) => {
     if (!d) return undefined
-    const around = after.declarations.filter((x) => x.triviaStart <= start && start <= x.end)
+    const around = after.declarations.filter(
+      (x) => topOf(x) <= start && start <= trailingCommentEnd(next, x.end, after.traits)
+    )
     return (
       around.find((x) => x.qualifiedName === d.qualifiedName) ??
       around.find((x) => x.kind === d.kind && containerOf(x.qualifiedName) === parent)
@@ -247,6 +259,7 @@ function replaceIn(op: Extract<EditOp, { op: 'replace_in' }>, text: string, anal
   }
 }
 
+/** findAnchor in `hay`, which starts at `offset` in `text`, with errors that name lines and show the symbol. */
 function anchor(
   hay: string,
   needle: string,
@@ -254,22 +267,20 @@ function anchor(
   where: string,
   d: Declaration | undefined,
   text: string,
-  hayStart: number
+  offset: number
 ) {
   try {
     return findAnchor(hay, needle)
   } catch (err) {
     if (!(err instanceof AnchorError)) throw err
     if (err.reason === 'many') {
-      const lines = err.hits.map((h) => lineOf(text, hayStart + h)).join(', ')
+      const lines = err.hits.map((h) => lineOf(text, offset + h)).join(', ')
       throw new EditError(
         `${field} matches ${err.hits.length} places in ${where} (lines ${lines}). Add surrounding text to make it unique.`
       )
     }
     if (!d) throw new EditError(`${field} matches nothing in ${where}.`)
-    throw new EditError(
-      `${field} matches nothing in ${where}. Its current text:\n${numbered(text, d.triviaStart, d.end)}`
-    )
+    throw new EditError(`${field} matches nothing in ${where}. Its current text:\n${numbered(text, topOf(d), d.end)}`)
   }
 }
 
@@ -290,27 +301,28 @@ function insert(op: Extract<EditOp, { op: 'insert' }>, text: string, analysis: A
   }
 
   const d = lookup(analysis, anchorName, label)
-  if (!startsLine(text, d.triviaStart)) {
+  const top = topOf(d)
+  if (!startsLine(text, top)) {
     throw new EditError(
       `'${d.qualifiedName}' shares line ${d.line} with other code; insert needs a symbol on its own lines. Use replace_in instead.`
     )
   }
-  const block = indentBlock(op.code, indentAt(text, d.triviaStart))
+  const block = indentBlock(op.code, indentAt(text, top))
   let at: number
   let next: string
   if (op.after !== undefined) {
-    const eol = lineEnd(text, d.end)
-    if (!/^\s*(?:(?:\/\/|#).*)?$/.test(text.slice(d.end, eol))) {
+    if (!endsLine(text, d.end, analysis.traits)) {
       throw new EditError(
         `'${d.qualifiedName}' ends mid-line (line ${d.endLine}); insert after it is ambiguous. Use replace_in instead.`
       )
     }
+    const eol = lineEnd(text, d.end)
     const following = eol < text.length ? text.slice(eol + 1, lineEnd(text, eol + 1)) : ''
     const gap = following.trim() && !/^\s*[}\])]/.test(following) ? '\n' : ''
     at = eol + 2
     next = text.slice(0, eol) + '\n\n' + block + gap + text.slice(eol)
   } else {
-    const sol = lineStart(text, d.triviaStart)
+    const sol = lineStart(text, top)
     const preceding = sol > 0 ? text.slice(lineStart(text, sol - 1), sol - 1) : ''
     const gap = preceding.trim() && !/[{([:]\s*$/.test(preceding) ? '\n' : ''
     at = sol + gap.length
@@ -327,16 +339,14 @@ function insert(op: Extract<EditOp, { op: 'insert' }>, text: string, analysis: A
 
 function remove(symbol: string, text: string, analysis: Analysis, label: string): Step {
   const d = lookup(analysis, symbol, label)
-  const eol = lineEnd(text, d.end)
-  const ownLines = startsLine(text, d.triviaStart) && /^\s*(?:(?:\/\/|#).*)?$/.test(text.slice(d.end, eol))
+  const top = topOf(d)
   let next: string
-  if (ownLines) {
-    const from = lineStart(text, d.triviaStart)
-    const to = eol < text.length ? eol + 1 : eol
-    next = tidyBlankLines(text.slice(0, from) + text.slice(to), from)
+  if (startsLine(text, top) && endsLine(text, d.end, analysis.traits)) {
+    const eol = lineEnd(text, d.end)
+    next = removeLines(text, lineStart(text, top), eol < text.length ? eol + 1 : eol)
   } else {
     // Mid-line (an enum member, a type literal member): take one list separator with it.
-    let from = d.triviaStart
+    let from = top
     let to = d.end
     const after = /^[ \t]*[,;][ \t]*/.exec(text.slice(to))
     if (after) to += after[0].length
@@ -349,19 +359,31 @@ function remove(symbol: string, text: string, analysis: Analysis, label: string)
   return { text: next, note: () => `remove ${d.qualifiedName} · lines ${d.startLine}–${d.endLine}` }
 }
 
-/** After deleting whole lines at `at`, drop the blank line the deletion leaves doubled or dangling. */
-function tidyBlankLines(text: string, at: number): string {
-  const prevStart = at > 0 ? lineStart(text, at - 1) : -1
-  const prev = prevStart >= 0 ? text.slice(prevStart, at - 1) : undefined
-  const next = text.slice(at, lineEnd(text, at))
-  const nextBlank = at >= text.length || !next.trim()
-  if (prev !== undefined && !prev.trim() && (nextBlank || /^\s*[}\])]/.test(next))) {
-    return text.slice(0, prevStart) + text.slice(at)
+/**
+ * Delete the whole lines [from, to) and the blank lines around them, then put
+ * one gap back: the wider of the two, or the narrower beside a bracket that
+ * opens or closes a block, or at either end of the file.
+ */
+function removeLines(text: string, from: number, to: number): string {
+  let start = from
+  let before = 0
+  while (start > 0 && !text.slice(lineStart(text, start - 1), start - 1).trim()) {
+    start = lineStart(text, start - 1)
+    before++
   }
-  if (at < text.length && !next.trim() && (prev === undefined || /[{([:]\s*$/.test(prev))) {
-    return text.slice(0, at) + text.slice(Math.min(text.length, lineEnd(text, at) + 1))
+  let end = to
+  let after = 0
+  while (end < text.length && !text.slice(end, lineEnd(text, end)).trim()) {
+    end = Math.min(text.length, lineEnd(text, end) + 1)
+    after++
   }
-  return text
+  const prev = start > 0 ? text.slice(lineStart(text, start - 1), start - 1) : ''
+  const edge =
+    start === 0 ||
+    end >= text.length ||
+    /[{([:]\s*$/.test(prev) ||
+    /^\s*[}\])]/.test(text.slice(end, lineEnd(text, end)))
+  return text.slice(0, start) + '\n'.repeat(edge ? Math.min(before, after) : Math.max(before, after)) + text.slice(end)
 }
 
 // ── helpers ───────────────────────────────────────────────────────────────────
@@ -375,6 +397,11 @@ function lookup(analysis: Analysis, symbol: string, label: string): Declaration 
     )
   }
   return resolveSymbol(analysis.declarations, symbol, label)
+}
+
+/** Where everything that belongs to a declaration begins: its overload signatures, else its comments and decorators. */
+function topOf(d: Declaration): number {
+  return d.overloadStart ?? d.triviaStart
 }
 
 function containerOf(qualifiedName: string): string {

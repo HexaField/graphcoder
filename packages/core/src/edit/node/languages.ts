@@ -37,9 +37,12 @@ export interface LanguageProfile {
   wrappers: ReadonlySet<string>
   /** Wrappers that count only while they hold one child of these types (`const a = 1, b = 2`). */
   single?: Readonly<Record<string, readonly string[]>>
-  /** Sibling types that attach above a declaration: comments, decorators, attributes. */
-  trivia: ReadonlySet<string>
+  /** Comment node types. With decorators, what attaches above a declaration. */
+  comments: ReadonlySet<string>
+  /** Decorator or attribute node types. */
   decorators: ReadonlySet<string>
+  /** True for a sibling above a declaration that is one of its overload signatures. */
+  overload?: (node: SyntaxNode, name: string) => boolean
   /** Value node types: a function or class assigned to a variable. */
   values?: ReadonlySet<string>
   /** Visibility text replacement code keeps when it omits it. */
@@ -70,8 +73,15 @@ function tsProfile(id: string, grammar: () => unknown): LanguageProfile {
       'enum_assignment'
     ]),
     single: { lexical_declaration: ['variable_declarator'], variable_declaration: ['variable_declarator'] },
-    trivia: new Set(['comment', 'decorator']),
+    comments: new Set(['comment']),
     decorators: new Set(['decorator']),
+    overload: (node, name) => {
+      const sig = node.type === 'export_statement' ? node.childForFieldName('declaration') : node
+      return (
+        (sig?.type === 'function_signature' || sig?.type === 'method_signature') &&
+        sig.childForFieldName('name')?.text === name
+      )
+    },
     values: new Set(['arrow_function', 'function_expression', 'function', 'generator_function', 'class']),
     exportPrefix: (outer, headStart, text) => {
       if (outer.type !== 'export_statement') return undefined
@@ -113,7 +123,7 @@ const python: LanguageProfile = {
   validate: pythonSyntax,
   traits: { comment: ['#'], decorator: ['@'] },
   wrappers: new Set(['decorated_definition', 'expression_statement']),
-  trivia: new Set(['comment']),
+  comments: new Set(['comment']),
   decorators: new Set(['decorator'])
 }
 
@@ -128,7 +138,7 @@ const rust: LanguageProfile = {
       /^(?:(?:async|const|unsafe|extern(?:\s+"[^"]*")?)\s+)*(?:fn|struct|enum|trait|impl|type|const|static|mod|union|macro_rules!)\b/
   },
   wrappers: new Set(['const_item', 'static_item', 'enum_variant']),
-  trivia: new Set(['line_comment', 'block_comment', 'attribute_item']),
+  comments: new Set(['line_comment', 'block_comment']),
   decorators: new Set(['attribute_item']),
   exportPrefix: (outer) => {
     const vis = outer.namedChildren.find((c) => c.type === 'visibility_modifier')
@@ -146,7 +156,7 @@ const go: LanguageProfile = {
     var_declaration: ['var_spec'],
     const_declaration: ['const_spec']
   },
-  trivia: new Set(['comment']),
+  comments: new Set(['comment']),
   decorators: new Set()
 }
 

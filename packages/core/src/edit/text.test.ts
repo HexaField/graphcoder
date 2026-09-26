@@ -13,7 +13,7 @@ import type { Declaration } from './types.js'
 
 describe('normaliseSource / restoreSource', () => {
   it('round-trips a BOM and CRLF endings', () => {
-    const raw = '﻿a\r\nb\r\n'
+    const raw = '\uFEFFa\r\nb\r\n'
     const src = normaliseSource(raw)
     expect(src).toEqual({ text: 'a\nb\n', bom: true, crlf: true })
     expect(restoreSource(src.text, src)).toBe(raw)
@@ -42,6 +42,16 @@ describe('reindent', () => {
 
   it('drops blank edges and keeps inner blank lines empty', () => {
     expect(reindent('\n\na()\n   \nb()\n\n', '  ')).toBe('a()\n\n  b()')
+  })
+
+  it('measures lines against an indented first line, so a dedent stays a dedent', () => {
+    // Python: `b` sits outside the `if` that `a` is in; it must not move inside it.
+    expect(reindent('      a = 10\n  b = 20', '        ')).toBe('a = 10\n    b = 20')
+  })
+
+  it('leaves code already at the target indent as it is, string text at column 0 included', () => {
+    const code = '  sql() {\n    return `\nSELECT 1\n`\n  }'
+    expect(reindent(code, '  ')).toBe(code.trimStart())
   })
 })
 
