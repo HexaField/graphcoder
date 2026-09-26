@@ -155,7 +155,7 @@ Run with `node packages/mcp/dist/index.js` or register in MCP config as `graphco
 
 **Builds bundle `@graphcoder/core`.** Core ships TypeScript source (`main: src/index.ts`), which Node cannot run, so the `cli` and `mcp` tsdown configs inline it (`noExternal: [/^@graphcoder\//]`) and keep core as a devDependency. Every other dependency stays external, so a package that bundles core must also list core's runtime dependencies (codegraph, diff, @noble/hashes). Both write `dist/index.js`, the path their `bin` names.
 
-**Standalone install:** `pnpm --filter @graphcoder/mcp deploy --prod --legacy <dir>` copies the package with its own `node_modules` (codegraph's platform bundle included); link `<dir>/dist/index.js` onto PATH as `graphcoder-mcp`. `--legacy` is needed because the workspace does not set `inject-workspace-packages`.
+**Standalone install:** build first (`pnpm --filter @graphcoder/mcp build`): deploy copies `dist/` as it stands, and the bundle holds core. Then `pnpm --filter @graphcoder/mcp deploy --prod --legacy <dir>` copies the package with its own `node_modules` (codegraph's platform bundle included); link `<dir>/dist/index.js` onto PATH as `graphcoder-mcp`. `--legacy` is needed because the workspace does not set `inject-workspace-packages`.
 
 ## Symbol edit (`@graphcoder/core/edit`)
 
